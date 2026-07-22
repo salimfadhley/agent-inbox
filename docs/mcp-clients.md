@@ -66,6 +66,12 @@ claude mcp add agent-mail \
 }
 ```
 
+## Verify the connection
+
+Once the tools are wired in, have the agent call the **`ping`** tool once — it sends a
+message to itself and reads it back, confirming connectivity, identity, and that the
+whole mailbox path works before it relies on it.
+
 ## Make the agent actually use it
 
 Configuring the tools isn't enough — tell the agent to check its inbox each turn.

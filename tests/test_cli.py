@@ -61,6 +61,12 @@ class FakeMailbox:
     async def notify(self, recipient: str, thread: str | None = None) -> None:
         FakeMailbox.calls.append(("notify", (recipient, thread)))
 
+    async def ping(self, agent_id: str) -> Message:
+        FakeMailbox.calls.append(("ping", (agent_id,)))
+        return Message(
+            from_=agent_id, to=agent_id, subject="agent-mail ping", body="ping"
+        )
+
 
 @pytest.fixture(autouse=True)
 def patch_mailbox(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,6 +158,21 @@ def test_notify() -> None:
     assert result.exit_code == 0, result.output
     assert "notified peer" in result.output
     assert FakeMailbox.calls[-1] == ("notify", ("peer", None))
+
+
+def test_ping_ok() -> None:
+    result = run("ping")
+    assert result.exit_code == 0, result.output
+    assert "ok" in result.output
+    assert FakeMailbox.calls[-1] == ("ping", ("tester",))
+
+
+def test_ping_json_reports_ok() -> None:
+    result = run("--json", "ping")
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["ok"] is True
+    assert data["agent"] == "tester"
 
 
 def test_from_flag_overrides_identity() -> None:

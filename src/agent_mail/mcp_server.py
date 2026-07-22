@@ -120,6 +120,20 @@ async def notify_agent(to: str, thread: str | None = None) -> dict[str, Any]:
     return {"notified": to, "thread": thread}
 
 
+@mcp.tool()
+async def ping() -> dict[str, Any]:
+    """Round-trip a message to yourself to confirm agent-mail is operational.
+
+    Good to call once on sign-on: it verifies connectivity, your identity, and that
+    send + inbox + read all work. Consumes only its own probe.
+    """
+    config = _config()
+    me = resolve_identity(config)
+    async with Mailbox(config) as mailbox:
+        received = await mailbox.ping(me)
+    return {"ok": True, "agent": me, "message_id": received.id}
+
+
 # -- HTTP multi-tenant identity middleware --------------------------------------
 
 Scope = MutableMapping[str, Any]

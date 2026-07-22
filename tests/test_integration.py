@@ -67,3 +67,15 @@ async def test_notify_publishes() -> None:
     async with Mailbox(config) as mailbox:
         # notify is fire-and-forget; success is simply not raising.
         await mailbox.notify(f"itest-{uuid4().hex[:8]}")
+
+
+async def test_ping_roundtrip() -> None:
+    agent = f"itest-ping-{uuid4().hex[:8]}"
+    config = Config.from_env()
+    async with Mailbox(config) as mailbox:
+        received = await mailbox.ping(agent)
+        assert received.from_ == agent
+        assert received.to == agent
+        assert received.subject == "agent-mail ping"
+        # the probe was consumed, so the inbox is empty again
+        assert await mailbox.peek(agent) == []

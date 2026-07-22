@@ -244,6 +244,26 @@ class Mailbox:
         await self._conn.flush()
         logger.debug("notified %s", recipient)
 
+    async def ping(self, agent_id: str) -> Message:
+        """Round-trip a probe message to ``agent_id`` itself and consume it.
+
+        Exercises the whole path — connect, stream, publish to a durable subject,
+        the per-agent consumer, and read/ack — so a client can confirm agent-mail is
+        fully operational (e.g. on sign-on). Reads back exactly the probe by id, so
+        any real unread mail is left untouched. Raises :class:`MailboxError` if the
+        probe does not come back.
+        """
+        probe = Message(
+            from_=agent_id,
+            to=agent_id,
+            subject="agent-mail ping",
+            body="ping",
+        )
+        await self.send(probe)
+        received = await self.read(agent_id, probe.id)
+        logger.debug("ping round-trip ok for %s (%s)", agent_id, probe.id)
+        return received
+
 
 def _reply_subject(subject: str) -> str:
     return subject if subject.lower().startswith("re:") else f"Re: {subject}"

@@ -88,12 +88,19 @@ Add `--json` to any command for machine-readable output.
 | `read <id>` | Show a message and **ack** it (consume) |
 | `reply <id> --body` | Reply on the same thread and ack the original |
 | `notify --to [--thread]` | Publish a non-durable "you have mail" wake |
+| `ping` | Round-trip a message to yourself to check the system is operational |
 | `mcp-serve` | Run the MCP server (see below) |
+
+```bash
+# verify agent-mail is working end-to-end (send + inbox + read to yourself)
+AGENT_ID=alice agent-mail ping        # -> ok — round-trip for alice in 12ms
+```
 
 ## MCP server
 
 The same verbs are exposed as MCP tools (`send_message`, `check_inbox`,
-`read_message`, `reply_message`, `notify_agent`). Two ways to run it:
+`read_message`, `reply_message`, `notify_agent`, and `ping` — a self round-trip a
+client can call on sign-on to confirm everything works). Two ways to run it:
 
 **Local, per-agent (stdio).** The client spawns it; identity is `AGENT_ID`.
 

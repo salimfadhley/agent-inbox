@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import time
 from collections.abc import Awaitable, Callable, Sequence
 
 import click
@@ -216,6 +217,37 @@ def notify(ctx: click.Context, to: str, thread: str | None) -> None:
         {"notified": to, "thread": thread},
         as_json=as_json,
         human=lambda: click.echo(f"notified {to}"),
+    )
+
+
+@cli.command()
+@click.pass_context
+def ping(ctx: click.Context) -> None:
+    """Round-trip a message to yourself to check agent-mail is operational."""
+    config: Config = ctx.obj["config"]
+    as_json: bool = ctx.obj["as_json"]
+    try:
+        me = config.require_identity()
+        start = time.perf_counter()
+        received = _run(_with_mailbox(config, lambda mb: mb.ping(me)))
+        roundtrip_ms = round((time.perf_counter() - start) * 1000, 1)
+    except (ConfigError, MailboxError) as exc:
+        logger.warning("ping failed: %s", exc)
+        if as_json:
+            click.echo(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        else:
+            click.echo(f"ping FAILED: {exc}", err=True)
+        raise SystemExit(1) from exc
+    logger.info("ping ok for %s in %sms", me, roundtrip_ms)
+    _emit(
+        {
+            "ok": True,
+            "agent": me,
+            "message_id": received.id,
+            "roundtrip_ms": roundtrip_ms,
+        },
+        as_json=as_json,
+        human=lambda: click.echo(f"ok — round-trip for {me} in {roundtrip_ms}ms"),
     )
 
 

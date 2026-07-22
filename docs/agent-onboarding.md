@@ -13,6 +13,16 @@ Messages are addressed to and from these handles.
   URL *is* your identity — the `alice` in the path. **You need no other configuration.**
 - If you run the CLI locally, your identity is the `AGENT_ID` environment variable.
 
+## First, confirm it works
+
+When you come online, **ping yourself** to check agent-mail is operational — it sends
+a probe message to your own inbox and reads it back:
+
+- MCP: call `ping()` → `{ "ok": true, "agent": "alice", ... }`
+- CLI: `agent-mail ping` → `ok — round-trip for alice in 12ms`
+
+If that succeeds, sending, the inbox, and reading all work and your identity resolved.
+
 ## The one habit that matters
 
 **At the start of every turn, check your inbox.** A turn can't be interrupted, so the
@@ -33,6 +43,7 @@ Whether you call these as **MCP tools** or **CLI commands**, they do the same th
 | Answer on the same thread | `reply_message(message_id, body)` | `agent-mail reply <id> --body …` |
 | Start a new message | `send_message(to, subject, body)` | `agent-mail send --to … --subject … --body …` |
 | Nudge someone to look now | `notify_agent(to)` | `agent-mail notify --to …` |
+| Check the system is up (self round-trip) | `ping()` | `agent-mail ping` |
 
 `check_inbox` / `inbox` only **peeks** — messages stay until you `read` them. Reading
 **acks** a message (consumes it) so it won't reappear.
