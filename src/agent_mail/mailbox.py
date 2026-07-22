@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 from types import TracebackType
+from typing import Any
 
 import nats
 from nats.aio.client import Client as NatsClient
@@ -41,15 +43,31 @@ _FETCH_MAX = 1024
 _FETCH_TIMEOUT = 1.0
 
 
+def _connect_options(config: Config) -> dict[str, Any]:
+    """Build nats.connect() kwargs for auth/TLS from config (all optional)."""
+    opts: dict[str, Any] = {}
+    if config.nats_creds_file:
+        opts["user_credentials"] = config.nats_creds_file
+    if config.nats_token:
+        opts["token"] = config.nats_token
+    if config.nats_user:
+        opts["user"] = config.nats_user
+    if config.nats_password:
+        opts["password"] = config.nats_password
+    if config.nats_ca_file:
+        opts["tls"] = ssl.create_default_context(cafile=config.nats_ca_file)
+    return opts
+
+
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
     retry=retry_if_exception_type((NoServersError, OSError)),
     reraise=True,
 )
-async def _connect(nats_url: str) -> NatsClient:
+async def _connect(nats_url: str, **options: Any) -> NatsClient:
     """Open a NATS connection, retrying transient failures (server still booting)."""
-    return await nats.connect(nats_url)
+    return await nats.connect(nats_url, **options)
 
 
 class Mailbox:
@@ -77,7 +95,9 @@ class Mailbox:
         if self._nc is not None:
             return
         logger.debug("connecting to NATS at %s", self._config.nats_url)
-        self._nc = await _connect(self._config.nats_url)
+        self._nc = await _connect(
+            self._config.nats_url, **_connect_options(self._config)
+        )
         self._js = self._nc.jetstream()
         await self._ensure_stream()
 

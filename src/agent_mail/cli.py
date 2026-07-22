@@ -12,7 +12,8 @@ from collections.abc import Awaitable, Callable, Sequence
 
 import click
 
-from agent_mail.config import Config
+from agent_mail.config import Config, hub_descriptor
+from agent_mail.config_env import set_runtime_config_path
 from agent_mail.exceptions import ConfigError, MailboxError
 from agent_mail.mailbox import Mailbox
 from agent_mail.models import Intent, Message
@@ -34,6 +35,11 @@ async def _with_mailbox[T](
 ) -> T:
     async with Mailbox(config) as mailbox:
         return await action(mailbox)
+
+
+async def _reachable(_mailbox: Mailbox) -> bool:
+    """No-op action; reaching it means connect + stream-ensure both succeeded."""
+    return True
 
 
 def _message_dict(message: Message) -> dict[str, object]:
@@ -74,11 +80,23 @@ def _emit(payload: object, *, as_json: bool, human: Callable[[], None]) -> None:
     default=False,
     help="Emit machine-readable JSON instead of human text.",
 )
+@click.option(
+    "--config",
+    "config_path",
+    default=None,
+    envvar="AGENT_MAIL_CONFIG",
+    help="Path to a TOML config file (env vars still override it).",
+)
 @click.pass_context
-def cli(ctx: click.Context, from_: str | None, as_json: bool) -> None:
+def cli(
+    ctx: click.Context, from_: str | None, as_json: bool, config_path: str | None
+) -> None:
     """A NATS JetStream mailbox for local LLM agents."""
     ctx.ensure_object(dict)
-    ctx.obj["config"] = Config.from_env(agent_override=from_)
+    set_runtime_config_path(config_path)
+    config = Config.from_env(agent_override=from_)
+    logging.getLogger("agent_mail").setLevel(config.log_level.upper())
+    ctx.obj["config"] = config
     ctx.obj["as_json"] = as_json
 
 
@@ -249,6 +267,59 @@ def ping(ctx: click.Context) -> None:
         as_json=as_json,
         human=lambda: click.echo(f"ok — round-trip for {me} in {roundtrip_ms}ms"),
     )
+
+
+@cli.command()
+@click.pass_context
+def doctor(ctx: click.Context) -> None:
+    """Validate configuration and NATS connectivity; print effective config."""
+    config: Config = ctx.obj["config"]
+    as_json: bool = ctx.obj["as_json"]
+
+    nats_ok = True
+    nats_error: str | None = None
+    try:
+        _run(_with_mailbox(config, _reachable))
+    except Exception as exc:  # process boundary: report, don't crash
+        nats_ok = False
+        nats_error = str(exc)
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "ok": nats_ok,
+                    "config": config.redacted(),
+                    "nats": {"reachable": nats_ok, "error": nats_error},
+                },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+        )
+    else:
+        click.echo(f"hub:       {config.hub}")
+        click.echo(f"nats_url:  {config.nats_url}")
+        click.echo(f"transport: {config.transport}")
+        click.echo(f"agent_id:  {config.agent_id or '(unset — hosted / multi-agent)'}")
+        status = "✅ reachable" if nats_ok else f"❌ {nats_error or 'unreachable'}"
+        click.echo(f"nats:      {status}")
+    if not nats_ok:
+        raise SystemExit(1)
+
+
+@cli.command(name="hub-info")
+@click.pass_context
+def hub_info_cmd(ctx: click.Context) -> None:
+    """Show this hub's public self-description (name, connect URL, admin/feedback)."""
+    config: Config = ctx.obj["config"]
+    as_json: bool = ctx.obj["as_json"]
+    descriptor = hub_descriptor(config)
+    if as_json:
+        click.echo(json.dumps(descriptor, indent=2, sort_keys=True))
+    else:
+        for key, value in descriptor.items():
+            click.echo(f"{key}: {value}")
 
 
 @cli.command(name="mcp-serve")

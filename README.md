@@ -89,6 +89,8 @@ Add `--json` to any command for machine-readable output.
 | `reply <id> --body` | Reply on the same thread and ack the original |
 | `notify --to [--thread]` | Publish a non-durable "you have mail" wake |
 | `ping` | Round-trip a message to yourself to check the system is operational |
+| `doctor` | Validate config + NATS connectivity; print the effective (redacted) config |
+| `hub-info` | Show this hub's public self-description (name, connect URL, admin/feedback) |
 | `mcp-serve` | Run the MCP server (see below) |
 
 ```bash
@@ -134,15 +136,20 @@ An agent only benefits from mail if it looks. Paste the ready-made block from
 
 ## Configuration
 
-| Env var | Default | Meaning |
-|---------|---------|---------|
-| `NATS_URL` | `nats://127.0.0.1:4222` | NATS (JetStream) server |
-| `AGENT_ID` | — | This agent's identity (CLI / stdio server) |
-| `AGENT_MAIL_TRANSPORT` | `stdio` | `stdio` or `http` |
-| `AGENT_MAIL_HOST` | `127.0.0.1` | Bind host for `http` |
-| `AGENT_MAIL_PORT` | `8080` | Bind port for `http` |
-| `AGENT_MAIL_PATH` | `/mcp` | Mount path for `http` |
-| `AGENT_MAIL_LOG_LEVEL` | `WARNING` | `DEBUG` … `ERROR` |
+Settings resolve from four layers, **later winning**: field defaults → the baked
+`defaults.toml` → a runtime `--config file.toml` → **environment variables**. Every
+setting has one name usable as a lowercase TOML key or its UPPERCASE env var (`nats_url`
+== `NATS_URL`). Containers set env vars; developers point at a TOML file:
+
+```bash
+agent-mail --config ./agent-mail.toml mcp-serve   # env still overrides the file
+agent-mail doctor                                 # show effective config + check NATS
+```
+
+Common settings: `NATS_URL`, `AGENT_ID`, `AGENT_MAIL_TRANSPORT/HOST/PORT/PATH`,
+`AGENT_MAIL_HUB`, NATS auth (`NATS_TOKEN` / `NATS_CREDS_FILE` / …), and the hub's
+admin/feedback fields advertised via `hub_info`. **Full reference:**
+[docs/configuration.md](docs/configuration.md).
 
 ## Development
 

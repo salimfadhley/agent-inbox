@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 
 from agent_mail.config import (
     Config,
     ConfigError,
     durable_name,
+    hub_descriptor,
     mail_subject,
     notify_subject,
     validate_agent_id,
 )
+from agent_mail.config_env import set_runtime_config_path
+
+
+@pytest.fixture(autouse=True)
+def _reset_runtime_config() -> Iterator[None]:
+    set_runtime_config_path(None)
+    yield
+    set_runtime_config_path(None)
 
 
 def test_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,3 +56,52 @@ def test_subject_helpers() -> None:
     assert mail_subject("casework") == "agent.mail.casework"
     assert notify_subject("casework") == "agent.notify.casework"
     assert durable_name("casework") == "mail-casework"
+
+
+def test_config_layering_env_beats_file_beats_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for key in ("AGENT_MAIL_HUB", "NATS_URL", "AGENT_ID"):
+        monkeypatch.delenv(key, raising=False)
+
+    # 1. baked default
+    assert Config().hub == "agent-mail"
+
+    # 2. runtime --config file overrides the baked default
+    cfg = tmp_path / "agent-mail.toml"
+    cfg.write_text('hub = "from-file"\nnats_url = "nats://file:4222"\n')
+    set_runtime_config_path(str(cfg))
+    loaded = Config()
+    assert loaded.hub == "from-file"
+    assert loaded.nats_url == "nats://file:4222"
+
+    # 3. environment wins over the file
+    monkeypatch.setenv("AGENT_MAIL_HUB", "from-env")
+    assert Config().hub == "from-env"
+
+
+def test_missing_config_file_raises() -> None:
+    set_runtime_config_path("/definitely/not/here.toml")
+    with pytest.raises(ConfigError):
+        Config()
+
+
+def test_redacted_masks_secrets() -> None:
+    config = Config().model_copy(
+        update={"nats_password": "hunter2", "nats_token": "tok"}
+    )
+    redacted = config.redacted()
+    assert redacted["nats_password"] == "***"
+    assert redacted["nats_token"] == "***"
+    assert redacted["nats_url"] == config.nats_url
+
+
+def test_hub_descriptor_is_public() -> None:
+    config = Config().model_copy(
+        update={"hub": "h", "transport": "http", "admin_agent": "admin"}
+    )
+    descriptor = hub_descriptor(config)
+    assert descriptor["hub"] == "h"
+    assert descriptor["admin_agent"] == "admin"
+    assert "<agent>" in str(descriptor["connect_url_template"])
+    assert "ping" in descriptor["tools"]  # type: ignore[operator]

@@ -15,6 +15,7 @@ Two ways to run it:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, MutableMapping
@@ -24,7 +25,7 @@ from urllib.parse import parse_qs
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from agent_mail.config import Config
+from agent_mail.config import Config, hub_descriptor
 from agent_mail.identity import (
     reset_current_agent,
     resolve_identity,
@@ -134,6 +135,15 @@ async def ping() -> dict[str, Any]:
     return {"ok": True, "agent": me, "message_id": received.id}
 
 
+@mcp.tool()
+async def hub_info() -> dict[str, Any]:
+    """Describe this agent-mail hub: its name, how to connect, and how to get help.
+
+    Non-secret. Call on sign-on to learn which hub you reached and who administers it.
+    """
+    return hub_descriptor(_config())
+
+
 # -- HTTP multi-tenant identity middleware --------------------------------------
 
 Scope = MutableMapping[str, Any]
@@ -146,12 +156,14 @@ class AgentIdentityMiddleware:
     """Resolve the calling agent from the request URL and bind it for the handler.
 
     Rewrites ``/<agent>/mcp`` to the plain mount path before delegating, so the same
-    underlying MCP app serves every agent. Also answers ``GET /health`` directly.
+    underlying MCP app serves every agent. Also answers ``GET /health`` and serves the
+    hub descriptor at ``GET /`` (and ``/hub``) directly.
     """
 
-    def __init__(self, app: ASGIApp, mount_path: str) -> None:
+    def __init__(self, app: ASGIApp, mount_path: str, hub_json: bytes) -> None:
         self._app = app
         self._mount = mount_path.rstrip("/") or "/mcp"
+        self._hub_json = hub_json
         self._pattern = re.compile(
             rf"^/(?P<agent>[^/]+){re.escape(self._mount)}(?P<rest>/.*)?$"
         )
@@ -160,8 +172,12 @@ class AgentIdentityMiddleware:
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
             return
-        if scope.get("path") == "/health":
-            await self._health(send)
+        path = scope.get("path")
+        if path == "/health":
+            await self._json(send, b'{"status":"ok"}')
+            return
+        if path in ("/", "/hub"):
+            await self._json(send, self._hub_json)
             return
         agent = self._extract(scope)
         token = set_current_agent(agent)
@@ -189,7 +205,7 @@ class AgentIdentityMiddleware:
         return None
 
     @staticmethod
-    async def _health(send: Send) -> None:
+    async def _json(send: Send, body: bytes) -> None:
         await send(
             {
                 "type": "http.response.start",
@@ -197,13 +213,14 @@ class AgentIdentityMiddleware:
                 "headers": [(b"content-type", b"application/json")],
             }
         )
-        await send({"type": "http.response.body", "body": b'{"status":"ok"}'})
+        await send({"type": "http.response.body", "body": body})
 
 
 def build_http_app(config: Config) -> ASGIApp:
     """Build the multi-tenant ASGI app for the hosted MCP server."""
     mcp.settings.streamable_http_path = config.path
-    return AgentIdentityMiddleware(mcp.streamable_http_app(), config.path)
+    hub_json = json.dumps(hub_descriptor(config)).encode()
+    return AgentIdentityMiddleware(mcp.streamable_http_app(), config.path, hub_json)
 
 
 def serve(config: Config | None = None) -> None:

@@ -160,6 +160,18 @@ def test_notify() -> None:
     assert FakeMailbox.calls[-1] == ("notify", ("peer", None))
 
 
+def test_doctor_reports_reachable() -> None:
+    result = run("doctor")
+    assert result.exit_code == 0, result.output
+    assert "reachable" in result.output
+
+
+def test_hub_info_shows_hub_name() -> None:
+    result = run("hub-info")
+    assert result.exit_code == 0, result.output
+    assert "agent-mail" in result.output
+
+
 def test_ping_ok() -> None:
     result = run("ping")
     assert result.exit_code == 0, result.output

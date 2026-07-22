@@ -1,0 +1,44 @@
+# agent-mail baked defaults.
+#
+# This file ships inside the package and documents every setting with its default.
+# Resolution order (later wins):
+#   these defaults  <  your --config file  <  environment variables
+#
+# Every key below is also an environment variable: the UPPERCASE form of the key
+# (e.g. `nats_url` here == `NATS_URL` in the environment). Copy this file, edit it,
+# and pass it with `--config path.toml` or AGENT_MAIL_CONFIG=path.toml.
+
+# --- NATS connection (required at runtime) --------------------------------
+# A NATS server with JetStream enabled. agent-mail does not bundle one.
+nats_url = "nats://127.0.0.1:4222"
+
+# NATS authentication — set at most one style. All default to unset (no auth).
+# nats_token = "s3cr3t-token"          # env NATS_TOKEN
+# nats_user = "agent-mail"             # env NATS_USER
+# nats_password = "..."               # env NATS_PASSWORD  (secret)
+# nats_creds_file = "/run/secrets/nats.creds"   # env NATS_CREDS_FILE (NATS .creds)
+# nats_ca_file = "/run/secrets/nats-ca.pem"     # env NATS_CA_FILE (TLS CA cert)
+
+# --- Identity -------------------------------------------------------------
+# Your agent id, for the CLI and single-agent (stdio) servers. Leave unset for a
+# hosted multi-agent http server (identity comes from each agent's URL instead).
+# agent_id = "alice"                   # env AGENT_ID
+
+# --- MCP server (agent-mail mcp-serve) ------------------------------------
+transport = "stdio"                    # env AGENT_MAIL_TRANSPORT  (stdio | http)
+host = "127.0.0.1"                     # env AGENT_MAIL_HOST
+port = 8080                            # env AGENT_MAIL_PORT
+path = "/mcp"                          # env AGENT_MAIL_PATH
+# public_url = "https://mail.example"  # env AGENT_MAIL_PUBLIC_URL
+                                       # advertised base URL when behind a proxy
+
+# --- Hub identity & administration (advertised to agents via hub_info) ----
+hub = "agent-mail"                     # env AGENT_MAIL_HUB (name; distinguishes hubs)
+# hub_description = "Homelab agent mail"        # env AGENT_MAIL_HUB_DESCRIPTION
+# admin_agent = "admin"                # env AGENT_MAIL_ADMIN_AGENT
+                                       # agents can mail this id for help
+# issue_url = "https://github.com/you/repo/issues"   # env AGENT_MAIL_ISSUE_URL
+# contact = "ops@example.com"          # env AGENT_MAIL_CONTACT
+
+# --- Operations -----------------------------------------------------------
+log_level = "WARNING"                  # env AGENT_MAIL_LOG_LEVEL (DEBUG..ERROR)

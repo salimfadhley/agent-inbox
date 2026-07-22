@@ -45,7 +45,7 @@ def test_invalid_per_request_identity_rejected() -> None:
 
 
 def _extract(path: str, query: bytes = b"", headers: list | None = None) -> str | None:
-    mw = AgentIdentityMiddleware(app=_noop, mount_path="/mcp")
+    mw = AgentIdentityMiddleware(app=_noop, mount_path="/mcp", hub_json=b"{}")
     scope = {
         "type": "http",
         "path": path,
