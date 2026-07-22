@@ -16,8 +16,8 @@ Prior art (AMQ, AgenticMail, Google's A2A, MCP hubs) converges on one shape:
 
 > **a durable store + a thin "you have mail" signal + a per-agent listener.**
 
-We already operate **NATS with JetStream** at `nats://192.168.86.31:4222`, which
-provides all three primitives natively.
+**NATS with JetStream** provides all three primitives natively — durable subjects,
+publish, and request-reply — and is a small, mature, self-hostable dependency.
 
 ## Decision
 
