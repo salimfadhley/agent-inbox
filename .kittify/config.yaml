@@ -1,0 +1,12 @@
+project:
+  uuid: d4029717-cdee-49ee-a034-fea8e7368926
+  slug: agent-mail
+  node_id: f3e2d94d0fa7
+  build_id: 7f41b6c9-1ffd-5ac3-912c-1b2ea406cacd
+vcs:
+  type: git
+agents:
+  available:
+  - claude
+  auto_commit: true
+  lint_on_edit: false

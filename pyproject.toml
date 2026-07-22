@@ -1,0 +1,22 @@
+[project]
+name = "agent-mail"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Sal Fadhley", email = "sfadhley@hartreepartners.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.4.2",
+    "mcp[cli]>=1.28.1",
+    "nats-py>=2.15.0",
+    "pydantic>=2.13.4",
+]
+
+[project.scripts]
+agent-mail = "agent_mail:main"
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
