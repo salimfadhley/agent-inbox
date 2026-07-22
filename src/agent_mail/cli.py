@@ -177,9 +177,7 @@ def read(ctx: click.Context, message_id: str) -> None:
 @click.option("--body", required=True, help="Reply body.")
 @click.option("--subject", default=None, help="Override the reply subject.")
 @click.pass_context
-def reply(
-    ctx: click.Context, message_id: str, body: str, subject: str | None
-) -> None:
+def reply(ctx: click.Context, message_id: str, body: str, subject: str | None) -> None:
     """Reply on the same thread and ack the original."""
     config: Config = ctx.obj["config"]
     as_json: bool = ctx.obj["as_json"]
