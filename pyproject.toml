@@ -1,22 +1,88 @@
 [project]
 name = "agent-mail"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "A NATS JetStream mailbox for local LLM agents — a CLI primitive plus a hostable MCP server so AI coding agents can message and notify each other."
 readme = "README.md"
-authors = [
-    { name = "Sal Fadhley", email = "sfadhley@hartreepartners.com" }
-]
 requires-python = ">=3.12"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Sal Fadhley" },
+]
+keywords = [
+    "agents",
+    "llm",
+    "mcp",
+    "nats",
+    "jetstream",
+    "messaging",
+    "inter-agent",
+    "mailbox",
+    "claude",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Distributed Computing",
+]
 dependencies = [
-    "click>=8.4.2",
-    "mcp[cli]>=1.28.1",
-    "nats-py>=2.15.0",
-    "pydantic>=2.13.4",
+    "click>=8.1",
+    "mcp[cli]>=1.12",
+    "nats-py>=2.9",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "tenacity>=8.3",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
-agent-mail = "agent_mail:main"
+agent-mail = "agent_mail.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/salimfadhley/agent-mail"
+Repository = "https://github.com/salimfadhley/agent-mail"
+Issues = "https://github.com/salimfadhley/agent-mail/issues"
 
 [build-system]
-requires = ["uv_build>=0.9.18,<0.10.0"]
-build-backend = "uv_build"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_mail"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "README.md", "LICENSE"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.5",
+    "pyright>=1.1.350",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
