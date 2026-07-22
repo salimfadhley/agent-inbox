@@ -22,6 +22,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from agent_mail.config import Config
 from agent_mail.identity import (
@@ -34,7 +35,16 @@ from agent_mail.models import Intent, Message
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("agent-mail")
+# agent-mail is trusted-network software with no built-in auth (front it with a
+# reverse proxy on untrusted networks). MCP's DNS-rebinding protection only allows
+# localhost Host headers by default, which makes a hosted server unreachable by
+# remote agents — so we disable it and serve any Host.
+mcp = FastMCP(
+    "agent-mail",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    ),
+)
 
 
 def _config() -> Config:
