@@ -42,6 +42,7 @@ from agent_mail.identity import (
 )
 from agent_mail.mailbox import Mailbox
 from agent_mail.models import AgentProfile, Intent, Message
+from agent_mail.prompts import render_index, render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -302,10 +303,17 @@ class AgentIdentityMiddleware:
     serves the hub descriptor at ``GET /`` (and ``/hub``) directly.
     """
 
-    def __init__(self, app: ASGIApp, mount_path: str, hub_json: bytes) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        mount_path: str,
+        hub_json: bytes,
+        config: Config | None = None,
+    ) -> None:
         self._app = app
         self._mount = mount_path.rstrip("/") or "/mcp"
         self._hub_json = hub_json
+        self._config = config
         self._pattern = re.compile(
             rf"^/(?P<project>[^/]+)/(?P<agent>[^/]+){re.escape(self._mount)}"
             r"(?P<rest>/.*)?$"
@@ -321,6 +329,26 @@ class AgentIdentityMiddleware:
             return
         if path in ("/", "/hub"):
             await self._json(send, self._hub_json)
+            return
+        if self._config is not None and (path == "/prompts" or path == "/prompts/"):
+            await self._text(send, render_index(self._config))
+            return
+        if (
+            self._config is not None
+            and path is not None
+            and path.startswith("/prompts/")
+        ):
+            name = path[len("/prompts/") :].strip("/")
+            body = render_prompt(name, self._config)
+            if body is None:
+                await self._text(
+                    send,
+                    f"# not found\n\nNo prompt named {name!r}. "
+                    f"See {self._config.base_url()}/prompts\n",
+                    status=404,
+                )
+            else:
+                await self._text(send, body)
             return
         address = self._extract(scope)
         token = set_current_agent(address)
@@ -358,12 +386,25 @@ class AgentIdentityMiddleware:
         )
         await send({"type": "http.response.body", "body": body})
 
+    @staticmethod
+    async def _text(send: Send, body: str, status: int = 200) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-type", b"text/markdown; charset=utf-8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body.encode("utf-8")})
+
 
 def build_http_app(config: Config, max_message_bytes: int | None = None) -> ASGIApp:
     """Build the multi-tenant ASGI app for the hosted MCP server."""
     mcp.settings.streamable_http_path = config.path
     hub_json = json.dumps(hub_descriptor(config, max_message_bytes)).encode()
-    return AgentIdentityMiddleware(mcp.streamable_http_app(), config.path, hub_json)
+    return AgentIdentityMiddleware(
+        mcp.streamable_http_app(), config.path, hub_json, config
+    )
 
 
 def serve(config: Config | None = None) -> None:

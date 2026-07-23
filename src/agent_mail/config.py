@@ -335,6 +335,7 @@ def hub_descriptor(
             ),
         },
         "connect_url_template": connect,
+        "prompts_url": f"{base}/prompts" if config.transport == "http" else None,
         "transport": config.transport,
         "admin_agent": config.admin_agent,
         "host_agent": config.host_agent,

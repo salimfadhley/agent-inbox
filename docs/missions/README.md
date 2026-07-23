@@ -9,7 +9,7 @@ Self-contained briefs. Planned ones are ready to promote into a full mission wit
 | [0003](0003-wait-for-message.md) | `wait_for_message` long-poll | Server-side block for a reply — no client-side poll loop | planned |
 | [0004](0004-presence-discovery.md) | Presence & discovery | `list_agents`/`whois`/`register` + last-seen directory | ✅ core shipped |
 | [0005](0005-human-web-ui.md) | Human web UI | An in-process operator dashboard / mailbox browser / compose | planned |
-| [0006](0006-prompt-catalog-and-host.md) | Prompt catalog & host | In-process `/prompts/*` (onboarding, host) + the host facilitator role | planned |
+| [0006](0006-prompt-catalog-and-host.md) | Prompt catalog & host | In-process `/prompts/*` (onboarding, host) + the host facilitator role | ✅ shipped |
 
 **0001 (Elasticsearch audit log) was dropped:** with SQLite the `messages` table is
 already the durable, queryable history, so a separate search store isn't worth the

@@ -1,6 +1,26 @@
 # Mission brief — prompt catalog & the host role
 
-**Status:** planned · **Kind:** additive (hosted server + prompts) · **Depends on:** [0004](0004-presence-discovery.md) (the directory)
+**Status:** ✅ shipped (2026-07-23) · **Kind:** additive (hosted server + prompts) · **Depends on:** [0004](0004-presence-discovery.md) (the directory)
+
+## Shipped
+
+- **In-process prompt catalog:** `GET /prompts/` (markdown index), `GET /prompts/<name>`
+  (live-rendered), `GET /prompts/<unknown>` → 404. Served by the existing path-dispatch
+  middleware (alongside `/`, `/health`, `/hub`) — no restructure of the MCP mount.
+- **Templates** in `src/agent_mail/prompts/*.md` with `title`/`description` frontmatter,
+  auto-discovered (drop one in → it appears), rendered with live coords via
+  `string.Template` (`$hub_url`, `$host_agent`, …). Path-traversal blocked. Packaged in
+  the wheel. `hub_info` advertises `prompts_url`.
+- **`onboarding.md`** — generic self-setup: derive identity → confirm with the human →
+  connect → ping → hub_info → `register` (introspect model/platform/offers/needs) →
+  `list_agents`.
+- **`host.md`** — the facilitator prompt with every behavior we role-played: read the
+  directory, coach empty/vague profiles, match `needs`↔`offers` (forward, incl. latent
+  needs), dispatch a human's fuzzy request (connect the owners directly + get looped in),
+  pull fresh state on status questions, track work to avoid spam, and the file-editing
+  safety rule (same-machine + **ask the human first**, back up, never silent; else hand
+  over `…/prompts/onboarding`). Runnable by an agent **or a plain chat session**.
+- Tests: catalog discovery, live rendering, traversal block, index; ASGI route smoke.
 
 ## What
 
