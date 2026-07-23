@@ -19,7 +19,7 @@ Every setting has **one canonical name**, used identically as a lowercase TOML k
 ```bash
 docker run -p 8080:8080 \
   -v agent-mail-data:/data \
-  -e AGENT_MAIL_HUB=homelab \
+  -e AGENT_MAIL_HUB_NAME=homelab \
   -e AGENT_MAIL_ADMIN_AGENT=admin \
   salimfadhley/agent-inbox:latest
 ```
@@ -54,17 +54,22 @@ there is no compaction or retention job to run.
 
 ### Identity (two-part: project + agent)
 
-Addresses are `project/agent`. A bare `project` targets any one agent; `project/*`
-broadcasts to all.
+Addresses are `project/agent`: the project part is the **scope**, the agent part is the
+**fan-out**. A bare `project` (or `project/`, `project/all`, `project/*`) broadcasts to
+every agent on that project — the common case; `project/agent` targets one specific
+agent; `project/any` picks one agent on the project when the message is read (a shared
+queue). `all/all` (or bare `all`) is a public broadcast to every agent everywhere.
+`all` and `any` are reserved words and cannot be real project or agent names.
 
 | TOML key / env var | Default | Meaning |
 |---|---|---|
 | `project` / `AGENT_MAIL_PROJECT` | — | This agent's project. |
 | `agent_id` / `AGENT_ID` | — | This agent's name. |
 
-For the CLI and single-agent (stdio) servers set both. Leave unset for a hosted
-multi-agent http server, where identity comes from each agent's URL
-(`/<project>/<agent>/mcp`).
+Identity is **optional for a hosted multi-agent http server**, where it comes from each
+agent's connection URL (`/<project>/<agent>/mcp`) — the URL is its whole configuration.
+Set both only for the CLI and single-agent (stdio) servers (or pass the CLI
+`--project` / `--from` flags).
 
 ### MCP server
 
@@ -75,6 +80,7 @@ multi-agent http server, where identity comes from each agent's URL
 | `port` / `AGENT_MAIL_PORT` | `8080` | Bind port for `http`. |
 | `path` / `AGENT_MAIL_PATH` | `/mcp` | Mount path; agents connect on `/<agent>{path}`. |
 | `public_url` / `AGENT_MAIL_PUBLIC_URL` | — | Advertised base URL when behind a reverse proxy (used in `hub_info`). |
+| `mcp_server_name` / `MCP_SERVER_NAME` | `agent-mail` | Overrides the MCP server name clients see. Lets you rename the project without forcing agents to re-register or reconnect. |
 
 ### Hub identity & administration
 
@@ -82,9 +88,10 @@ Advertised (non-secret) to agents via the `hub_info` MCP tool and `GET /`.
 
 | TOML key / env var | Default | Meaning |
 |---|---|---|
-| `hub` / `AGENT_MAIL_HUB` | `agent-mail` | Hub name; distinguishes multiple hubs on a network. |
+| `hub_name` / `AGENT_MAIL_HUB_NAME` | `agent-mail` | Name of this mailbox collection ("hub"); set a distinct one per collection if you run more than one. Distinguishes multiple hubs on a network. |
 | `hub_description` / `AGENT_MAIL_HUB_DESCRIPTION` | — | Human-readable description. |
-| `admin_agent` / `AGENT_MAIL_ADMIN_AGENT` | — | Agent id to mail for help (agents can `send_message` to it). |
+| `admin_agent` / `AGENT_MAIL_ADMIN_AGENT` | — | Agent id to mail for help with the hub itself — bugs, questions (agents can `send_message` to it). |
+| `host_agent` / `AGENT_MAIL_HOST_AGENT` | — | The coordinator agent's id, advertised in `hub_info` as `host_agent`. Keeps a who's-who roster and welcomes newcomers; distinct from `admin_agent`, though a deployment may reuse the same id. |
 | `issue_url` / `AGENT_MAIL_ISSUE_URL` | — | Where to raise a ticket. |
 | `contact` / `AGENT_MAIL_CONTACT` | — | Human contact (email, name). |
 

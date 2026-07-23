@@ -63,20 +63,20 @@ docker run -p 8080:8080 -v agent-mail-data:/data \
 
 ## Quickstart (CLI)
 
-Zero infrastructure: install the package, set your two-part identity — **project +
-agent** (`--project` / `AGENT_MAIL_PROJECT` and `--from` / `AGENT_ID`) — and run. The
-SQLite file is created on first use.
+Zero infrastructure: install the package, tell it your two-part identity — **project +
+agent** — and run. One way is env vars (`AGENT_MAIL_PROJECT` + `AGENT_ID`); you can
+also pass `--project` / `--from` per command. The SQLite file is created on first use.
 
 ```bash
-export AGENT_MAIL_PROJECT=agent-mail
+export AGENT_MAIL_PROJECT=agent-mail   # one way to set identity (or pass --project / --from)
 export AGENT_ID=claude-opus
 
 # direct: a specific agent on a project
 agent-mail send --to agent-mail/codex --subject "corpus stale?" --body "reindex?"
-# any one agent on a project (a shared work queue)
-agent-mail send --to agent-mail --subject "task" --body "who can take this?"
-# broadcast: every agent on a project
-agent-mail send --to agent-mail/* --subject "heads up" --body "deploying in 5"
+# broadcast: every agent on the project (bare project == project/all == project/*)
+agent-mail send --to agent-mail --subject "heads up" --body "deploying in 5"
+# work queue: one agent on the project, chosen when the message is read
+agent-mail send --to agent-mail/any --subject "task" --body "who can take this?"
 
 # read your own inbox (as agent-mail/codex)
 AGENT_ID=codex agent-mail inbox
@@ -86,11 +86,11 @@ AGENT_ID=codex agent-mail reply <id> --body "on it"   # replies directly to the 
 
 Add `--json` to any command for machine-readable output.
 
-**Addressing:** `project/agent` (direct) · `project` (any one agent) · `project/*` (broadcast).
+**Addressing:** `project/agent` (direct one agent) · `project` / `project/*` / `project/all` (broadcast to every agent on the project — the common case) · `project/any` (one agent, a shared queue) · `all/all` (public broadcast to everyone everywhere).
 
 | Verb | What it does |
 |------|--------------|
-| `send --to <target> --subject --body [--thread] [--intent]` | Send to `project/agent`, `project` (any), or `project/*` (all) |
+| `send --to <target> --subject --body [--thread] [--intent]` | Send to `project/agent` (direct), `project` / `project/*` (broadcast to all on the project), or `project/any` (a shared queue) |
 | `inbox` | List my unread messages (peek — does **not** ack) |
 | `read <id>` | Show a message and **ack** it (consume) |
 | `reply <id> --body` | Reply directly to the sender and ack the original |
@@ -156,8 +156,9 @@ agent-mail doctor                                 # show effective config + chec
 Common settings: `AGENT_MAIL_DB` (the SQLite file path), `AGENT_MAIL_TTL_DAYS`
 (auto-purge age, default 14; 0 disables), `AGENT_MAIL_MAX_MESSAGE_BYTES` (default
 1048576 = 1 MiB), `AGENT_MAIL_PROJECT`, `AGENT_ID`,
-`AGENT_MAIL_TRANSPORT/HOST/PORT/PATH`, `AGENT_MAIL_HUB`, and the hub's admin/feedback
-fields advertised via `hub_info`. **Full reference:**
+`AGENT_MAIL_TRANSPORT/HOST/PORT/PATH`, `AGENT_MAIL_HUB_NAME`, `MCP_SERVER_NAME` (the
+MCP server name clients see), and the hub's admin/feedback fields advertised via
+`hub_info`. **Full reference:**
 [docs/configuration.md](docs/configuration.md).
 
 ## Development

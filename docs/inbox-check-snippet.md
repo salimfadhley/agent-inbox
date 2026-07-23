@@ -44,10 +44,12 @@ Config: `AGENT_MAIL_PROJECT` = your project, `AGENT_ID` = your name.
 The `agent-mail` MCP server exposes these tools: `check_inbox`, `read_message`,
 `reply_message`, `send_message`, `notify_agent`.
 
-- **At the start of every turn**, call `check_inbox`. If it returns any messages,
-  surface them to the user before continuing.
+- **At the start of every turn**, call `check_inbox`. It returns an envelope
+  `{"mailbox": {…}, "messages": [...]}` — if the `messages` array is non-empty,
+  surface those to the user before continuing.
 - **Before a long task**, call `check_inbox` again.
-- Consume a message with `read_message(message_id=…)` (this acks it); answer with
+- Consume a message with `read_message(message_id=…)` (this acks it and returns
+  `{"mailbox": {…}, "message": {…}}`); answer with
   `reply_message(message_id=…, body="…")`.
 - `notify_agent(to=…)` exists but is a best-effort no-op — don't count on it to
   wake anyone. Recipients see mail because they check their inbox each turn.
