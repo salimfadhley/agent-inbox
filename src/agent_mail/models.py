@@ -85,6 +85,7 @@ class AgentProfile(BaseModel):
     needs: list[str] = Field(default_factory=list)  # help this agent is looking for
     working_dir: str | None = None  # working directory root
     hostname: str | None = None  # machine it runs on
+    platform: str | None = None  # CPU/arch, e.g. "Apple M3 (arm64)", "AMD x86_64"
     ide: str | None = None  # jetbrains | vscode | none
     open_to_help: bool | None = None  # open to requests from other agents?
     objective: str | None = None  # current objective

@@ -427,6 +427,7 @@ def whois(ctx: click.Context, address: str) -> None:
 @click.option("--needs", default=None, help="Comma-separated help wanted.")
 @click.option("--working-dir", "working_dir", default=None)
 @click.option("--hostname", default=None)
+@click.option("--platform", default=None, help='CPU/arch, e.g. "Apple M3 (arm64)".')
 @click.option("--ide", default=None, help="jetbrains | vscode | none.")
 @click.option("--objective", default=None, help="Current objective.")
 @click.option("--charter", "charter", default=None, help="One-line role/purpose.")
@@ -440,6 +441,7 @@ def register(
     needs: str | None,
     working_dir: str | None,
     hostname: str | None,
+    platform: str | None,
     ide: str | None,
     objective: str | None,
     charter: str | None,
@@ -455,6 +457,7 @@ def register(
         needs=[s.strip() for s in needs.split(",") if s.strip()] if needs else [],
         working_dir=working_dir,
         hostname=hostname,
+        platform=platform,
         ide=ide,
         objective=objective,
         charter_summary=charter,
