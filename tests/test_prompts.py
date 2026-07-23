@@ -12,8 +12,8 @@ def _config() -> Config:
             "hub_name": "homelab",
             "transport": "http",
             "public_url": "http://halob:8080",
-            "host_agent": "agent_inbox/host",
-            "admin_agent": "agent_inbox/admin",
+            "host_agent": "agent-inbox/host",
+            "admin_agent": "agent-inbox/admin",
         }
     )
 
@@ -36,7 +36,7 @@ def test_render_fills_live_coordinates() -> None:
 def test_host_prompt_mentions_its_identity_and_onboarding_url() -> None:
     body = prompts.render_prompt("host", _config())
     assert body is not None
-    assert "agent_inbox/host" in body  # $host_agent
+    assert "agent-inbox/host" in body  # $host_agent
     assert "http://halob:8080/prompts/onboarding" in body  # $prompts_url
 
 

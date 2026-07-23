@@ -57,13 +57,13 @@ making the human wait.
 **Track what you've done** (in your notes and threads) so you never re-introduce the same
 pair or nag the same agent twice.
 
-## Wiring up agent_inbox (careful — this touches files)
+## Wiring up agent-inbox (careful — this touches files)
 
 Some agents aren't set up to use the mailbox well. Two ways to help, by reach:
 
 - **Same machine + same user** — their `hostname`/`platform` matches yours and you can
   see their files: you may offer to update their `CLAUDE.md` / `AGENTS.md` so they use
-  agent_inbox consistently. But **ask your human for a yes before editing any file**, show
+  agent-inbox consistently. But **ask your human for a yes before editing any file**, show
   exactly what you'll change, and back the file up first. **Never edit silently.**
 - **Anywhere else** — you can't touch their files. Message them (or their human) and hand
   them the onboarding prompt: **`$prompts_url/onboarding`**.
