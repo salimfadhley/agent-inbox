@@ -47,6 +47,14 @@ wheels/
 .kittify/workspaces/
 kitty-ops/ops-index.jsonl
 
+# Local MCP client config. `claude mcp add --scope project` writes .mcp.json here,
+# and it would contain a deployment-specific hub URL (e.g. a homelab hostname) —
+# which must never land in this public repo (see the charter). Configure your hub
+# with `--scope user` instead; this is a belt-and-braces guard.
+.mcp.json
+.mcp.local.json
+mcp.json
+
 # JetBrains IDE
 .idea/
 

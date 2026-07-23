@@ -19,8 +19,13 @@ http://<host>:<port>/<project>/<agent>/mcp
 ```bash
 # identity is agent-inbox/claude-opus — it's in the URL, nowhere else.
 claude mcp add --transport http agent-inbox \
-  https://mail-host/agent-inbox/claude-opus/mcp
+  https://mail-host/agent-inbox/claude-opus/mcp --scope user
 ```
+
+> **Use `--scope user` (or `local`), not `--scope project`.** Project scope writes a
+> `.mcp.json` into the repository, and your hub URL is deployment-specific — a private
+> hostname you probably don't want committed, least of all to a public repo. Keep it in
+> your own client config. (This repo also gitignores `.mcp.json` as a safety net.)
 
 ### Generic MCP client config
 
