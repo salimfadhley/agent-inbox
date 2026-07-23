@@ -8,14 +8,12 @@ from pathlib import Path
 import pytest
 
 from agent_mail.config import (
+    DEFAULT_MAX_MESSAGE_BYTES,
+    DEFAULT_TTL_DAYS,
     Config,
     ConfigError,
-    any_subject,
-    broadcast_subject,
-    direct_subject,
     format_address,
     hub_descriptor,
-    notify_target_subject,
     parse_target,
     validate_agent_id,
     validate_project,
@@ -31,10 +29,12 @@ def _reset_runtime_config() -> Iterator[None]:
 
 
 def test_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("NATS_URL", "AGENT_ID", "AGENT_MAIL_PROJECT"):
+    for key in ("AGENT_MAIL_DB", "AGENT_ID", "AGENT_MAIL_PROJECT"):
         monkeypatch.delenv(key, raising=False)
     config = Config.from_env()
-    assert config.nats_url == "nats://127.0.0.1:4222"
+    assert config.db.endswith("agent-mail.db")
+    assert config.ttl_days == DEFAULT_TTL_DAYS
+    assert config.max_message_bytes == DEFAULT_MAX_MESSAGE_BYTES
     assert config.agent_id is None
     assert config.project is None
 
@@ -64,39 +64,39 @@ def test_invalid_ids_rejected(bad: str) -> None:
         validate_project(bad)
 
 
-def test_address_and_subject_helpers() -> None:
+def test_format_address() -> None:
     assert format_address("proj", "alice") == "proj/alice"
-    assert direct_subject("proj", "alice") == "agent.mail.proj.alice"
-    assert broadcast_subject("proj") == "agent.mail.proj.__all__"
-    assert any_subject("proj") == "agent.mail.proj.__any__"
+    with pytest.raises(ConfigError):
+        format_address("proj", "bad id")
 
 
 def test_parse_target_modes() -> None:
-    assert parse_target("proj/alice") == ("direct", "agent.mail.proj.alice")
-    assert parse_target("proj") == ("any", "agent.mail.proj.__any__")
-    assert parse_target("proj/*") == ("broadcast", "agent.mail.proj.__all__")
+    assert parse_target("proj/alice") == ("direct", "proj", "alice")
+    assert parse_target("proj") == ("any", "proj", None)
+    assert parse_target("proj/*") == ("broadcast", "proj", None)
 
 
-def test_notify_target_subject_modes() -> None:
-    assert notify_target_subject("proj/alice") == "agent.notify.proj.alice"
-    assert notify_target_subject("proj") == "agent.notify.proj.__all__"
-    assert notify_target_subject("proj/*") == "agent.notify.proj.__all__"
+def test_parse_target_validates_tokens() -> None:
+    with pytest.raises(ConfigError):
+        parse_target("bad project/alice")
+    with pytest.raises(ConfigError):
+        parse_target("proj/bad agent")
 
 
 def test_config_layering_env_beats_file_beats_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for key in ("AGENT_MAIL_HUB", "NATS_URL", "AGENT_ID"):
+    for key in ("AGENT_MAIL_HUB", "AGENT_MAIL_TTL_DAYS", "AGENT_ID"):
         monkeypatch.delenv(key, raising=False)
 
     assert Config().hub == "agent-mail"
 
     cfg = tmp_path / "agent-mail.toml"
-    cfg.write_text('hub = "from-file"\nnats_url = "nats://file:4222"\n')
+    cfg.write_text('hub = "from-file"\nttl_days = 3\n')
     set_runtime_config_path(str(cfg))
     loaded = Config()
     assert loaded.hub == "from-file"
-    assert loaded.nats_url == "nats://file:4222"
+    assert loaded.ttl_days == 3
 
     monkeypatch.setenv("AGENT_MAIL_HUB", "from-env")
     assert Config().hub == "from-env"
@@ -120,14 +120,11 @@ def test_missing_config_file_raises() -> None:
         Config()
 
 
-def test_redacted_masks_secrets() -> None:
-    config = Config().model_copy(
-        update={"nats_password": "hunter2", "nats_token": "tok"}
-    )
+def test_redacted_returns_effective_config() -> None:
+    config = Config().model_copy(update={"db": "/tmp/mail.db"})
     redacted = config.redacted()
-    assert redacted["nats_password"] == "***"
-    assert redacted["nats_token"] == "***"
-    assert redacted["nats_url"] == config.nats_url
+    assert redacted["db"] == "/tmp/mail.db"
+    assert redacted["hub"] == "agent-mail"
 
 
 def test_hub_descriptor_is_public() -> None:
@@ -136,8 +133,15 @@ def test_hub_descriptor_is_public() -> None:
     )
     descriptor = hub_descriptor(config, max_message_bytes=1048576)
     assert descriptor["hub"] == "h"
+    assert descriptor["storage"] == "sqlite"
     assert descriptor["admin_agent"] == "admin"
     assert "<project>/<agent>" in str(descriptor["connect_url_template"])
     assert "ping" in descriptor["tools"]  # type: ignore[operator]
     assert descriptor["limits"] == {"max_message_bytes": 1048576}
     assert descriptor["version"]
+
+
+def test_hub_descriptor_defaults_limit_to_config() -> None:
+    config = Config().model_copy(update={"max_message_bytes": 4096})
+    descriptor = hub_descriptor(config)
+    assert descriptor["limits"] == {"max_message_bytes": 4096}

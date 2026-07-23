@@ -149,18 +149,7 @@ async def hub_info() -> dict[str, Any]:
     (`limits.max_message_bytes`), and who administers it.
     """
     config = _config()
-    max_size = await _probe_max_message_size(config)
-    return hub_descriptor(config, max_message_bytes=max_size)
-
-
-async def _probe_max_message_size(config: Config) -> int | None:
-    """Best-effort query of the hub's max message size; None if NATS is unreachable."""
-    try:
-        async with Mailbox(config) as mailbox:
-            return await mailbox.max_message_size()
-    except Exception:  # discovery must not hard-fail if NATS is momentarily down
-        logger.warning("could not determine max message size", exc_info=True)
-        return None
+    return hub_descriptor(config, max_message_bytes=config.max_message_bytes)
 
 
 # -- HTTP multi-tenant identity middleware --------------------------------------
@@ -247,12 +236,10 @@ def serve(config: Config | None = None) -> None:
     """Run the MCP server over the configured transport."""
     config = config or _config()
     if config.transport == "http":
-        import asyncio
-
         import uvicorn
 
-        # Query the hub's max message size once so GET / can advertise it.
-        max_size = asyncio.run(_probe_max_message_size(config))
+        # The hub advertises its configured max message size on GET /.
+        max_size = config.max_message_bytes
         logger.info(
             "serving MCP over http on %s:%s (agents connect on /<project>/<agent>%s)",
             config.host,

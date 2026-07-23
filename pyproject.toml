@@ -1,7 +1,7 @@
 [project]
 name = "agent-mail"
 dynamic = ["version"]
-description = "A NATS JetStream mailbox for local LLM agents — a CLI primitive plus a hostable MCP server so AI coding agents can message and notify each other."
+description = "A SQLite mailbox for local LLM agents — a CLI primitive plus a hostable MCP server so AI coding agents can message and notify each other. No external services."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
@@ -12,8 +12,7 @@ keywords = [
     "agents",
     "llm",
     "mcp",
-    "nats",
-    "jetstream",
+    "sqlite",
     "messaging",
     "inter-agent",
     "mailbox",
@@ -32,12 +31,11 @@ classifiers = [
     "Topic :: System :: Distributed Computing",
 ]
 dependencies = [
+    "aiosqlite>=0.20",
     "click>=8.1",
     "mcp[cli]>=1.12",
-    "nats-py>=2.9",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "tenacity>=8.3",
     "uvicorn>=0.30",
 ]
 
@@ -86,3 +84,5 @@ select = ["E", "F", "W", "I", "UP", "B"]
 include = ["src"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"

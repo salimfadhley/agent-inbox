@@ -54,10 +54,10 @@ class Message(BaseModel):
         return self
 
     def to_json_bytes(self) -> bytes:
-        """Serialise for publishing onto NATS (uses the ``from`` alias)."""
+        """Serialise to JSON bytes (uses the ``from`` alias); also the size measure."""
         return self.model_dump_json(by_alias=True).encode("utf-8")
 
     @classmethod
     def from_json_bytes(cls, data: bytes) -> Message:
-        """Parse a message off the wire."""
+        """Parse a message from JSON bytes."""
         return cls.model_validate_json(data)

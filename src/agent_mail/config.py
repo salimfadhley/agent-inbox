@@ -1,18 +1,21 @@
 """Runtime configuration and addressing for agent-mail.
 
 Every setting has one canonical name, usable identically as a lowercase TOML key or
-as an environment variable (e.g. TOML ``nats_url`` == env ``NATS_URL``). Values are
+as an environment variable (e.g. TOML ``db`` == env ``AGENT_MAIL_DB``). Values are
 resolved from four layers, later ones winning:
 
     field defaults  <  baked defaults.toml  <  runtime --config file  <  environment
 
 Addresses are two-part — ``<project>/<agent>``. A bare ``<project>`` targets any one
 agent on that project; ``<project>/*`` broadcasts to every agent.
+
+Storage is a single local SQLite file (``db``) — no external services.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -31,20 +34,22 @@ from agent_mail.exceptions import ConfigError
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_NATS_URL = "nats://127.0.0.1:4222"
-STREAM_NAME = "AGENT_MAIL"
-MAIL_SUBJECT_PREFIX = "agent.mail"
-NOTIFY_SUBJECT_PREFIX = "agent.notify"
-
-# Reserved subject tokens for the two group-delivery modes. They start with "_", so
-# they can never be a valid agent id or project — no collision with real names.
-RESERVED_ALL = "__all__"  # broadcast: a copy to every agent on the project
-RESERVED_ANY = "__any__"  # anycast: exactly one agent on the project (a work queue)
+DEFAULT_MAX_MESSAGE_BYTES = 1_048_576  # 1 MiB
+DEFAULT_TTL_DAYS = 14
 
 _BAKED_DEFAULTS = Path(__file__).parent / "defaults.toml"
 _VALID_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
-_SECRET_FIELDS = frozenset({"nats_token", "nats_password"})
+# No secret settings today (SQLite needs no credentials); kept so redacted() stays
+# generic if secret-bearing settings are ever added.
+_SECRET_FIELDS: frozenset[str] = frozenset()
+
+
+def default_db_path() -> str:
+    """The default SQLite file: ``$XDG_DATA_HOME/agent-mail/agent-mail.db``."""
+    base = os.environ.get("XDG_DATA_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "share"
+    return str(root / "agent-mail" / "agent-mail.db")
 
 
 def _validate_token(value: str, kind: str) -> str:
@@ -57,12 +62,12 @@ def _validate_token(value: str, kind: str) -> str:
 
 
 def validate_agent_id(agent_id: str) -> str:
-    """Return ``agent_id`` if it is a safe NATS subject token, else raise."""
+    """Return ``agent_id`` if it is a safe address token, else raise."""
     return _validate_token(agent_id, "agent id")
 
 
 def validate_project(project: str) -> str:
-    """Return ``project`` if it is a safe NATS subject token, else raise."""
+    """Return ``project`` if it is a safe address token, else raise."""
     return _validate_token(project, "project")
 
 
@@ -71,59 +76,22 @@ def format_address(project: str, agent: str) -> str:
     return f"{validate_project(project)}/{validate_agent_id(agent)}"
 
 
-def direct_subject(project: str, agent: str) -> str:
-    """Subject for one specific agent's inbox."""
-    return (
-        f"{MAIL_SUBJECT_PREFIX}.{validate_project(project)}.{validate_agent_id(agent)}"
-    )
+def parse_target(to: str) -> tuple[str, str, str | None]:
+    """Resolve an address string to ``(kind, project, agent)``.
 
+    * ``project/agent`` -> ``("direct", project, agent)`` — one specific agent;
+    * ``project`` -> ``("any", project, None)`` — exactly one agent on the project;
+    * ``project/*`` -> ``("broadcast", project, None)`` — every agent on the project.
 
-def broadcast_subject(project: str) -> str:
-    """Subject every agent on ``project`` also listens to (fan-out)."""
-    return f"{MAIL_SUBJECT_PREFIX}.{validate_project(project)}.{RESERVED_ALL}"
-
-
-def any_subject(project: str) -> str:
-    """Shared queue subject for ``project`` (exactly one agent consumes)."""
-    return f"{MAIL_SUBJECT_PREFIX}.{validate_project(project)}.{RESERVED_ANY}"
-
-
-def own_durable(project: str, agent: str) -> str:
-    """Per-agent durable consumer name (direct + broadcast)."""
-    return f"mail-{validate_project(project)}-{validate_agent_id(agent)}"
-
-
-def any_durable(project: str) -> str:
-    """Shared per-project durable consumer name (anycast queue)."""
-    return f"mail-{validate_project(project)}-{RESERVED_ANY}"
-
-
-def parse_target(to: str) -> tuple[str, str]:
-    """Resolve an address string to ``(kind, subject)``.
-
-    ``project/agent`` -> direct; ``project`` -> any (one agent);
-    ``project/*`` -> broadcast (every agent).
+    Validates every token, raising :class:`ConfigError` on a malformed address.
     """
     to = to.strip()
     if "/" not in to:
-        return "any", any_subject(to)
+        return "any", validate_project(to), None
     project, name = to.split("/", 1)
     if name == "*":
-        return "broadcast", broadcast_subject(project)
-    return "direct", direct_subject(project, name)
-
-
-def notify_target_subject(to: str) -> str:
-    """Resolve an address string to its non-durable wake-signal subject."""
-    to = to.strip()
-    if "/" not in to:
-        return f"{NOTIFY_SUBJECT_PREFIX}.{validate_project(to)}.{RESERVED_ALL}"
-    project, name = to.split("/", 1)
-    if name == "*":
-        return f"{NOTIFY_SUBJECT_PREFIX}.{validate_project(project)}.{RESERVED_ALL}"
-    return (
-        f"{NOTIFY_SUBJECT_PREFIX}.{validate_project(project)}.{validate_agent_id(name)}"
-    )
+        return "broadcast", validate_project(project), None
+    return "direct", validate_project(project), validate_agent_id(name)
 
 
 def _alias(toml_key: str, env_name: str) -> AliasChoices:
@@ -132,7 +100,7 @@ def _alias(toml_key: str, env_name: str) -> AliasChoices:
 
 
 class Config(BaseSettings):
-    """Resolved connection, identity, server and hub settings.
+    """Resolved storage, identity, server and hub settings.
 
     Frozen: to vary a field build a copy with :meth:`~pydantic.BaseModel.model_copy`.
     """
@@ -141,24 +109,16 @@ class Config(BaseSettings):
     # must NOT match ubiquitous uppercase env vars (``PATH``, ``HOST``, ``USER``, …).
     model_config = SettingsConfigDict(frozen=True, extra="ignore", case_sensitive=True)
 
-    # -- NATS connection --------------------------------------------------
-    nats_url: str = Field(
-        DEFAULT_NATS_URL, validation_alias=_alias("nats_url", "NATS_URL")
+    # -- storage (single local SQLite file) -------------------------------
+    db: str = Field(
+        default_factory=default_db_path, validation_alias=_alias("db", "AGENT_MAIL_DB")
     )
-    nats_token: str | None = Field(
-        None, validation_alias=_alias("nats_token", "NATS_TOKEN")
+    ttl_days: int = Field(
+        DEFAULT_TTL_DAYS, validation_alias=_alias("ttl_days", "AGENT_MAIL_TTL_DAYS")
     )
-    nats_user: str | None = Field(
-        None, validation_alias=_alias("nats_user", "NATS_USER")
-    )
-    nats_password: str | None = Field(
-        None, validation_alias=_alias("nats_password", "NATS_PASSWORD")
-    )
-    nats_creds_file: str | None = Field(
-        None, validation_alias=_alias("nats_creds_file", "NATS_CREDS_FILE")
-    )
-    nats_ca_file: str | None = Field(
-        None, validation_alias=_alias("nats_ca_file", "NATS_CA_FILE")
+    max_message_bytes: int = Field(
+        DEFAULT_MAX_MESSAGE_BYTES,
+        validation_alias=_alias("max_message_bytes", "AGENT_MAIL_MAX_MESSAGE_BYTES"),
     )
 
     # -- identity (two-part: project + agent) -----------------------------
@@ -263,7 +223,7 @@ class Config(BaseSettings):
         return f"http://{host}:{self.port}"
 
     def redacted(self) -> dict[str, object]:
-        """Return the effective config with secrets masked, for banners/logs."""
+        """Return the effective config with any secrets masked, for banners/logs."""
         data = self.model_dump()
         for key in _SECRET_FIELDS:
             if data.get(key):
@@ -283,8 +243,8 @@ def hub_descriptor(
 ) -> dict[str, object]:
     """Return the hub's public, non-secret self-description for discovery.
 
-    ``max_message_bytes`` is the effective per-message size limit (queried from the
-    live NATS server); ``None`` if it could not be determined.
+    ``max_message_bytes`` is the effective per-message size limit; falls back to the
+    configured cap when not supplied.
     """
     base = config.base_url()
     connect = (
@@ -296,13 +256,18 @@ def hub_descriptor(
         "hub": config.hub,
         "description": config.hub_description,
         "version": _hub_version(),
+        "storage": "sqlite",
         "addressing": {
             "direct": "project/agent",
             "any": "project (bare) — one agent on the project",
             "broadcast": "project/* — every agent on the project",
         },
         "limits": {
-            "max_message_bytes": max_message_bytes,
+            "max_message_bytes": (
+                max_message_bytes
+                if max_message_bytes is not None
+                else config.max_message_bytes
+            ),
         },
         "connect_url_template": connect,
         "transport": config.transport,

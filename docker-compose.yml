@@ -1,10 +1,14 @@
 # Host the agent-mail MCP server with Docker Compose.
 #
-# NATS (with JetStream) is a prerequisite. By default this points at an existing
-# NATS server via NATS_URL. To spin up a throwaway NATS alongside for a quick trial,
-# run:  docker compose --profile with-nats up
+# No external services: storage is a single SQLite file on a Docker volume.
+# Agents configure a single URL:  http://<this-host>:8080/<project>/<agent>/mcp
 #
-# Agents then configure a single URL:  http://<this-host>:8080/<agent>/mcp
+#   docker compose up -d
+#
+# By default mail is kept in the named volume `agent-mail-data`. To inspect the
+# SQLite file from the host instead, replace the volume line with a bind mount:
+#     - ./agent-mail-data:/data
+# then open ./agent-mail-data/agent-mail.db with any sqlite tool.
 
 services:
   agent-mail:
@@ -15,18 +19,14 @@ services:
     ports:
       - "8080:8080"
     environment:
-      NATS_URL: ${NATS_URL:-nats://nats:4222}
       AGENT_MAIL_TRANSPORT: http
       AGENT_MAIL_HOST: 0.0.0.0
       AGENT_MAIL_PORT: "8080"
+      AGENT_MAIL_DB: /data/agent-mail.db
+      AGENT_MAIL_TTL_DAYS: ${AGENT_MAIL_TTL_DAYS:-14}
       AGENT_MAIL_LOG_LEVEL: ${AGENT_MAIL_LOG_LEVEL:-INFO}
+    volumes:
+      - agent-mail-data:/data
 
-  # Optional: a local NATS with JetStream, only started with `--profile with-nats`.
-  nats:
-    image: nats:latest
-    profiles: ["with-nats"]
-    command: ["-js", "-m", "8222"]
-    restart: unless-stopped
-    ports:
-      - "4222:4222"
-      - "8222:8222"
+volumes:
+  agent-mail-data:

@@ -38,7 +38,7 @@ async def _with_mailbox[T](
 
 
 async def _reachable(_mailbox: Mailbox) -> bool:
-    """No-op action; reaching it means connect + stream-ensure both succeeded."""
+    """No-op action; reaching it means the db opened and the schema is ready."""
     return True
 
 
@@ -294,25 +294,25 @@ def ping(ctx: click.Context) -> None:
 @cli.command()
 @click.pass_context
 def doctor(ctx: click.Context) -> None:
-    """Validate configuration and NATS connectivity; print effective config."""
+    """Validate configuration and storage; print effective config."""
     config: Config = ctx.obj["config"]
     as_json: bool = ctx.obj["as_json"]
 
-    nats_ok = True
-    nats_error: str | None = None
+    db_ok = True
+    db_error: str | None = None
     try:
         _run(_with_mailbox(config, _reachable))
     except Exception as exc:  # process boundary: report, don't crash
-        nats_ok = False
-        nats_error = str(exc)
+        db_ok = False
+        db_error = str(exc)
 
     if as_json:
         click.echo(
             json.dumps(
                 {
-                    "ok": nats_ok,
+                    "ok": db_ok,
                     "config": config.redacted(),
-                    "nats": {"reachable": nats_ok, "error": nats_error},
+                    "storage": {"backend": "sqlite", "ready": db_ok, "error": db_error},
                 },
                 indent=2,
                 sort_keys=True,
@@ -321,12 +321,12 @@ def doctor(ctx: click.Context) -> None:
         )
     else:
         click.echo(f"hub:       {config.hub}")
-        click.echo(f"nats_url:  {config.nats_url}")
+        click.echo(f"db:        {config.db}")
         click.echo(f"transport: {config.transport}")
         click.echo(f"agent_id:  {config.agent_id or '(unset — hosted / multi-agent)'}")
-        status = "✅ reachable" if nats_ok else f"❌ {nats_error or 'unreachable'}"
-        click.echo(f"nats:      {status}")
-    if not nats_ok:
+        status = "✅ ready" if db_ok else f"❌ {db_error or 'unavailable'}"
+        click.echo(f"storage:   {status}")
+    if not db_ok:
         raise SystemExit(1)
 
 

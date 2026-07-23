@@ -1,133 +1,120 @@
-"""The JetStream-backed mailbox — the single core all surfaces (CLI, MCP) share.
+"""The SQLite-backed mailbox — the single core all surfaces (CLI, MCP) share.
+
+Storage is one local SQLite file. No external services: ``pip install agent-mail``,
+run, done. For a hosted hub, point the file at a mounted volume.
 
 Addressing is two-part, ``<project>/<agent>``:
 
 * **direct** ``project/agent`` -> that specific agent's inbox;
-* **any** ``project`` (bare) -> exactly one agent on the project (a shared work queue);
-* **broadcast** ``project/*`` -> a copy to every agent on the project.
+* **any** ``project`` (bare) -> exactly one agent on the project (claimed on read, so
+  the first reader wins — a shared work queue);
+* **broadcast** ``project/*`` -> a copy for every agent on the project (each agent
+  consumes its own copy, tracked per-reader).
 
-Each agent keeps its **own** durable consumer (direct + broadcast, so broadcasts fan
-out because every agent's consumer is independent) plus membership in a **shared**
-per-project consumer for the anycast queue.
+A message is *unread* for an agent until that agent ``read``\\s it. Old messages are
+purged automatically after ``ttl_days`` (see :meth:`Mailbox._purge_expired`).
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import ssl
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import TracebackType
-from typing import Any
 
-import nats
-from nats.aio.client import Client as NatsClient
-from nats.aio.msg import Msg
-from nats.errors import MaxPayloadError, NoServersError
-from nats.errors import TimeoutError as NatsTimeoutError
-from nats.js import JetStreamContext
-from nats.js.api import AckPolicy, ConsumerConfig, StreamConfig
-from nats.js.errors import NotFoundError
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+import aiosqlite
 
-from agent_mail.config import (
-    STREAM_NAME,
-    Config,
-    any_durable,
-    any_subject,
-    broadcast_subject,
-    direct_subject,
-    format_address,
-    notify_target_subject,
-    own_durable,
-    parse_target,
-)
+from agent_mail.config import Config, format_address, parse_target
 from agent_mail.exceptions import MailboxError
 from agent_mail.models import Intent, Message
 
 logger = logging.getLogger(__name__)
 
-_STREAM_SUBJECTS = ["agent.mail.>"]
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS messages (
+    id          TEXT PRIMARY KEY,
+    from_addr   TEXT NOT NULL,
+    to_addr     TEXT NOT NULL,
+    kind        TEXT NOT NULL,          -- 'direct' | 'any' | 'broadcast'
+    to_project  TEXT NOT NULL,
+    to_agent    TEXT,                   -- direct only; NULL for any/broadcast
+    thread      TEXT,
+    intent      TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    created     TEXT NOT NULL,          -- ISO-8601 UTC
+    acked_at    TEXT                    -- direct/any: set when consumed; NULL = unread
+);
+CREATE INDEX IF NOT EXISTS idx_messages_route
+    ON messages (to_project, to_agent, kind, acked_at);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages (created);
 
-# How many messages a single fetch round asks for, and the overall ceiling when
-# draining a mailbox. Comfortably above any realistic local agent backlog.
-_FETCH_BATCH = 64
-_FETCH_MAX = 1024
-_FETCH_TIMEOUT = 1.0
+CREATE TABLE IF NOT EXISTS broadcast_reads (
+    message_id  TEXT NOT NULL,
+    reader      TEXT NOT NULL,          -- 'project/agent' that consumed the broadcast
+    acked_at    TEXT NOT NULL,
+    PRIMARY KEY (message_id, reader)
+);
+"""
 
 
-def _connect_options(config: Config) -> dict[str, Any]:
-    """Build nats.connect() kwargs for auth/TLS from config (all optional)."""
-    opts: dict[str, Any] = {}
-    if config.nats_creds_file:
-        opts["user_credentials"] = config.nats_creds_file
-    if config.nats_token:
-        opts["token"] = config.nats_token
-    if config.nats_user:
-        opts["user"] = config.nats_user
-    if config.nats_password:
-        opts["password"] = config.nats_password
-    if config.nats_ca_file:
-        opts["tls"] = ssl.create_default_context(cafile=config.nats_ca_file)
-    return opts
+def _now_iso() -> str:
+    return datetime.now(tz=UTC).isoformat()
 
 
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
-    retry=retry_if_exception_type((NoServersError, OSError)),
-    reraise=True,
-)
-async def _connect(nats_url: str, **options: Any) -> NatsClient:
-    """Open a NATS connection, retrying transient failures (server still booting)."""
-    return await nats.connect(nats_url, **options)
+def _row_to_message(row: aiosqlite.Row) -> Message:
+    return Message(
+        id=row["id"],
+        from_=row["from_addr"],
+        to=row["to_addr"],
+        thread=row["thread"],
+        intent=Intent(row["intent"]),
+        subject=row["subject"],
+        body=row["body"],
+        created=row["created"],
+    )
 
 
 class Mailbox:
-    """Durable inbox + wake signals over NATS JetStream.
+    """Durable inbox over a local SQLite file.
 
     Use as an async context manager::
 
         async with Mailbox(config) as mb:
             await mb.send(msg)
 
-    Connection and stream/consumer creation are idempotent.
+    Connecting opens the file, ensures the schema, and purges expired messages.
     """
 
     def __init__(self, config: Config) -> None:
         self._config = config
-        self._nc: NatsClient | None = None
-        self._js: JetStreamContext | None = None
+        self._db: aiosqlite.Connection | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
     async def connect(self) -> None:
-        """Open the NATS connection and ensure the mailbox stream exists."""
-        if self._nc is not None:
+        """Open the SQLite file, ensure the schema, and purge expired messages."""
+        if self._db is not None:
             return
-        logger.debug("connecting to NATS at %s", self._config.nats_url)
-        self._nc = await _connect(
-            self._config.nats_url, **_connect_options(self._config)
-        )
-        self._js = self._nc.jetstream()
-        await self._ensure_stream()
+        target = self._config.db
+        if target != ":memory:":
+            path = Path(target).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            target = str(path)
+        logger.debug("opening mailbox db at %s", target)
+        self._db = await aiosqlite.connect(target)
+        self._db.row_factory = aiosqlite.Row
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA busy_timeout=5000")
+        await self._db.executescript(_SCHEMA)
+        await self._db.commit()
+        await self._purge_expired()
 
     async def close(self) -> None:
-        """Close the NATS connection (graceful drain, hard-close fallback)."""
-        nc = self._nc
-        if nc is not None:
-            try:
-                await asyncio.wait_for(nc.drain(), timeout=2.0)
-            except Exception:
-                if not nc.is_closed:
-                    await nc.close()
-            self._nc = None
-            self._js = None
+        """Close the SQLite connection."""
+        if self._db is not None:
+            await self._db.close()
+            self._db = None
 
     async def __aenter__(self) -> Mailbox:
         await self.connect()
@@ -144,134 +131,138 @@ class Mailbox:
     # -- internals ---------------------------------------------------------
 
     @property
-    def _stream(self) -> JetStreamContext:
-        if self._js is None:
+    def _conn(self) -> aiosqlite.Connection:
+        if self._db is None:
             raise MailboxError("mailbox is not connected; call connect() first")
-        return self._js
+        return self._db
 
-    @property
-    def _conn(self) -> NatsClient:
-        if self._nc is None:
-            raise MailboxError("mailbox is not connected; call connect() first")
-        return self._nc
-
-    async def _ensure_stream(self) -> None:
-        """Create/widen the ``AGENT_MAIL`` stream to bind ``agent.mail.>``."""
-        js = self._stream
-        try:
-            info = await js.stream_info(STREAM_NAME)
-            if set(info.config.subjects or []) != set(_STREAM_SUBJECTS):
-                info.config.subjects = list(_STREAM_SUBJECTS)
-                await js.update_stream(info.config)
-        except NotFoundError:
-            logger.info("creating JetStream stream %s", STREAM_NAME)
-            await js.add_stream(
-                StreamConfig(name=STREAM_NAME, subjects=list(_STREAM_SUBJECTS))
-            )
-
-    async def _bind(
-        self, durable: str, filters: list[str]
-    ) -> JetStreamContext.PullSubscription:
-        """Ensure a durable pull consumer with these filter subjects, and bind to it."""
-        js = self._stream
-        await js.add_consumer(
-            STREAM_NAME,
-            ConsumerConfig(
-                durable_name=durable,
-                filter_subjects=filters,
-                ack_policy=AckPolicy.EXPLICIT,
-            ),
+    async def _purge_expired(self) -> None:
+        """Delete messages older than ``ttl_days`` (and orphaned broadcast reads)."""
+        ttl = self._config.ttl_days
+        if ttl <= 0:
+            return
+        cutoff = (datetime.now(tz=UTC) - timedelta(days=ttl)).isoformat()
+        cur = await self._conn.execute(
+            "DELETE FROM messages WHERE created < ?", (cutoff,)
         )
-        return await js.pull_subscribe_bind(durable=durable, stream=STREAM_NAME)
-
-    async def _inbox_subscriptions(
-        self, project: str, agent: str
-    ) -> list[JetStreamContext.PullSubscription]:
-        """The agent's own consumer (direct + broadcast) and the shared any-queue."""
-        own = await self._bind(
-            own_durable(project, agent),
-            [direct_subject(project, agent), broadcast_subject(project)],
+        deleted = cur.rowcount
+        await self._conn.execute(
+            "DELETE FROM broadcast_reads "
+            "WHERE message_id NOT IN (SELECT id FROM messages)"
         )
-        shared = await self._bind(any_durable(project), [any_subject(project)])
-        return [own, shared]
+        await self._conn.commit()
+        if deleted:
+            logger.info("purged %d message(s) older than %d day(s)", deleted, ttl)
 
-    @staticmethod
-    async def _drain_pending(
-        sub: JetStreamContext.PullSubscription,
-    ) -> list[Msg]:
-        """Fetch every currently-pending message without acking it."""
-        collected: list[Msg] = []
-        while len(collected) < _FETCH_MAX:
-            try:
-                batch = await sub.fetch(batch=_FETCH_BATCH, timeout=_FETCH_TIMEOUT)
-            except NatsTimeoutError:
-                break
-            if not batch:
-                break
-            collected.extend(batch)
-            if len(batch) < _FETCH_BATCH:
-                break
-        return collected
+    def _not_found(self, project: str, agent: str, message_id: str) -> MailboxError:
+        return MailboxError(
+            f"no unread message with id {message_id!r} in {project}/{agent}'s inbox"
+        )
 
     # -- verbs -------------------------------------------------------------
 
     async def max_message_size(self) -> int:
-        """Effective max bytes for one message (server payload cap, or a smaller
-        stream limit if set)."""
-        server_max = self._conn.max_payload
-        info = await self._stream.stream_info(STREAM_NAME)
-        stream_max = info.config.max_msg_size or 0
-        if stream_max > 0:
-            return min(server_max, stream_max)
-        return server_max
+        """The effective max bytes for one message (the configured cap)."""
+        return self._config.max_message_bytes
 
     async def send(self, message: Message) -> Message:
-        """Publish ``message`` to the subject resolved from its ``to`` address."""
-        _, subject = parse_target(message.to)
+        """Store ``message`` for the recipient(s) named by its ``to`` address."""
         payload = message.to_json_bytes()
-        try:
-            await self._stream.publish(subject, payload)
-        except MaxPayloadError as exc:
+        cap = self._config.max_message_bytes
+        if cap and len(payload) > cap:
             raise MailboxError(
                 f"message too large: {len(payload)} bytes exceeds the hub's max of "
-                f"{self._conn.max_payload} bytes (see hub_info -> limits)"
-            ) from exc
+                f"{cap} bytes (see hub_info -> limits)"
+            )
+        kind, project, agent = parse_target(message.to)
+        await self._conn.execute(
+            "INSERT INTO messages (id, from_addr, to_addr, kind, to_project, "
+            "to_agent, thread, intent, subject, body, created, acked_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (
+                message.id,
+                message.from_,
+                message.to,
+                kind,
+                project,
+                agent,
+                message.thread,
+                message.intent.value,
+                message.subject,
+                message.body,
+                message.created.isoformat(),
+            ),
+        )
+        await self._conn.commit()
         logger.debug("sent %s -> %s (%s)", message.from_, message.to, message.id)
         return message
 
     async def peek(self, project: str, agent: str) -> list[Message]:
         """Return unread messages for ``project/agent`` without consuming them."""
-        messages: list[Message] = []
-        for sub in await self._inbox_subscriptions(project, agent):
-            try:
-                for msg in await self._drain_pending(sub):
-                    messages.append(Message.from_json_bytes(msg.data))
-                    await msg.nak()
-            finally:
-                await sub.unsubscribe()
-        messages.sort(key=lambda m: m.created)
-        return messages
+        reader = format_address(project, agent)
+        cursor = await self._conn.execute(
+            "SELECT * FROM messages "
+            "WHERE acked_at IS NULL AND ("
+            "  (kind = 'direct' AND to_project = ? AND to_agent = ?)"
+            "  OR (kind = 'any' AND to_project = ?)"
+            "  OR (kind = 'broadcast' AND to_project = ? AND id NOT IN ("
+            "        SELECT message_id FROM broadcast_reads WHERE reader = ?))"
+            ") ORDER BY created ASC",
+            (project, agent, project, project, reader),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_message(row) for row in rows]
 
     async def read(self, project: str, agent: str, message_id: str) -> Message:
-        """Return the message with ``message_id`` and ack (consume) it."""
-        found: Message | None = None
-        for sub in await self._inbox_subscriptions(project, agent):
-            try:
-                for msg in await self._drain_pending(sub):
-                    parsed = Message.from_json_bytes(msg.data)
-                    if found is None and parsed.id == message_id:
-                        found = parsed
-                        await msg.ack()
-                    else:
-                        await msg.nak()
-            finally:
-                await sub.unsubscribe()
-        if found is None:
-            raise MailboxError(
-                f"no unread message with id {message_id!r} in {project}/{agent}'s inbox"
+        """Return the message with ``message_id`` and consume it for this agent.
+
+        For **direct**/**any** messages this claims the row atomically (first reader
+        wins — so an ``any`` message is delivered exactly once). For **broadcast** it
+        records that *this* agent has consumed its copy; other agents still see theirs.
+        """
+        cursor = await self._conn.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise self._not_found(project, agent, message_id)
+
+        kind = row["kind"]
+        if kind == "broadcast":
+            if row["to_project"] != project:
+                raise self._not_found(project, agent, message_id)
+            reader = format_address(project, agent)
+            seen = await (
+                await self._conn.execute(
+                    "SELECT 1 FROM broadcast_reads WHERE message_id = ? AND reader = ?",
+                    (message_id, reader),
+                )
+            ).fetchone()
+            if seen is not None:
+                raise self._not_found(project, agent, message_id)
+            await self._conn.execute(
+                "INSERT INTO broadcast_reads (message_id, reader, acked_at) "
+                "VALUES (?, ?, ?)",
+                (message_id, reader, _now_iso()),
             )
+            await self._conn.commit()
+        else:  # direct or any
+            if kind == "direct" and (
+                row["to_project"] != project or row["to_agent"] != agent
+            ):
+                raise self._not_found(project, agent, message_id)
+            if kind == "any" and row["to_project"] != project:
+                raise self._not_found(project, agent, message_id)
+            claim = await self._conn.execute(
+                "UPDATE messages SET acked_at = ? WHERE id = ? AND acked_at IS NULL",
+                (_now_iso(), message_id),
+            )
+            await self._conn.commit()
+            if claim.rowcount != 1:  # already consumed (e.g. another agent won the any)
+                raise self._not_found(project, agent, message_id)
+
         logger.debug("read %s from %s/%s", message_id, project, agent)
-        return found
+        return _row_to_message(row)
 
     async def reply(
         self,
@@ -294,11 +285,14 @@ class Mailbox:
         return await self.send(reply)
 
     async def notify(self, to: str, thread: str | None = None) -> None:
-        """Publish a lightweight, non-durable 'you have mail' wake for ``to``."""
-        payload = json.dumps({} if thread is None else {"thread": thread}).encode()
-        await self._conn.publish(notify_target_subject(to), payload)
-        await self._conn.flush()
-        logger.debug("notified %s", to)
+        """Best-effort 'you have mail' wake.
+
+        With the SQLite backend there is no cross-process push, so this is a no-op
+        beyond validating the address: agents discover mail by checking their inbox
+        each turn. Kept for API symmetry (and future backends that can push).
+        """
+        parse_target(to)  # validate the address; raise on a malformed one
+        logger.debug("notify %s (no-op with the sqlite backend)", to)
 
     async def ping(self, project: str, agent: str) -> Message:
         """Round-trip a probe to ``project/agent`` itself and consume it."""

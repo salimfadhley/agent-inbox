@@ -182,10 +182,10 @@ def test_notify() -> None:
     assert FakeMailbox.calls[-1] == ("notify", ("peer/bob", None))
 
 
-def test_doctor_reports_reachable() -> None:
+def test_doctor_reports_ready() -> None:
     result = run("doctor")
     assert result.exit_code == 0, result.output
-    assert "reachable" in result.output
+    assert "ready" in result.output
 
 
 def test_hub_info_shows_hub_name_and_limit() -> None:

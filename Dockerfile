@@ -5,10 +5,11 @@
 # Runs the multi-tenant HTTP MCP server. Agents connect on their own address,
 # http://<host>:<port>/<agent>/mcp — that URL is their whole configuration.
 #
-# NATS with JetStream is a prerequisite: point NATS_URL at your existing server.
+# Storage is a single SQLite file at /data/agent-mail.db — mount a volume at /data
+# so mail survives restarts. No external services required.
 #
 # Build:  docker build -t agent-mail .
-# Run:    docker run -p 8080:8080 -e NATS_URL=nats://host.docker.internal:4222 agent-mail
+# Run:    docker run -p 8080:8080 -v agent-mail-data:/data agent-mail
 
 FROM python:3.12-slim AS build
 
@@ -40,7 +41,12 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     AGENT_MAIL_TRANSPORT=http \
     AGENT_MAIL_HOST=0.0.0.0 \
     AGENT_MAIL_PORT=8080 \
-    NATS_URL=nats://127.0.0.1:4222
+    AGENT_MAIL_DB=/data/agent-mail.db
+
+# Persist the SQLite file on a volume (named volume by default; bind-mount to
+# inspect it from the host — see docker-compose.yml).
+RUN mkdir -p /data && chown agentmail:agentmail /data
+VOLUME ["/data"]
 
 USER agentmail
 EXPOSE 8080
