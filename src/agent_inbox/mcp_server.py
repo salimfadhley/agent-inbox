@@ -427,6 +427,11 @@ class AgentIdentityMiddleware:
             await self._json(send, self._hub_json)
             return
         if self._config is not None and (path == "/prompts" or path == "/prompts/"):
+            # A human wants the console page (readable, copyable); a machine wants
+            # the plain markdown index it can parse.
+            if self._web is not None and self._wants_html(scope):
+                await self._redirect(send, "/ui/prompts")
+                return
             await self._text(send, render_index(self._config))
             return
         if (

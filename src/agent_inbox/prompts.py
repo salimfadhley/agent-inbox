@@ -16,6 +16,10 @@ from agent_inbox.config import Config, hub_version
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
+# Retired prompt names kept resolving. A renamed URL that 404s silently orphans every
+# reference to it — including the ones already written into agents' CLAUDE.md files.
+_ALIASES = {"onboarding": "agent"}
+
 
 def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     """Return ``(metadata, body)`` for a ``---``-delimited frontmatter block."""
@@ -48,6 +52,7 @@ def prompt_context(config: Config) -> dict[str, str]:
 
 def _template_path(name: str) -> Path | None:
     """Resolve a prompt name to its file, rejecting anything path-y (no traversal)."""
+    name = _ALIASES.get(name, name)
     if not name or "/" in name or "\\" in name or name.startswith("."):
         return None
     path = _PROMPTS_DIR / f"{name}.md"

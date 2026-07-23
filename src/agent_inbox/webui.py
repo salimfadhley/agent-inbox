@@ -197,6 +197,8 @@ class WebConsole:
             await self._do_read(scope, receive, send)
         elif parts == ["inbox", "reply"] and method == "POST":
             await self._do_reply(scope, receive, send)
+        elif parts == ["prompts"]:
+            await self._prompts(send)
         elif parts == ["flow"]:
             await self._flow(scope, send)
         elif parts == ["flow", "edge"]:
@@ -305,6 +307,23 @@ class WebConsole:
             to=to,
             since_label=label,
             messages=messages,
+        )
+
+    async def _prompts(self, send: Send) -> None:
+        """The prompt catalog, for humans: read it, and copy it out in one click."""
+        from agent_inbox.prompts import list_prompts, render_prompt
+
+        entries = []
+        for meta in list_prompts():
+            body = render_prompt(meta["name"], self._config)
+            if body is None:  # pragma: no cover - listed implies renderable
+                continue
+            entries.append({**meta, "body": body})
+        await self._render(
+            send,
+            "prompts.html",
+            entries=entries,
+            base_url=self._config.base_url(),
         )
 
     async def _static(self, send: Send, name: str) -> None:
@@ -474,7 +493,7 @@ _NAV = [
     ("/ui/flow", "Flow"),
     ("/ui/inbox", "My inbox"),
     ("/ui/compose", "Compose"),
-    ("/prompts", "Prompts"),
+    ("/ui/prompts", "Prompts"),
     ("/ui/status", "Status"),
 ]
 

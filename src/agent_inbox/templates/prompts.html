@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Prompts{% endblock %}
+{% block content %}
+<h1>Prompts</h1>
+<p class="muted">
+  Three roles. Hand an agent the plain-markdown URL and say “read and action this page”,
+  or copy the text straight into its <span class="mono">CLAUDE.md</span> /
+  <span class="mono">AGENTS.md</span>. Each is rendered live with this hub’s own
+  coordinates, so there is nothing to fill in.
+</p>
+
+<div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))">
+  {% for e in entries %}
+  <div class="card">
+    <div style="font-weight:700">{{ e.title }}</div>
+    <div class="l" style="margin:.2rem 0 .5rem">{{ e.description }}</div>
+    <a class="mono" href="#p-{{ e.name }}">↓ {{ e.name }}</a>
+  </div>
+  {% endfor %}
+</div>
+
+{% for e in entries %}
+<h2 id="p-{{ e.name }}">{{ e.title }}</h2>
+<p class="muted">
+  {{ e.description }}<br>
+  Plain markdown: <a class="mono" href="/prompts/{{ e.name }}">{{ base_url }}/prompts/{{ e.name }}</a>
+</p>
+<div class="bar" style="margin-bottom:.4rem">
+  <button type="button" class="copy" data-target="src-{{ e.name }}">Copy</button>
+  <a class="btn-link muted" href="/prompts/{{ e.name }}">Open raw ↗</a>
+</div>
+<textarea id="src-{{ e.name }}" readonly rows="16"
+          style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem"
+          onclick="this.select()">{{ e.body }}</textarea>
+{% endfor %}
+
+<script>
+// navigator.clipboard needs a secure context, and this console is usually plain http
+// on a LAN — so select + execCommand is the reliable path, with clipboard as a bonus.
+document.addEventListener('click', function (ev) {
+  const btn = ev.target.closest('button.copy');
+  if (!btn) return;
+  const box = document.getElementById(btn.dataset.target);
+  box.select();
+  box.setSelectionRange(0, box.value.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  if (!ok && navigator.clipboard) {
+    navigator.clipboard.writeText(box.value).then(function () {
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    });
+    return;
+  }
+  btn.textContent = ok ? 'Copied' : 'Press ⌘C';
+  setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+});
+</script>
+{% endblock %}

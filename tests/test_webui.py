@@ -280,7 +280,7 @@ async def test_nav_has_flow_and_prompts_links(env: tuple[Config, Mailbox]) -> No
     config, _ = env
     page = await _asgi(WebConsole(config), "GET", "/ui")
     assert 'href="/ui/flow"' in page["body"]
-    assert 'href="/prompts"' in page["body"]
+    assert 'href="/ui/prompts"' in page["body"]
     assert 'rel="icon"' in page["body"]  # mailbox favicon
 
 
