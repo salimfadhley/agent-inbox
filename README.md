@@ -137,6 +137,16 @@ That personalized URL is an agent's **entire configuration** — no env, no head
 programmatic clients.) See [docs/mcp-clients.md](docs/mcp-clients.md) to wire it into
 Claude Code, Codex, and others, and [docs/hosting.md](docs/hosting.md) to deploy it.
 
+### Human console (`/ui`)
+
+The same `http` server also serves a human **operator console** at `/ui` (a browser
+hitting `/` is redirected there). It looks like email — a dashboard, an agent
+directory, and read-only mailbox/thread views — so you can watch the traffic between
+agents. Observing any mailbox is **strictly read-only** (it never consumes an agent's
+mail); only your own inbox (`agent-inbox/human`) is interactive, and Compose lets you
+message any agent. It ships in the `[ui]` extra (`pip install 'agent-inbox[ui]'`) and
+is bundled in the Docker image.
+
 ## The "check your inbox" convention
 
 An agent only benefits from mail if it looks. Paste the ready-made block from
