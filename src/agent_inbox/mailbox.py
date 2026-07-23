@@ -31,6 +31,11 @@ from agent_inbox.models import AgentInfo, AgentProfile, Intent, Message
 
 logger = logging.getLogger(__name__)
 
+# Bumped whenever the on-disk shape changes; stamped into SQLite's `user_version`
+# so an opening server knows exactly which upgrades it still owes. v1 = the
+# original two-part store; v2 = three-part addressing (a `role` position).
+SCHEMA_VERSION = 2
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
     id          TEXT PRIMARY KEY,
@@ -207,58 +212,105 @@ class Mailbox:
         )
         return await cursor.fetchone() is not None
 
+    async def _schema_version(self) -> int:
+        """The store's schema version, from SQLite's built-in ``user_version``."""
+        cursor = await self._conn.execute("PRAGMA user_version")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
     async def _migrate(self) -> None:
-        """Upgrade a pre-three-part store in place. Never destructive.
+        """Bring the store up to :data:`SCHEMA_VERSION`, in place and non-destructively.
 
-        Losing the store once already cost us: agents silently re-derived addresses
-        against an empty directory and one project split across two names. So this
-        adds columns and rewrites values, and never drops a message.
+        The version is stamped in SQLite's own ``user_version`` header, so the server
+        knows on open exactly which upgrades to run — no sniffing of columns, and no
+        re-running work that is already done.
+
+        Nothing here drops a message. Losing the store once already cost us: agents
+        re-derived their addresses against an emptied directory and one project ended
+        up split across two names that could no longer reach each other.
         """
-        if await self._table_exists("messages"):
-            cols = await self._columns("messages")
-            if "to_role" not in cols:
-                logger.info("migrating messages to three-part addressing")
-                await self._conn.execute("ALTER TABLE messages ADD COLUMN to_role TEXT")
-                # Old kinds collapse onto the two delivery modes.
-                await self._conn.execute(
-                    "UPDATE messages SET kind = 'fanout' "
-                    "WHERE kind IN ('broadcast', 'public')"
-                )
-                await self._conn.execute(
-                    "UPDATE messages SET kind = 'claim' "
-                    "WHERE kind IN ('direct', 'any', 'global_any')"
-                )
-                # '' meant "no project scope"; NULL is now the wildcard.
-                await self._conn.execute(
-                    "UPDATE messages SET to_project = NULL WHERE to_project = ''"
-                )
-                await self._conn.commit()
+        fresh = not await self._table_exists("messages")
+        if fresh:
+            # Brand-new file: _SCHEMA is about to create the current shape.
+            await self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            await self._conn.commit()
+            return
 
-        if await self._table_exists("agents"):
-            cols = await self._columns("agents")
-            if "role" not in cols:
-                logger.info("migrating agents table to include role")
-                # SQLite can't alter a primary key, so rebuild and copy every row.
-                await self._conn.executescript(
-                    """
-                    CREATE TABLE agents_v2 (
-                        project     TEXT NOT NULL,
-                        agent       TEXT NOT NULL,
-                        role        TEXT NOT NULL DEFAULT '',
-                        first_seen  TEXT NOT NULL,
-                        last_seen   TEXT NOT NULL,
-                        profile     TEXT NOT NULL DEFAULT '{}',
-                        PRIMARY KEY (project, agent, role)
-                    );
-                    INSERT INTO agents_v2 (project, agent, role, first_seen,
-                                           last_seen, profile)
-                        SELECT project, agent, '', first_seen, last_seen, profile
-                        FROM agents;
-                    DROP TABLE agents;
-                    ALTER TABLE agents_v2 RENAME TO agents;
-                    """
-                )
-                await self._conn.commit()
+        version = await self._schema_version()
+        if version == 0:
+            version = 1  # a store predating versioning is, by definition, v1
+        if version > SCHEMA_VERSION:
+            raise MailboxError(
+                f"database schema is v{version} but this agent-inbox only understands "
+                f"v{SCHEMA_VERSION} — it was written by a newer version. Upgrade "
+                "agent-inbox rather than letting an old build write to it."
+            )
+        if version < 2:
+            await self._migrate_v1_to_v2()
+            version = 2
+
+        await self._conn.execute(f"PRAGMA user_version = {version}")
+        await self._conn.commit()
+
+    async def _migrate_v1_to_v2(self) -> None:
+        """v1 -> v2: three-part addressing (a ``role`` position) .
+
+        Each step re-checks the shape it is about to change, so a store that was
+        half-upgraded by an older build (before versioning existed) still converges.
+        """
+        logger.info("migrating store v1 -> v2 (three-part addressing)")
+
+        if "to_role" not in await self._columns("messages"):
+            # The table must be REBUILT, not merely widened. The v1 table declared
+            # `to_project NOT NULL` (and `subject NOT NULL`), and ALTER TABLE cannot
+            # relax a constraint — so a merely-widened table would reject every
+            # wildcard address and every subject-less message from then on. Copy the
+            # rows into the current shape instead, translating as we go.
+            await self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS messages_v2 ("
+                " id TEXT PRIMARY KEY, from_addr TEXT NOT NULL, to_addr TEXT NOT NULL,"
+                " kind TEXT NOT NULL, to_project TEXT, to_agent TEXT, to_role TEXT,"
+                " thread TEXT, intent TEXT NOT NULL, subject TEXT, body TEXT NOT NULL,"
+                " created TEXT NOT NULL, acked_at TEXT)"
+            )
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO messages_v2 "
+                "(id, from_addr, to_addr, kind, to_project, to_agent, to_role,"
+                " thread, intent, subject, body, created, acked_at) "
+                "SELECT id, from_addr, to_addr,"
+                # the five old kinds collapse onto two delivery modes
+                "  CASE WHEN kind IN ('broadcast','public') THEN 'fanout'"
+                "       ELSE 'claim' END,"
+                # '' meant "no project scope"; NULL is now the wildcard
+                "  NULLIF(to_project, ''), to_agent, NULL,"
+                "  thread, intent, subject, body, created, acked_at "
+                "FROM messages"
+            )
+            await self._conn.execute("DROP TABLE messages")
+            await self._conn.execute("ALTER TABLE messages_v2 RENAME TO messages")
+            await self._conn.commit()
+
+        if await self._table_exists("agents") and "role" not in await self._columns(
+            "agents"
+        ):
+            # SQLite cannot alter a primary key, so rebuild and copy every row.
+            # Discrete statements (not executescript, which forces its own COMMIT
+            # mid-transaction and can deadlock against the open connection).
+            await self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS agents_v2 ("
+                " project TEXT NOT NULL, agent TEXT NOT NULL,"
+                " role TEXT NOT NULL DEFAULT '', first_seen TEXT NOT NULL,"
+                " last_seen TEXT NOT NULL, profile TEXT NOT NULL DEFAULT '{}',"
+                " PRIMARY KEY (project, agent, role))"
+            )
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO agents_v2 "
+                "(project, agent, role, first_seen, last_seen, profile) "
+                "SELECT project, agent, '', first_seen, last_seen, profile FROM agents"
+            )
+            await self._conn.execute("DROP TABLE agents")
+            await self._conn.execute("ALTER TABLE agents_v2 RENAME TO agents")
+            await self._conn.commit()
 
     async def close(self) -> None:
         """Close the SQLite connection."""

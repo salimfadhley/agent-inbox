@@ -364,3 +364,96 @@ async def test_stale_entries_hidden_and_supersede_protects_the_living(
         f"{project}/live"
     ]
     assert await mailbox.whois(project, "live") is None
+
+
+# -- migration from the pre-three-part schema ---------------------------------
+
+
+async def test_migration_preserves_a_pre_three_part_store(tmp_path: Path) -> None:
+    """Opening an old store must upgrade it in place without losing anything.
+
+    Losing the store once already cost us: agents re-derived addresses against an
+    empty directory and one project ended up split across two names. So this builds
+    a genuine v0.5-era database and asserts every row survives and still routes.
+    """
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE messages (
+            id TEXT PRIMARY KEY, from_addr TEXT NOT NULL, to_addr TEXT NOT NULL,
+            kind TEXT NOT NULL, to_project TEXT NOT NULL, to_agent TEXT,
+            thread TEXT, intent TEXT NOT NULL, subject TEXT, body TEXT NOT NULL,
+            created TEXT NOT NULL, acked_at TEXT
+        );
+        CREATE TABLE broadcast_reads (
+            message_id TEXT NOT NULL, reader TEXT NOT NULL, acked_at TEXT NOT NULL,
+            PRIMARY KEY (message_id, reader)
+        );
+        CREATE TABLE agents (
+            project TEXT NOT NULL, agent TEXT NOT NULL, first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL, profile TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (project, agent)
+        );
+        """
+    )
+    now = datetime.now(tz=UTC).isoformat()
+    con.executemany(
+        "INSERT INTO messages (id, from_addr, to_addr, kind, to_project, to_agent, "
+        "thread, intent, subject, body, created, acked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            # a direct message still waiting to be read
+            ("m1", "p/alice", "p/bob", "direct", "p", "bob", "m1", "message",
+             "hello", "body one", now, None),
+            # a project broadcast
+            ("m2", "p/alice", "p/all", "broadcast", "p", None, "m2", "message",
+             "shout", "body two", now, None),
+            # a public broadcast — stored with '' for "no project scope"
+            ("m3", "q/carol", "all/all", "public", "", None, "m3", "message",
+             "townhall", "body three", now, None),
+        ],
+    )
+    con.execute(
+        "INSERT INTO agents (project, agent, first_seen, last_seen, profile) "
+        "VALUES (?,?,?,?,?)",
+        ("p", "bob", now, now, '{"offers": ["deploys"]}'),
+    )
+    con.commit()
+    con.close()
+
+    config = Config().model_copy(update={"db": str(db)})
+    async with Mailbox(config) as mb:
+        # nothing was dropped
+        assert await mb._scalar("SELECT COUNT(*) FROM messages") == 3
+
+        # the directory entry survived, profile intact, now carrying an empty role
+        bob = await mb.whois("p", "bob")
+        assert bob is not None
+        assert bob.profile.offers == ["deploys"]
+        assert bob.role is None
+
+        # and everything still routes: bob sees his direct message, the project
+        # broadcast, and the public one
+        subjects = {m.subject for m in await mb.peek("p", "bob")}
+        assert subjects == {"hello", "shout", "townhall"}
+
+        # an agent on another project sees only the public broadcast
+        assert {m.subject for m in await mb.peek("q", "dave")} == {"townhall"}
+
+        # reading still consumes exactly once
+        first = next(m for m in await mb.peek("p", "bob") if m.subject == "hello")
+        await mb.read("p", "bob", first.id)
+        assert "hello" not in {m.subject for m in await mb.peek("p", "bob")}
+
+
+async def test_migration_is_idempotent(tmp_path: Path) -> None:
+    """Re-opening an already-migrated store must not re-run or corrupt anything."""
+    config = Config().model_copy(update={"db": str(tmp_path / "twice.db")})
+    async with Mailbox(config) as mb:
+        await mb.send(Message(from_="p/a", to="p/b", subject="s", body="b"))
+        stamp = await mb.storage_initialized_at()
+    async with Mailbox(config) as mb:
+        assert await mb._scalar("SELECT COUNT(*) FROM messages") == 1
+        assert await mb.storage_initialized_at() == stamp
