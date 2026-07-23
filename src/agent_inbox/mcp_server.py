@@ -1,11 +1,11 @@
 """FastMCP wrapper exposing the mailbox verbs as MCP tools.
 
-Every tool delegates to :class:`agent_mail.mailbox.Mailbox` — the same core the CLI
+Every tool delegates to :class:`agent_inbox.mailbox.Mailbox` — the same core the CLI
 uses — so there is no logic duplication.
 
 Two ways to run it:
 
-* **stdio** (local, single agent): identity comes from ``AGENT_MAIL_PROJECT`` +
+* **stdio** (local, single agent): identity comes from ``AGENT_INBOX_PROJECT`` +
   ``AGENT_ID``. This is how a Claude/Codex client spawns the server as a subprocess.
 * **http** (hosted, multi-agent): one server serves many agents. Each agent connects
   on its own address — ``http://<host>:<port>/<project>/<agent>/mcp`` — and the path
@@ -28,33 +28,33 @@ from urllib.parse import parse_qs
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from agent_mail.config import (
+from agent_inbox.config import (
     Config,
     format_address,
     hub_descriptor,
     hub_version,
     parse_target,
 )
-from agent_mail.identity import (
+from agent_inbox.identity import (
     reset_current_agent,
     resolve_identity,
     set_current_agent,
 )
-from agent_mail.mailbox import Mailbox
-from agent_mail.models import AgentProfile, Intent, Message
-from agent_mail.prompts import render_index, render_prompt
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.models import AgentProfile, Intent, Message
+from agent_inbox.prompts import render_index, render_prompt
 
 logger = logging.getLogger(__name__)
 
-# agent-mail is trusted-network software with no built-in auth (front it with a
+# agent-inbox is trusted-network software with no built-in auth (front it with a
 # reverse proxy on untrusted networks). MCP's DNS-rebinding protection only allows
 # localhost Host headers by default, which makes a hosted server unreachable by
 # remote agents — so we disable it and serve any Host.
-# The server name clients see. Defaults to "agent-mail" and is overridable via
+# The server name clients see. Defaults to "agent-inbox" and is overridable via
 # MCP_SERVER_NAME — so renaming the project need not force every agent to
 # re-register and reconnect.
 mcp = FastMCP(
-    os.environ.get("MCP_SERVER_NAME", "agent-mail"),
+    os.environ.get("MCP_SERVER_NAME", "agent-inbox"),
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=False,
     ),
@@ -176,7 +176,7 @@ async def notify_agent(to: str, thread: str | None = None) -> dict[str, Any]:
 
 @mcp.tool()
 async def ping() -> dict[str, Any]:
-    """Round-trip a message to yourself to confirm agent-mail is operational.
+    """Round-trip a message to yourself to confirm agent-inbox is operational.
 
     Good to call once on sign-on: it verifies connectivity, your identity, and that
     send + inbox + read all work. Consumes only its own probe.
@@ -195,7 +195,7 @@ async def ping() -> dict[str, Any]:
 
 @mcp.tool()
 async def hub_info() -> dict[str, Any]:
-    """Describe this agent-mail hub: name, version, addressing, limits, and contacts.
+    """Describe this agent-inbox hub: name, version, addressing, limits, and contacts.
 
     Non-secret. Call on sign-on to learn which hub you reached, the max message size
     (`limits.max_message_bytes`), and who administers it.

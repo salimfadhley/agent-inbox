@@ -1,8 +1,9 @@
-"""Runtime configuration and addressing for agent-mail.
+"""Runtime configuration and addressing for agent-inbox.
 
 Every setting has one canonical name, usable identically as a lowercase TOML key or
-as an environment variable (e.g. TOML ``db`` == env ``AGENT_MAIL_DB``). Values are
-resolved from four layers, later ones winning:
+as an environment variable (e.g. TOML ``db`` == env ``AGENT_INBOX_DB``). The legacy
+``AGENT_MAIL_*`` names are still accepted as deprecated aliases. Values are resolved
+from four layers, later ones winning:
 
     field defaults  <  baked defaults.toml  <  runtime --config file  <  environment
 
@@ -29,8 +30,8 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-from agent_mail.config_env import RUNTIME_CONFIG_ENV, runtime_config_path
-from agent_mail.exceptions import ConfigError
+from agent_inbox.config_env import RUNTIME_CONFIG_ENV, runtime_config_path
+from agent_inbox.exceptions import ConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,10 @@ _SECRET_FIELDS: frozenset[str] = frozenset()
 
 
 def default_db_path() -> str:
-    """The default SQLite file: ``$XDG_DATA_HOME/agent-mail/agent-mail.db``."""
+    """The default SQLite file: ``$XDG_DATA_HOME/agent-inbox/agent-inbox.db``."""
     base = os.environ.get("XDG_DATA_HOME")
     root = Path(base) if base else Path.home() / ".local" / "share"
-    return str(root / "agent-mail" / "agent-mail.db")
+    return str(root / "agent-inbox" / "agent-inbox.db")
 
 
 def _validate_token(value: str, kind: str) -> str:
@@ -131,7 +132,14 @@ def parse_target(to: str) -> tuple[str, str | None, str | None]:
 
 
 def _alias(toml_key: str, env_name: str) -> AliasChoices:
-    """Accept a setting under its lowercase TOML key or its uppercase env name."""
+    """Accept a setting under its TOML key or env name.
+
+    For brand-prefixed vars, ``AGENT_INBOX_<X>`` is canonical and the legacy
+    ``AGENT_MAIL_<X>`` is kept as a deprecated back-compat alias (canonical wins).
+    """
+    if env_name.startswith("AGENT_MAIL_"):
+        canonical = "AGENT_INBOX_" + env_name.removeprefix("AGENT_MAIL_")
+        return AliasChoices(toml_key, canonical, env_name)
     return AliasChoices(toml_key, env_name)
 
 
@@ -189,7 +197,7 @@ class Config(BaseSettings):
     # The name of this mailbox collection (a "hub"). Set a distinct name per collection
     # if you run more than one on the same storage.
     hub_name: str = Field(
-        default="agent-mail",
+        default="agent-inbox",
         validation_alias=_alias("hub_name", "AGENT_MAIL_HUB_NAME"),
     )
     hub_description: str | None = Field(

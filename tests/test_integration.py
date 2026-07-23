@@ -13,10 +13,10 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from agent_mail.config import Config
-from agent_mail.exceptions import ConfigError, MailboxError
-from agent_mail.mailbox import Mailbox
-from agent_mail.models import AgentProfile, Intent, Message
+from agent_inbox.config import Config
+from agent_inbox.exceptions import ConfigError, MailboxError
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.models import AgentProfile, Intent, Message
 
 
 @pytest_asyncio.fixture
@@ -144,7 +144,7 @@ async def test_global_any_delivers_to_one_agent_anywhere(mailbox: Mailbox) -> No
 async def test_ping_roundtrip(mailbox: Mailbox) -> None:
     project = _project()
     received = await mailbox.ping(project, "alice")
-    assert received.subject == "agent-mail ping"
+    assert received.subject == "agent-inbox ping"
     assert await mailbox.peek(project, "alice") == []
 
 

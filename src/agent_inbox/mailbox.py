@@ -1,6 +1,6 @@
 """The SQLite-backed mailbox — the single core all surfaces (CLI, MCP) share.
 
-Storage is one local SQLite file. No external services: ``pip install agent-mail``,
+Storage is one local SQLite file. No external services: ``pip install agent-inbox``,
 run, done. For a hosted hub, point the file at a mounted volume.
 
 Addressing is two-part, ``<project>/<agent>``:
@@ -24,9 +24,9 @@ from types import TracebackType
 
 import aiosqlite
 
-from agent_mail.config import Config, format_address, parse_target
-from agent_mail.exceptions import MailboxError
-from agent_mail.models import AgentInfo, AgentProfile, Intent, Message
+from agent_inbox.config import Config, format_address, parse_target
+from agent_inbox.exceptions import MailboxError
+from agent_inbox.models import AgentInfo, AgentProfile, Intent, Message
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +314,7 @@ class Mailbox:
     async def ping(self, project: str, agent: str) -> Message:
         """Round-trip a probe to ``project/agent`` itself and consume it."""
         me = format_address(project, agent)
-        probe = Message(from_=me, to=me, subject="agent-mail ping", body="ping")
+        probe = Message(from_=me, to=me, subject="agent-inbox ping", body="ping")
         await self.send(probe)
         received = await self.read(project, agent, probe.id)
         logger.debug("ping round-trip ok for %s (%s)", me, probe.id)

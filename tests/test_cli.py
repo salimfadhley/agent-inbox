@@ -8,8 +8,8 @@ from types import TracebackType
 import pytest
 from click.testing import CliRunner
 
-from agent_mail import cli as cli_module
-from agent_mail.models import Intent, Message
+from agent_inbox import cli as cli_module
+from agent_inbox.models import Intent, Message
 
 
 class FakeMailbox:
@@ -69,7 +69,7 @@ class FakeMailbox:
     async def ping(self, project: str, agent: str) -> Message:
         FakeMailbox.calls.append(("ping", (project, agent)))
         me = f"{project}/{agent}"
-        return Message(from_=me, to=me, subject="agent-mail ping", body="ping")
+        return Message(from_=me, to=me, subject="agent-inbox ping", body="ping")
 
     async def max_message_size(self) -> int:
         FakeMailbox.calls.append(("max_message_size", ()))
@@ -82,7 +82,7 @@ def patch_mailbox(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeMailbox.peek_result = []
     FakeMailbox.read_result = None
     monkeypatch.setattr(cli_module, "Mailbox", FakeMailbox)
-    monkeypatch.setenv("AGENT_MAIL_PROJECT", "proj")
+    monkeypatch.setenv("AGENT_INBOX_PROJECT", "proj")
     monkeypatch.setenv("AGENT_ID", "tester")
 
 
@@ -133,7 +133,7 @@ def test_send_requires_agent(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_send_requires_project(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AGENT_MAIL_PROJECT", raising=False)
+    monkeypatch.delenv("AGENT_INBOX_PROJECT", raising=False)
     result = run("send", "--to", "p", "--subject", "s", "--body", "b")
     assert result.exit_code == 1
     assert "project" in result.output
@@ -191,7 +191,7 @@ def test_doctor_reports_ready() -> None:
 def test_hub_info_shows_hub_name_and_limit() -> None:
     result = run("hub-info")
     assert result.exit_code == 0, result.output
-    assert "agent-mail" in result.output
+    assert "agent-inbox" in result.output
     assert "1048576" in result.output  # max_message_bytes from the fake mailbox
 
 

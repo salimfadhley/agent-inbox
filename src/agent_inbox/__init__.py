@@ -1,13 +1,18 @@
-"""agent-mail — a local SQLite mailbox for local LLM agents."""
+"""agent-inbox — a local SQLite mailbox for local LLM agents."""
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from agent_mail.config import Config
-from agent_mail.exceptions import AgentMailError, ConfigError, MailboxError
-from agent_mail.mailbox import Mailbox
-from agent_mail.models import Intent, Message
+from agent_inbox.config import Config
+from agent_inbox.exceptions import (
+    AgentInboxError,
+    AgentMailError,  # deprecated alias
+    ConfigError,
+    MailboxError,
+)
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.models import Intent, Message
 
 try:
     __version__ = version("agent-inbox")
@@ -16,13 +21,14 @@ except PackageNotFoundError:  # pragma: no cover - source checkout without metad
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Console entry point (kept importable as ``agent_mail.main``)."""
-    from agent_mail.cli import main as _main
+    """Console entry point (kept importable as ``agent_inbox.main``)."""
+    from agent_inbox.cli import main as _main
 
     _main(argv)
 
 
 __all__ = [
+    "AgentInboxError",
     "AgentMailError",
     "Config",
     "ConfigError",

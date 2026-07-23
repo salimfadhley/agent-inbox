@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from agent_mail.config import Config
-from agent_mail.exceptions import ConfigError
-from agent_mail.identity import (
+from agent_inbox.config import Config
+from agent_inbox.exceptions import ConfigError
+from agent_inbox.identity import (
     reset_current_agent,
     resolve_identity,
     set_current_agent,
 )
-from agent_mail.mcp_server import AgentIdentityMiddleware
+from agent_inbox.mcp_server import AgentIdentityMiddleware
 
 
 def _config(project: str | None, agent: str | None) -> Config:
@@ -54,14 +54,14 @@ def _extract(
 
 
 def test_path_identity_is_extracted_and_rewritten() -> None:
-    address, rewritten = _extract("/agent-mail/casework/mcp")
-    assert address == ("agent-mail", "casework")
+    address, rewritten = _extract("/agent-inbox/casework/mcp")
+    assert address == ("agent-inbox", "casework")
     assert rewritten == "/mcp"
 
 
 def test_path_identity_preserves_subpath() -> None:
-    address, rewritten = _extract("/agent-mail/casework/mcp/messages")
-    assert address == ("agent-mail", "casework")
+    address, rewritten = _extract("/agent-inbox/casework/mcp/messages")
+    assert address == ("agent-inbox", "casework")
     assert rewritten == "/mcp/messages"
 
 

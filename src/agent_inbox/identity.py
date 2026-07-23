@@ -5,19 +5,19 @@ When the MCP server runs over HTTP it is multi-tenant: many agents share one URL
 request path (or ``?project=&agent=`` / ``X-Agent-*`` headers) says who is calling.
 The ASGI middleware stashes that in a :class:`~contextvars.ContextVar`; the MCP tools
 read it back here. Over stdio (single-tenant) the contextvar is unset and identity
-falls back to ``AGENT_MAIL_PROJECT`` / ``AGENT_ID`` from the config.
+falls back to ``AGENT_INBOX_PROJECT`` / ``AGENT_ID`` from the config.
 """
 
 from __future__ import annotations
 
 from contextvars import ContextVar
 
-from agent_mail.config import Config, validate_agent_id, validate_project
-from agent_mail.exceptions import ConfigError
+from agent_inbox.config import Config, validate_agent_id, validate_project
+from agent_inbox.exceptions import ConfigError
 
 # (project, agent) for the current request, or None over stdio.
 _current: ContextVar[tuple[str, str] | None] = ContextVar(
-    "agent_mail_current_address", default=None
+    "agent_inbox_current_address", default=None
 )
 
 
@@ -45,5 +45,5 @@ def resolve_identity(config: Config) -> tuple[str, str]:
         return validate_project(config.project), validate_agent_id(config.agent_id)
     raise ConfigError(
         "no identity for this request: connect on /<project>/<agent>/mcp "
-        "(or set AGENT_MAIL_PROJECT + AGENT_ID for a single-agent server)"
+        "(or set AGENT_INBOX_PROJECT + AGENT_ID for a single-agent server)"
     )

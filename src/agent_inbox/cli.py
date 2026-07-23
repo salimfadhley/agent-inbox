@@ -1,4 +1,4 @@
-"""The ``agent-mail`` command-line primitive."""
+"""The ``agent-inbox`` command-line primitive."""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from typing import NoReturn
 
 import click
 
-from agent_mail.config import Config, format_address, hub_descriptor, parse_target
-from agent_mail.config_env import set_runtime_config_path
-from agent_mail.exceptions import ConfigError, MailboxError
-from agent_mail.mailbox import Mailbox
-from agent_mail.models import AgentInfo, AgentProfile, Intent, Message
+from agent_inbox.config import Config, format_address, hub_descriptor, parse_target
+from agent_inbox.config_env import set_runtime_config_path
+from agent_inbox.exceptions import ConfigError, MailboxError
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.models import AgentInfo, AgentProfile, Intent, Message
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def _emit(payload: object, *, as_json: bool, human: Callable[[], None]) -> None:
 @click.option(
     "--project",
     default=None,
-    help="Your project (overrides AGENT_MAIL_PROJECT).",
+    help="Your project (overrides AGENT_INBOX_PROJECT).",
 )
 @click.option(
     "--from",
@@ -90,7 +90,7 @@ def _emit(payload: object, *, as_json: bool, human: Callable[[], None]) -> None:
     "--config",
     "config_path",
     default=None,
-    envvar="AGENT_MAIL_CONFIG",
+    envvar="AGENT_INBOX_CONFIG",
     help="Path to a TOML config file (env vars still override it).",
 )
 @click.pass_context
@@ -110,7 +110,7 @@ def cli(
     ctx.ensure_object(dict)
     set_runtime_config_path(config_path)
     config = Config.from_env(agent_override=from_, project_override=project)
-    logging.getLogger("agent_mail").setLevel(config.log_level.upper())
+    logging.getLogger("agent_inbox").setLevel(config.log_level.upper())
     ctx.obj["config"] = config
     ctx.obj["as_json"] = as_json
 
@@ -264,7 +264,7 @@ def notify(ctx: click.Context, to: str, thread: str | None) -> None:
 @cli.command()
 @click.pass_context
 def ping(ctx: click.Context) -> None:
-    """Round-trip a message to yourself to check agent-mail is operational."""
+    """Round-trip a message to yourself to check agent-inbox is operational."""
     config: Config = ctx.obj["config"]
     as_json: bool = ctx.obj["as_json"]
     try:
@@ -482,27 +482,27 @@ def register(
     "--transport",
     type=click.Choice(["stdio", "http"]),
     default=None,
-    envvar="AGENT_MAIL_TRANSPORT",
+    envvar="AGENT_INBOX_TRANSPORT",
     help="MCP transport: stdio (local, single agent) or http (hosted, multi-agent).",
 )
 @click.option(
     "--host",
     default=None,
-    envvar="AGENT_MAIL_HOST",
+    envvar="AGENT_INBOX_HOST",
     help="Bind host for http transport (default 127.0.0.1).",
 )
 @click.option(
     "--port",
     type=int,
     default=None,
-    envvar="AGENT_MAIL_PORT",
+    envvar="AGENT_INBOX_PORT",
     help="Bind port for http transport (default 8080).",
 )
 @click.option(
     "--path",
     "path_",
     default=None,
-    envvar="AGENT_MAIL_PATH",
+    envvar="AGENT_INBOX_PATH",
     help="Mount path for http transport (default /mcp).",
 )
 @click.pass_context
@@ -518,7 +518,7 @@ def mcp_serve(
     Over http the server is multi-agent: each agent connects on its own address,
     ``http://<host>:<port>/<agent>/mcp``, which is its whole configuration.
     """
-    from agent_mail.mcp_server import serve
+    from agent_inbox.mcp_server import serve
 
     base: Config = ctx.obj["config"]
     updates: dict[str, object] = {}
@@ -535,7 +535,7 @@ def mcp_serve(
 
 
 def _setup_logging() -> None:
-    level = os.environ.get("AGENT_MAIL_LOG_LEVEL", "WARNING").upper()
+    level = os.environ.get("AGENT_INBOX_LOG_LEVEL", "WARNING").upper()
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

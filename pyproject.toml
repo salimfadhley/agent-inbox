@@ -40,7 +40,8 @@ dependencies = [
 ]
 
 [project.scripts]
-agent-mail = "agent_mail.cli:main"
+agent-inbox = "agent_inbox.cli:main"
+agent-mail = "agent_inbox.cli:main"  # deprecated alias for the old command name
 
 [project.urls]
 Homepage = "https://github.com/salimfadhley/agent-inbox"
@@ -55,7 +56,7 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_mail"]
+packages = ["src/agent_inbox"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "docs", "README.md", "LICENSE"]
