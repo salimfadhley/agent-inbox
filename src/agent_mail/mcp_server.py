@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
@@ -40,8 +41,11 @@ logger = logging.getLogger(__name__)
 # reverse proxy on untrusted networks). MCP's DNS-rebinding protection only allows
 # localhost Host headers by default, which makes a hosted server unreachable by
 # remote agents — so we disable it and serve any Host.
+# The server name clients see. Defaults to "agent-mail" and is overridable via
+# MCP_SERVER_NAME — so renaming the project need not force every agent to
+# re-register and reconnect.
 mcp = FastMCP(
-    "agent-mail",
+    os.environ.get("MCP_SERVER_NAME", "agent-mail"),
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=False,
     ),

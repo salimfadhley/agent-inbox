@@ -72,8 +72,20 @@ def test_format_address() -> None:
 
 def test_parse_target_modes() -> None:
     assert parse_target("proj/alice") == ("direct", "proj", "alice")
-    assert parse_target("proj") == ("any", "proj", None)
+    # broadcast to the whole project — bare, trailing slash, /all, /* all mean this
+    assert parse_target("proj") == ("broadcast", "proj", None)
+    assert parse_target("proj/") == ("broadcast", "proj", None)
+    assert parse_target("proj/all") == ("broadcast", "proj", None)
     assert parse_target("proj/*") == ("broadcast", "proj", None)
+    # one agent on the project (a shared work queue)
+    assert parse_target("proj/any") == ("any", "proj", None)
+    # public broadcast — every agent everywhere
+    assert parse_target("all/all") == ("public", None, None)
+    assert parse_target("*/*") == ("public", None, None)
+    assert parse_target("all") == ("public", None, None)
+    # one agent anywhere
+    assert parse_target("any/any") == ("global_any", None, None)
+    assert parse_target("any") == ("global_any", None, None)
 
 
 def test_parse_target_validates_tokens() -> None:
@@ -83,23 +95,38 @@ def test_parse_target_validates_tokens() -> None:
         parse_target("proj/bad agent")
 
 
+def test_reserved_words_rejected_as_names() -> None:
+    for bad in ("all", "any", "ALL", "Any"):
+        with pytest.raises(ConfigError):
+            validate_agent_id(bad)
+        with pytest.raises(ConfigError):
+            validate_project(bad)
+
+
+def test_specific_agent_under_global_scope_is_ambiguous() -> None:
+    with pytest.raises(ConfigError):
+        parse_target("all/alice")
+    with pytest.raises(ConfigError):
+        parse_target("any/bob")
+
+
 def test_config_layering_env_beats_file_beats_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for key in ("AGENT_MAIL_HUB", "AGENT_MAIL_TTL_DAYS", "AGENT_ID"):
+    for key in ("AGENT_MAIL_HUB_NAME", "AGENT_MAIL_TTL_DAYS", "AGENT_ID"):
         monkeypatch.delenv(key, raising=False)
 
-    assert Config().hub == "agent-mail"
+    assert Config().hub_name == "agent-mail"
 
     cfg = tmp_path / "agent-mail.toml"
-    cfg.write_text('hub = "from-file"\nttl_days = 3\n')
+    cfg.write_text('hub_name = "from-file"\nttl_days = 3\n')
     set_runtime_config_path(str(cfg))
     loaded = Config()
-    assert loaded.hub == "from-file"
+    assert loaded.hub_name == "from-file"
     assert loaded.ttl_days == 3
 
-    monkeypatch.setenv("AGENT_MAIL_HUB", "from-env")
-    assert Config().hub == "from-env"
+    monkeypatch.setenv("AGENT_MAIL_HUB_NAME", "from-env")
+    assert Config().hub_name == "from-env"
 
 
 def test_lowercase_aliases_do_not_capture_uppercase_env(
@@ -124,12 +151,12 @@ def test_redacted_returns_effective_config() -> None:
     config = Config().model_copy(update={"db": "/tmp/mail.db"})
     redacted = config.redacted()
     assert redacted["db"] == "/tmp/mail.db"
-    assert redacted["hub"] == "agent-mail"
+    assert redacted["hub_name"] == "agent-mail"
 
 
 def test_hub_descriptor_is_public() -> None:
     config = Config().model_copy(
-        update={"hub": "h", "transport": "http", "admin_agent": "admin"}
+        update={"hub_name": "h", "transport": "http", "admin_agent": "admin"}
     )
     descriptor = hub_descriptor(config, max_message_bytes=1048576)
     assert descriptor["hub"] == "h"

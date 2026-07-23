@@ -103,8 +103,9 @@ def cli(
 ) -> None:
     """A local SQLite mailbox for local LLM agents.
 
-    Addresses are two-part: project/agent (direct), project (any one agent), or
-    project/* (broadcast to every agent).
+    Addresses are two-part: project/agent (one agent); project or project/all
+    (every agent on the project); project/any (one agent on it); all/all (everyone
+    everywhere); any/any (one agent anywhere). '*' is a synonym for 'all'.
     """
     ctx.ensure_object(dict)
     set_runtime_config_path(config_path)
@@ -118,7 +119,7 @@ def cli(
 @click.option(
     "--to",
     required=True,
-    help="Target: project/agent (direct), project (any one), or project/* (broadcast).",
+    help="project/agent | project or project/all (all on it) | project/any | all/all | any/any",
 )
 @click.option("--subject", required=True, help="Message subject.")
 @click.option("--body", required=True, help="Message body.")
@@ -321,7 +322,7 @@ def doctor(ctx: click.Context) -> None:
             )
         )
     else:
-        click.echo(f"hub:       {config.hub}")
+        click.echo(f"hub:       {config.hub_name}")
         click.echo(f"db:        {config.db}")
         click.echo(f"transport: {config.transport}")
         click.echo(f"agent_id:  {config.agent_id or '(unset — hosted / multi-agent)'}")

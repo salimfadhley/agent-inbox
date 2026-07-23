@@ -175,6 +175,8 @@ class Mailbox:
                 f"{cap} bytes (see hub_info -> limits)"
             )
         kind, project, agent = parse_target(message.to)
+        # Global kinds (public / global_any) have no project scope; store "" (the
+        # column is NOT NULL and real projects are never empty).
         await self._conn.execute(
             "INSERT INTO messages (id, from_addr, to_addr, kind, to_project, "
             "to_agent, thread, intent, subject, body, created, acked_at) "
@@ -184,7 +186,7 @@ class Mailbox:
                 message.from_,
                 message.to,
                 kind,
-                project,
+                project or "",
                 agent,
                 message.thread,
                 message.intent.value,
@@ -205,10 +207,13 @@ class Mailbox:
             "WHERE acked_at IS NULL AND ("
             "  (kind = 'direct' AND to_project = ? AND to_agent = ?)"
             "  OR (kind = 'any' AND to_project = ?)"
+            "  OR (kind = 'global_any')"
             "  OR (kind = 'broadcast' AND to_project = ? AND id NOT IN ("
             "        SELECT message_id FROM broadcast_reads WHERE reader = ?))"
+            "  OR (kind = 'public' AND id NOT IN ("
+            "        SELECT message_id FROM broadcast_reads WHERE reader = ?))"
             ") ORDER BY created ASC",
-            (project, agent, project, project, reader),
+            (project, agent, project, project, reader, reader),
         )
         rows = await cursor.fetchall()
         return [_row_to_message(row) for row in rows]
@@ -228,8 +233,10 @@ class Mailbox:
             raise self._not_found(project, agent, message_id)
 
         kind = row["kind"]
-        if kind == "broadcast":
-            if row["to_project"] != project:
+        if kind in ("broadcast", "public"):
+            # fan-out kinds: each agent consumes its own copy. 'public' spans all
+            # projects, so it has no project scope to check.
+            if kind == "broadcast" and row["to_project"] != project:
                 raise self._not_found(project, agent, message_id)
             reader = format_address(project, agent)
             seen = await (
@@ -246,7 +253,7 @@ class Mailbox:
                 (message_id, reader, _now_iso()),
             )
             await self._conn.commit()
-        else:  # direct or any
+        else:  # claim kinds: direct, any (project), global_any (anywhere)
             if kind == "direct" and (
                 row["to_project"] != project or row["to_agent"] != agent
             ):

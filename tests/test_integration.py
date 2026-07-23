@@ -94,7 +94,7 @@ async def test_broadcast_reaches_every_agent(mailbox: Mailbox) -> None:
 async def test_any_delivers_to_exactly_one_agent(mailbox: Mailbox) -> None:
     project = _project()
     await mailbox.send(
-        Message(from_=f"{project}/sys", to=project, subject="task", body="do it")
+        Message(from_=f"{project}/sys", to=f"{project}/any", subject="task", body="x")
     )
 
     # both see the unclaimed task
@@ -109,6 +109,36 @@ async def test_any_delivers_to_exactly_one_agent(mailbox: Mailbox) -> None:
     assert not any(m.subject == "task" for m in await mailbox.peek(project, "bob"))
     with pytest.raises(MailboxError):
         await mailbox.read(project, "bob", pending[0].id)
+
+
+async def test_public_broadcast_reaches_agents_across_projects(
+    mailbox: Mailbox,
+) -> None:
+    await mailbox.send(
+        Message(from_="ops/sys", to="all/all", subject="townhall", body="hi all")
+    )
+    # agents on unrelated projects all see it, and each consumes its own copy
+    a = await mailbox.peek("proj-a", "alice")
+    b = await mailbox.peek("proj-b", "bob")
+    assert any(m.subject == "townhall" for m in a)
+    assert any(m.subject == "townhall" for m in b)
+    await mailbox.read("proj-a", "alice", a[0].id)
+    a2 = await mailbox.peek("proj-a", "alice")
+    assert not any(m.subject == "townhall" for m in a2)
+    assert any(m.subject == "townhall" for m in await mailbox.peek("proj-b", "bob"))
+
+
+async def test_global_any_delivers_to_one_agent_anywhere(mailbox: Mailbox) -> None:
+    await mailbox.send(
+        Message(from_="ops/sys", to="any/any", subject="whoever", body="grab me")
+    )
+    a = [m for m in await mailbox.peek("proj-a", "alice") if m.subject == "whoever"]
+    assert a
+    await mailbox.read("proj-a", "alice", a[0].id)
+    # nobody else, on any project, can still claim it
+    assert not any(m.subject == "whoever" for m in await mailbox.peek("proj-b", "bob"))
+    with pytest.raises(MailboxError):
+        await mailbox.read("proj-b", "bob", a[0].id)
 
 
 async def test_ping_roundtrip(mailbox: Mailbox) -> None:

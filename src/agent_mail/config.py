@@ -40,6 +40,10 @@ DEFAULT_TTL_DAYS = 14
 _BAKED_DEFAULTS = Path(__file__).parent / "defaults.toml"
 _VALID_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
+# Address wildcards, usable in either position (project or agent). ``*`` is a synonym
+# for ``all``. They are reserved: a real project or agent may not be named these.
+RESERVED_TOKENS = frozenset({"all", "any"})
+
 # No secret settings today (SQLite needs no credentials); kept so redacted() stays
 # generic if secret-bearing settings are ever added.
 _SECRET_FIELDS: frozenset[str] = frozenset()
@@ -57,6 +61,10 @@ def _validate_token(value: str, kind: str) -> str:
         raise ConfigError(
             f"invalid {kind} {value!r}: use letters, digits, '-' or '_' "
             "(must start alphanumeric; no dots, spaces or wildcards), max 64 chars"
+        )
+    if value.lower() in RESERVED_TOKENS:
+        raise ConfigError(
+            f"invalid {kind} {value!r}: 'all' and 'any' are reserved address words"
         )
     return value
 
@@ -76,22 +84,49 @@ def format_address(project: str, agent: str) -> str:
     return f"{validate_project(project)}/{validate_agent_id(agent)}"
 
 
-def parse_target(to: str) -> tuple[str, str, str | None]:
+def parse_target(to: str) -> tuple[str, str | None, str | None]:
     """Resolve an address string to ``(kind, project, agent)``.
 
-    * ``project/agent`` -> ``("direct", project, agent)`` — one specific agent;
-    * ``project`` -> ``("any", project, None)`` — exactly one agent on the project;
-    * ``project/*`` -> ``("broadcast", project, None)`` — every agent on the project.
+    The **project part** is the scope and the **agent part** is the fan-out; an absent
+    agent part defaults to ``all``, and ``*`` is a synonym for ``all``. So:
 
-    Validates every token, raising :class:`ConfigError` on a malformed address.
+    * ``project/agent`` -> ``("direct", project, agent)`` — one specific agent;
+    * ``project`` (bare), ``project/``, ``project/all``, ``project/*``
+      -> ``("broadcast", project, None)`` — every agent on the project (common case);
+    * ``project/any`` -> ``("any", project, None)`` — one agent on the project, chosen
+      when the message is read (a shared work queue; rarer);
+    * ``all/all`` (or ``*/*``, bare ``all``) -> ``("public", None, None)`` — every
+      agent everywhere (public broadcast);
+    * ``any/any`` (or bare ``any``) -> ``("global_any", None, None)`` — one agent
+      anywhere (very rare).
+
+    Validates real tokens, raising :class:`ConfigError` on a malformed or ambiguous
+    address (e.g. a specific agent under a global scope, like ``all/alice``).
     """
-    to = to.strip()
-    if "/" not in to:
-        return "any", validate_project(to), None
-    project, name = to.split("/", 1)
-    if name == "*":
-        return "broadcast", validate_project(project), None
-    return "direct", validate_project(project), validate_agent_id(name)
+    proj_part, _sep, agent_part = to.strip().partition("/")
+    if not _sep:
+        # bare token: a bare project means "everyone on it"; bare ``any`` -> any/any;
+        # bare ``all``/``*`` -> all/all.
+        agent_part = "any" if proj_part.strip().lower() == "any" else "all"
+    proj_part = (proj_part.strip() or "all").replace("*", "all")
+    agent_part = (agent_part.strip() or "all").replace("*", "all")
+    proj_l, agent_l = proj_part.lower(), agent_part.lower()
+
+    if proj_l in ("all", "any"):  # global scope (any project)
+        if agent_l == "all":
+            return "public", None, None
+        if agent_l == "any":
+            return "global_any", None, None
+        raise ConfigError(
+            f"cannot address a specific agent across all projects: {to!r} "
+            "(use 'all/all' for everyone, or 'any/any' for one)"
+        )
+    project = validate_project(proj_part)
+    if agent_l == "all":
+        return "broadcast", project, None
+    if agent_l == "any":
+        return "any", project, None
+    return "direct", project, validate_agent_id(agent_part)
 
 
 def _alias(toml_key: str, env_name: str) -> AliasChoices:
@@ -146,8 +181,11 @@ class Config(BaseSettings):
     )
 
     # -- hub identity & administration (advertised via hub_info) ----------
-    hub: str = Field(
-        default="agent-mail", validation_alias=_alias("hub", "AGENT_MAIL_HUB")
+    # The name of this mailbox collection (a "hub"). Set a distinct name per collection
+    # if you run more than one on the same storage.
+    hub_name: str = Field(
+        default="agent-mail",
+        validation_alias=_alias("hub_name", "AGENT_MAIL_HUB_NAME"),
     )
     hub_description: str | None = Field(
         default=None,
@@ -263,14 +301,16 @@ def hub_descriptor(
         else f"{base}{config.path.rstrip('/')}"
     )
     return {
-        "hub": config.hub,
+        "hub": config.hub_name,
         "description": config.hub_description,
         "version": _hub_version(),
         "storage": "sqlite",
         "addressing": {
-            "direct": "project/agent",
-            "any": "project (bare) — one agent on the project",
-            "broadcast": "project/* — every agent on the project",
+            "direct": "project/agent — one specific agent",
+            "broadcast": "project (or project/all, project/*) — all agents on it",
+            "any": "project/any — one agent on the project (a shared work queue)",
+            "public": "all/all (or */*) — every agent everywhere",
+            "global_any": "any/any — one agent anywhere",
         },
         "limits": {
             "max_message_bytes": (

@@ -36,7 +36,8 @@ path = "/mcp"                          # env AGENT_MAIL_PATH
                                        # advertised base URL when behind a proxy
 
 # --- Hub identity & administration (advertised to agents via hub_info) ----
-hub = "agent-mail"                     # env AGENT_MAIL_HUB (name; distinguishes hubs)
+# hub_name = the name of this mailbox collection; set a distinct one per collection.
+hub_name = "agent-mail"                # env AGENT_MAIL_HUB_NAME
 # hub_description = "Homelab agent mail"        # env AGENT_MAIL_HUB_DESCRIPTION
 # admin_agent = "admin"                # env AGENT_MAIL_ADMIN_AGENT
                                        # agents can mail this id for help
