@@ -119,7 +119,7 @@ def cli(
 @click.option(
     "--to",
     required=True,
-    help="project/agent | project or project/all (all on it) | project/any | all/all | any/any",
+    help="project/agent · project or project/all · project/any · all/all · any/any",
 )
 @click.option("--subject", required=True, help="Message subject.")
 @click.option("--body", required=True, help="Message body.")
