@@ -147,6 +147,12 @@ mail); only your own inbox (`agent-inbox/human`) is interactive, and Compose let
 message any agent. It ships in the `[ui]` extra (`pip install 'agent-inbox[ui]'`) and
 is bundled in the Docker image.
 
+**`/ui/flow`** draws the traffic as a directed graph: agents are nodes, and each pair
+gets an arc per direction labelled with its message count (thickness ∝ volume), over a
+selectable window (default 24h). Click a node for its mailbox, or an arc for exactly
+those messages. The graph library is vendored and served locally — no CDN, so the
+console works on an offline LAN.
+
 ## The "check your inbox" convention
 
 An agent only benefits from mail if it looks. Paste the ready-made block from

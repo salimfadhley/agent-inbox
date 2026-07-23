@@ -8,6 +8,7 @@ external services, just a temp-file SQLite db.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,7 +16,7 @@ from uuid import uuid4
 import pytest_asyncio
 
 from agent_inbox.config import Config
-from agent_inbox.mailbox import Mailbox
+from agent_inbox.mailbox import FlowGraph, Mailbox
 from agent_inbox.mcp_server import AgentIdentityMiddleware
 from agent_inbox.models import AgentProfile, Message
 from agent_inbox.webui import WebConsole, has_ui, subject_or_snippet
@@ -40,6 +41,7 @@ async def _asgi(
     path: str,
     *,
     body: bytes = b"",
+    query: bytes = b"",
     headers: list[tuple[bytes, bytes]] | None = None,
 ) -> dict[str, Any]:
     """Drive an ASGI app once and collect the response."""
@@ -47,7 +49,7 @@ async def _asgi(
         "type": "http",
         "method": method,
         "path": path,
-        "query_string": b"",
+        "query_string": query,
         "headers": headers or [],
     }
     events = [{"type": "http.request", "body": body, "more_body": False}]
@@ -194,6 +196,92 @@ async def test_operator_inbox_read_consumes(env: tuple[Config, Mailbox]) -> None
     assert resp["status"] == 303
     # The operator's own inbox IS interactive: reading consumes it.
     assert await mb.peek("agent-inbox", "human") == []
+
+
+async def test_flow_graph_counts_each_direction(env: tuple[Config, Mailbox]) -> None:
+    config, mb = env
+    p = _project()
+    # 2 messages A->B, 1 message B->A, plus a broadcast (which must NOT be an edge)
+    for _ in range(2):
+        await mb.send(Message(from_=f"{p}/a", to=f"{p}/b", subject="x", body="x"))
+    await mb.send(Message(from_=f"{p}/b", to=f"{p}/a", subject="y", body="y"))
+    await mb.send(Message(from_=f"{p}/a", to=f"{p}/all", subject="bc", body="bc"))
+
+    graph = await mb.flow_graph(None)
+    edges = {(e.frm, e.to): e.count for e in graph.edges}
+    assert edges[(f"{p}/a", f"{p}/b")] == 2
+    assert edges[(f"{p}/b", f"{p}/a")] == 1
+    assert graph.broadcast_count >= 1  # the broadcast is counted, not drawn
+    assert f"{p}/a" in graph.nodes and f"{p}/b" in graph.nodes
+
+
+async def test_flow_window_excludes_old_messages(env: tuple[Config, Mailbox]) -> None:
+    config, mb = env
+    p = _project()
+    await mb.send(Message(from_=f"{p}/a", to=f"{p}/b", subject="new", body="n"))
+    # a cutoff in the future excludes everything
+    future = (datetime.now(tz=UTC) + timedelta(hours=1)).isoformat()
+    assert await mb.flow_graph(future) == FlowGraph(
+        edges=[], nodes=[], online=[], broadcast_count=0
+    )
+
+
+async def test_flow_page_and_edge_drilldown(env: tuple[Config, Mailbox]) -> None:
+    config, mb = env
+    p = _project()
+    await mb.send(Message(from_=f"{p}/a", to=f"{p}/b", subject="hello flow", body="b"))
+    console = WebConsole(config)
+
+    page = await _asgi(console, "GET", "/ui/flow", query=b"since=all")
+    assert page["status"] == 200
+    assert "vis-network.min.js" in page["body"]  # graph script wired up
+    assert f"{p}/a" in page["body"]  # node data embedded server-side
+
+    edge = await _asgi(
+        console,
+        "GET",
+        "/ui/flow/edge",
+        query=f"from={p}/a&to={p}/b&since=all".encode(),
+    )
+    assert edge["status"] == 200
+    assert "hello flow" in edge["body"]
+    # drilling down is observation only — it must not consume
+    assert any(m.subject == "hello flow" for m in await mb.peek(p, "b"))
+
+
+async def test_static_asset_served_and_traversal_blocked(
+    env: tuple[Config, Mailbox],
+) -> None:
+    config, _ = env
+    console = WebConsole(config)
+
+    js = await _asgi(console, "GET", "/ui/static/vis-network.min.js")
+    assert js["status"] == 200
+    assert "vis-network" in js["body"][:400]
+    assert any(k == b"content-type" and b"javascript" in v for k, v in js["headers"])
+
+    for bad in ("/ui/static/..", "/ui/static/.env"):
+        assert (await _asgi(console, "GET", bad))["status"] == 404
+
+
+async def test_compose_offers_address_autocomplete(env: tuple[Config, Mailbox]) -> None:
+    config, mb = env
+    p = _project()
+    await mb.register(p, "alice", AgentProfile())
+    console = WebConsole(config)
+    page = await _asgi(console, "GET", "/ui/compose")
+    assert page["status"] == 200
+    assert "<datalist" in page["body"]
+    assert f"{p}/alice" in page["body"]  # known agent suggested
+    assert f"{p}/all" in page["body"]  # broadcast form suggested
+
+
+async def test_nav_has_flow_and_prompts_links(env: tuple[Config, Mailbox]) -> None:
+    config, _ = env
+    page = await _asgi(WebConsole(config), "GET", "/ui")
+    assert 'href="/ui/flow"' in page["body"]
+    assert 'href="/prompts"' in page["body"]
+    assert 'rel="icon"' in page["body"]  # mailbox favicon
 
 
 async def test_status_and_doctor_render(env: tuple[Config, Mailbox]) -> None:

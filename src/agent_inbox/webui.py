@@ -20,9 +20,10 @@ extra and is imported lazily, so the base install and the MCP tools are unaffect
 from __future__ import annotations
 
 import html
+import json
 import logging
 from collections.abc import Awaitable, Callable, MutableMapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,22 @@ from agent_inbox.models import Message
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+_STATIC_DIR = Path(__file__).parent / "static"
+
+_CONTENT_TYPES = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+}
+
+# Time windows offered on the flow graph (query key -> label, hours; None = all).
+_WINDOWS: list[tuple[str, str]] = [
+    ("1h", "1h"),
+    ("24h", "24h"),
+    ("7d", "7d"),
+    ("all", "all"),
+]
+_WINDOW_HOURS: dict[str, int | None] = {"1h": 1, "24h": 24, "7d": 168, "all": None}
 
 Scope = MutableMapping[str, Any]
 Receive = Callable[[], Awaitable[MutableMapping[str, Any]]]
@@ -180,6 +197,12 @@ class WebConsole:
             await self._do_read(scope, receive, send)
         elif parts == ["inbox", "reply"] and method == "POST":
             await self._do_reply(scope, receive, send)
+        elif parts == ["flow"]:
+            await self._flow(scope, send)
+        elif parts == ["flow", "edge"]:
+            await self._flow_edge(scope, send)
+        elif parts[0] == "static" and len(parts) == 2:
+            await self._static(send, parts[1])
         elif parts == ["status"]:
             await self._status(send)
         elif parts == ["doctor"]:
@@ -238,6 +261,64 @@ class WebConsole:
             thread = await mb.thread(message.thread or message.id)
         await self._render(send, "message.html", message=message, thread=thread)
 
+    async def _flow(self, scope: Scope, send: Send) -> None:
+        since_key = _query(scope).get("since", "24h")
+        cutoff, label = _since_window(since_key)
+        async with Mailbox(self._config) as mb:
+            graph = await mb.flow_graph(cutoff)
+        online = set(graph.online)
+        vis_nodes = [
+            {
+                "id": addr,
+                "label": addr.replace("/", "/\n", 1),
+                "online": addr in online,
+            }
+            for addr in graph.nodes
+        ]
+        vis_edges = [{"from": e.frm, "to": e.to, "count": e.count} for e in graph.edges]
+        await self._render(
+            send,
+            "flow.html",
+            nodes_json=json.dumps(vis_nodes),
+            edges_json=json.dumps(vis_edges),
+            edge_count=len(graph.edges),
+            node_count=len(graph.nodes),
+            broadcast_count=graph.broadcast_count,
+            since_key=since_key,
+            since_label=label,
+            windows=_WINDOWS,
+        )
+
+    async def _flow_edge(self, scope: Scope, send: Send) -> None:
+        q = _query(scope)
+        frm, to = (q.get("from") or "").strip(), (q.get("to") or "").strip()
+        cutoff, label = _since_window(q.get("since", "24h"))
+        if not frm or not to:
+            await self._error(send, 400, "Bad request", "Need both from and to.")
+            return
+        async with Mailbox(self._config) as mb:
+            messages = await mb.messages_between(frm, to, cutoff)
+        await self._render(
+            send,
+            "flow_edge.html",
+            frm=frm,
+            to=to,
+            since_label=label,
+            messages=messages,
+        )
+
+    async def _static(self, send: Send, name: str) -> None:
+        # Serve a vendored asset. Reject anything path-y (no traversal).
+        if not name or "/" in name or "\\" in name or name.startswith("."):
+            await self._error(send, 404, "Not found", "No such asset.")
+            return
+        path = _STATIC_DIR / name
+        if not path.is_file():
+            await self._error(send, 404, "Not found", f"No asset {name!r}.")
+            return
+        ctype = _CONTENT_TYPES.get(path.suffix, "application/octet-stream")
+        await _raw(send, path.read_bytes(), ctype)
+
     async def _inbox(self, send: Send) -> None:
         async with Mailbox(self._config) as mb:
             items = await mb.browse(self._op_project, self._op_agent)
@@ -250,12 +331,27 @@ class WebConsole:
 
     # -- interactive (operator only) --------------------------------------
 
-    async def _compose_form(self, send: Send, error: str | None = None) -> None:
+    async def _compose_form(
+        self, send: Send, error: str | None = None, to: str = ""
+    ) -> None:
+        async with Mailbox(self._config) as mb:
+            agents = await mb.list_agents()
+        # Suggest every known agent, plus the broadcast/anycast form per project, so
+        # the To field auto-completes to a valid address.
+        suggestions: list[str] = []
+        seen: set[str] = set()
+        for a in agents:
+            for cand in (a.address, f"{a.project}/all", f"{a.project}/any"):
+                if cand not in seen:
+                    seen.add(cand)
+                    suggestions.append(cand)
         await self._render(
             send,
             "compose.html",
             operator=format_address(self._op_project, self._op_agent),
             error=error,
+            to=to,
+            suggestions=suggestions,
         )
 
     async def _do_compose(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -265,7 +361,7 @@ class WebConsole:
         subject = (form.get("subject") or "").strip() or None
         if not to or not body.strip():
             await self._compose_form(
-                send, error="Both a recipient and a body are required."
+                send, error="Both a recipient and a body are required.", to=to
             )
             return
         message = Message(
@@ -279,7 +375,7 @@ class WebConsole:
                 await mb.touch(self._op_project, self._op_agent)
                 await mb.send(message)
         except AgentInboxError as exc:
-            await self._compose_form(send, error=str(exc))
+            await self._compose_form(send, error=str(exc), to=to)
             return
         await self._redirect(send, f"/ui/mbox/{self._op_project}/{self._op_agent}")
 
@@ -375,10 +471,27 @@ class WebConsole:
 _NAV = [
     ("/ui", "Dashboard"),
     ("/ui/agents", "Agents"),
+    ("/ui/flow", "Flow"),
     ("/ui/inbox", "My inbox"),
     ("/ui/compose", "Compose"),
+    ("/prompts", "Prompts"),
     ("/ui/status", "Status"),
 ]
+
+
+def _query(scope: Scope) -> dict[str, str]:
+    """Parse the request query string into a flat ``{key: first-value}`` dict."""
+    parsed = parse_qs(scope.get("query_string", b"").decode(), keep_blank_values=True)
+    return {k: v[0] for k, v in parsed.items()}
+
+
+def _since_window(key: str) -> tuple[str | None, str]:
+    """Map a window key (1h/24h/7d/all) to ``(iso_cutoff | None, label)``."""
+    hours = _WINDOW_HOURS.get(key, 24)
+    if hours is None:
+        return None, "all time"
+    cutoff = (datetime.now(tz=UTC) - timedelta(hours=hours)).isoformat()
+    return cutoff, f"last {key}"
 
 
 async def _read_form(receive: Receive) -> dict[str, str]:
@@ -402,3 +515,18 @@ async def _html(send: Send, body: str, status: int = 200) -> None:
         }
     )
     await send({"type": "http.response.body", "body": body.encode("utf-8")})
+
+
+async def _raw(send: Send, body: bytes, content_type: str) -> None:
+    """Send raw bytes with a content type + long cache (vendored, versioned assets)."""
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", content_type.encode()),
+                (b"cache-control", b"public, max-age=31536000, immutable"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})

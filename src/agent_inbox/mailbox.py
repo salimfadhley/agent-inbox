@@ -81,6 +81,26 @@ class MailboxStats:
     recent: list[Message] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class FlowEdge:
+    """A directed edge in the message-flow graph: ``frm`` sent ``count`` to ``to``."""
+
+    frm: str
+    to: str
+    count: int
+    last: str  # ISO-8601 of the most recent message on this edge
+
+
+@dataclass(frozen=True)
+class FlowGraph:
+    """The message-flow graph over a time window (directed, direct messages only)."""
+
+    edges: list[FlowEdge]
+    nodes: list[str]  # agent addresses that appear as an endpoint
+    online: list[str]  # of those, the ones currently online
+    broadcast_count: int  # non-direct messages in the window (not drawn; a footnote)
+
+
 def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
@@ -498,6 +518,66 @@ class Mailbox:
         cursor = await self._conn.execute(sql, params)
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    async def flow_graph(self, since: str | None = None) -> FlowGraph:
+        """Directed agent→agent message flow over a window (read-only).
+
+        ``since`` is an ISO-8601 cutoff (messages at/after it); ``None`` = all history.
+        Only ``direct`` messages produce edges — broadcast/anycast have no single
+        recipient node — so those are returned as a ``broadcast_count`` footnote.
+        A→B and B→A are distinct edges, so per-direction counts fall out naturally.
+        """
+        where = "kind = 'direct'"
+        params: tuple[object, ...] = ()
+        if since is not None:
+            where += " AND created >= ?"
+            params = (since,)
+        cursor = await self._conn.execute(
+            f"SELECT from_addr, to_addr, COUNT(*) AS n, MAX(created) AS last "
+            f"FROM messages WHERE {where} "
+            f"GROUP BY from_addr, to_addr ORDER BY n DESC",
+            params,
+        )
+        edges = [
+            FlowEdge(frm=r["from_addr"], to=r["to_addr"], count=r["n"], last=r["last"])
+            for r in await cursor.fetchall()
+        ]
+        broadcast_count = await self._scalar(
+            "SELECT COUNT(*) FROM messages WHERE kind != 'direct'"
+            + (" AND created >= ?" if since is not None else ""),
+            params,
+        )
+        node_set: list[str] = []
+        seen: set[str] = set()
+        for edge in edges:
+            for addr in (edge.frm, edge.to):
+                if addr not in seen:
+                    seen.add(addr)
+                    node_set.append(addr)
+        agents = {a.address: a.online for a in await self.list_agents()}
+        online = [addr for addr in node_set if agents.get(addr)]
+        return FlowGraph(
+            edges=edges,
+            nodes=node_set,
+            online=online,
+            broadcast_count=broadcast_count,
+        )
+
+    async def messages_between(
+        self, frm: str, to: str, since: str | None = None
+    ) -> list[Message]:
+        """Direct messages ``frm`` -> ``to`` in the window, newest first (read-only)."""
+        sql = (
+            "SELECT * FROM messages "
+            "WHERE kind = 'direct' AND from_addr = ? AND to_addr = ?"
+        )
+        params: list[object] = [frm, to]
+        if since is not None:
+            sql += " AND created >= ?"
+            params.append(since)
+        sql += " ORDER BY created DESC"
+        cursor = await self._conn.execute(sql, tuple(params))
+        return [_row_to_message(row) for row in await cursor.fetchall()]
 
 
 def _reply_subject(subject: str | None) -> str | None:

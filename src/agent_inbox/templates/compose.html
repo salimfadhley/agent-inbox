@@ -6,8 +6,12 @@
 {% if error %}<p class="err">{{ error }}</p>{% endif %}
 <form class="stack" method="post" action="/ui/compose">
   <label>To
-    <input name="to" required placeholder="project/agent · project · project/all · project/any"
-           value="{{ request_to or '' }}">
+    <input name="to" required autocomplete="off" list="addrs"
+           placeholder="project/agent · project · project/all · project/any"
+           value="{{ to or '' }}">
+    <datalist id="addrs">
+      {% for s in suggestions %}<option value="{{ s }}"></option>{% endfor %}
+    </datalist>
   </label>
   <label>Subject <span class="muted">(optional but encouraged)</span>
     <input name="subject" placeholder="A one-line summary">

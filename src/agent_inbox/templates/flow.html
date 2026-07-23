@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Flow{% endblock %}
+{% block content %}
+<div class="bar" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.6rem">
+  <h1 style="margin:0">Message flow — {{ since_label }}</h1>
+  <div class="bar" style="gap:.4rem">
+    {% for key, label in windows %}
+      <a class="pill {{ 'on' if key == since_key else '' }}" href="/ui/flow?since={{ key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+<p class="muted">
+  {{ node_count }} agents · {{ edge_count }} channels · direct messages only.
+  {% if broadcast_count %}<strong>{{ broadcast_count }}</strong> broadcast/anycast message(s) not shown (they fan out to groups). {% endif %}
+  Drag nodes · click a node → its mailbox · click an arc → those messages.
+</p>
+
+{% if edge_count %}
+<div id="flow" style="height:70vh;border:1px solid var(--line);border-radius:.6rem"></div>
+<script src="/ui/static/vis-network.min.js"></script>
+<script>
+(function () {
+  const SINCE = {{ since_key | tojson }};
+  const rawNodes = {{ nodes_json | safe }};
+  const rawEdges = {{ edges_json | safe }};
+  const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  const nodes = new vis.DataSet(rawNodes.map(function (n) {
+    return {
+      id: n.id, label: n.label,
+      color: { background: n.online ? '#dcfce7' : '#e5e7eb',
+               border: n.online ? '#16a34a' : '#9ca3af' }
+    };
+  }));
+  const edges = new vis.DataSet(rawEdges.map(function (e, i) {
+    return { id: i, from: e.from, to: e.to, label: String(e.count),
+             value: e.count, _from: e.from, _to: e.to };
+  }));
+
+  const net = new vis.Network(document.getElementById('flow'), { nodes: nodes, edges: edges }, {
+    nodes: { shape: 'dot', size: 16, borderWidth: 2,
+             font: { size: 13, color: dark ? '#e6e8eb' : '#111', face: 'system-ui' } },
+    edges: {
+      arrows: { to: { enabled: true, scaleFactor: 0.7 } },
+      smooth: { type: 'curvedCW', roundness: 0.25 },
+      color: { color: '#93a4c4', highlight: '#2563eb' },
+      // 'horizontal' keeps the count upright; 'middle' would rotate it along the arc.
+      font: { size: 17, color: dark ? '#e6e8eb' : '#111', bold: true,
+              strokeWidth: 6, strokeColor: dark ? '#15171c' : '#fff',
+              align: 'horizontal' },
+      scaling: { min: 1, max: 8 }
+    },
+    physics: { barnesHut: { springLength: 170, gravitationalConstant: -7000 },
+               stabilization: { iterations: 300 } },
+    interaction: { hover: true }
+  });
+
+  net.on('click', function (p) {
+    if (p.nodes.length) { location.href = '/ui/mbox/' + p.nodes[0]; return; }
+    if (p.edges.length) {
+      const e = edges.get(p.edges[0]);
+      location.href = '/ui/flow/edge?from=' + encodeURIComponent(e._from) +
+                      '&to=' + encodeURIComponent(e._to) +
+                      '&since=' + encodeURIComponent(SINCE);
+    }
+  });
+})();
+</script>
+{% else %}
+<p class="muted">No direct messages in this window. Try a wider timeframe above.</p>
+{% endif %}
+{% endblock %}

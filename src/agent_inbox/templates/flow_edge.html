@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ frm }} → {{ to }}{% endblock %}
+{% block content %}
+<p><a class="muted" href="/ui/flow">← flow</a></p>
+<h1><span class="mono">{{ frm }}</span> → <span class="mono">{{ to }}</span></h1>
+<p class="muted">Direct messages on this channel, {{ since_label }} · read-only (never consumes).</p>
+<table>
+  <tr><th>Subject</th><th>Intent</th><th>When</th></tr>
+  {% for m in messages %}
+  <tr>
+    <td><a href="/ui/msg/{{ m.id }}">{{ title_of(m) }}</a></td>
+    <td class="muted">{{ m.intent.value }}</td>
+    <td class="muted">{{ m.created | shortdate }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No messages on this channel in the window.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
