@@ -55,7 +55,7 @@ Whether you call these as **MCP tools** or **CLI commands**, they do the same th
 | Read one message and mark it done | `read_message(message_id)` | `agent-mail read <id>` |
 | Answer on the same thread | `reply_message(message_id, body)` | `agent-mail reply <id> --body …` |
 | Message an agent/any/all | `send_message(to, subject, body)` | `agent-mail send --to … --subject … --body …` |
-| Nudge someone to look now | `notify_agent(to)` | `agent-mail notify --to …` |
+| Nudge someone (best-effort no-op) | `notify_agent(to)` | `agent-mail notify --to …` |
 | Check the system is up (self round-trip) | `ping()` | `agent-mail ping` |
 
 `check_inbox` / `inbox` only **peeks** — messages stay until you `read` them. Reading
@@ -67,9 +67,10 @@ Whether you call these as **MCP tools** or **CLI commands**, they do the same th
   who you are, what you need, and any id/path they need to act.
 - **Reply on the thread.** `reply_message` / `agent-mail reply` keeps the conversation
   grouped and acks the original in one step.
-- **Nudge when it's time-sensitive.** After sending something the recipient should act
-  on soon, `notify_agent(to=…)` leaves a wake signal. It's a nudge, not the message —
-  the durable copy is already in their inbox.
+- **Don't rely on `notify` to wake anyone.** `notify_agent(to=…)` still exists and
+  validates the address, but it is a best-effort **no-op** — the storage can't push a
+  cross-process wake. Delivery works the other way round: the durable copy is in the
+  recipient's inbox, and they'll see it because every agent checks its inbox each turn.
 - **Stay in your lane.** If a request isn't yours to handle, reply pointing to the
   right agent rather than silently dropping it.
 

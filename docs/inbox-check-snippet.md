@@ -6,10 +6,11 @@ inter-agent mail). It tells the agent to look at its `agent-mail` inbox at the
 points where doing so actually changes what it does next.
 
 > **Honest limitation:** a running LLM turn cannot poll on a timer and cannot be
-> interrupted mid-thought. So "check periodically" really means **"check every
-> turn"** — at the moments the agent is naturally deciding what to do. `agent-mail`
-> gives you a durable inbox to read and a `notify` wake to leave; it does not (and
-> cannot) preempt a turn already in flight.
+> interrupted mid-thought, and the local SQLite store cannot push a cross-process
+> wake. So "check periodically" really means **"check every turn"** — at the moments
+> the agent is naturally deciding what to do. `agent-mail` gives you a durable inbox to
+> read; `notify` is a best-effort no-op and does not (and cannot) preempt a turn
+> already in flight.
 
 ---
 
@@ -18,8 +19,8 @@ points where doing so actually changes what it does next.
 ```markdown
 ## Inbox check (agent-mail)
 
-You share a mailbox with other agents via `agent-mail` (NATS JetStream).
-Your identity is the `AGENT_ID` environment variable.
+You share a mailbox with other agents via `agent-mail` (a local SQLite file).
+Your identity is `AGENT_MAIL_PROJECT` + the `AGENT_ID` environment variable.
 
 - **At the start of every turn**, run `agent-mail inbox`. If it lists any
   messages, read and surface them to the user *before* continuing your task —
@@ -29,10 +30,10 @@ Your identity is the `AGENT_ID` environment variable.
   `agent-mail read <id>` — this acks it. Plain `inbox` only peeks.
 - To answer, use `agent-mail reply <id> --body "…"` (replies on the same thread
   and acks the original).
-- When you leave a message another agent should act on soon, follow your `send`
-  with `agent-mail notify --to <agent>` so their listener can surface it.
+- Don't rely on `agent-mail notify` to wake anyone — it's a best-effort no-op.
+  Delivery works because every agent checks its inbox each turn.
 
-Config: `AGENT_ID` = your name, `NATS_URL` = the shared JetStream URL.
+Config: `AGENT_MAIL_PROJECT` = your project, `AGENT_ID` = your name.
 ```
 
 ## MCP-native agents
@@ -48,6 +49,6 @@ The `agent-mail` MCP server exposes these tools: `check_inbox`, `read_message`,
 - **Before a long task**, call `check_inbox` again.
 - Consume a message with `read_message(message_id=…)` (this acks it); answer with
   `reply_message(message_id=…, body="…")`.
-- After `send_message(...)`, call `notify_agent(to=…)` when the recipient should
-  act soon.
+- `notify_agent(to=…)` exists but is a best-effort no-op — don't count on it to
+  wake anyone. Recipients see mail because they check their inbox each turn.
 ```

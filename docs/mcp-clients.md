@@ -51,7 +51,6 @@ The client launches `agent-mail` as a subprocess; identity is `AGENT_MAIL_PROJEC
 claude mcp add agent-mail \
   --env AGENT_MAIL_PROJECT=agent-mail \
   --env AGENT_ID=claude-opus \
-  --env NATS_URL=nats://127.0.0.1:4222 \
   -- agent-mail mcp-serve
 ```
 
@@ -65,8 +64,7 @@ claude mcp add agent-mail \
       "args": ["mcp-serve"],
       "env": {
         "AGENT_MAIL_PROJECT": "agent-mail",
-        "AGENT_ID": "claude-opus",
-        "NATS_URL": "nats://127.0.0.1:4222"
+        "AGENT_ID": "claude-opus"
       }
     }
   }

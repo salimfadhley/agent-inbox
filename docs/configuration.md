@@ -10,7 +10,7 @@ field defaults  <  baked defaults.toml  <  runtime --config file  <  environment
 - **Runtime config file** — a TOML file you provide with `--config path.toml` (or `AGENT_MAIL_CONFIG=path.toml`). Good for developers and for `uv`-based runs.
 - **Environment variables** — the last word. Ideal for containers (set them in Portainer, compose, or `-e`).
 
-Every setting has **one canonical name**, used identically as a lowercase TOML key or its UPPERCASE environment variable — e.g. TOML `nats_url` is env `NATS_URL`.
+Every setting has **one canonical name**, used identically as a lowercase TOML key or its UPPERCASE environment variable — e.g. TOML `db` is env `AGENT_MAIL_DB`.
 
 ## Two typical setups
 
@@ -18,7 +18,7 @@ Every setting has **one canonical name**, used identically as a lowercase TOML k
 
 ```bash
 docker run -p 8080:8080 \
-  -e NATS_URL=nats://your-nats:4222 \
+  -v agent-mail-data:/data \
   -e AGENT_MAIL_HUB=homelab \
   -e AGENT_MAIL_ADMIN_AGENT=admin \
   ghcr.io/salimfadhley/agent-mail:latest
@@ -39,18 +39,18 @@ agent-mail doctor
 
 ## Parameters
 
-### NATS connection
+### Storage
+
+Storage is a single local SQLite file — no external service.
 
 | TOML key / env var | Default | Meaning |
 |---|---|---|
-| `nats_url` / `NATS_URL` | `nats://127.0.0.1:4222` | NATS server (JetStream). Use `tls://…` for TLS. |
-| `nats_token` / `NATS_TOKEN` | — | Token auth (secret; masked in `doctor`). |
-| `nats_user` / `NATS_USER` | — | Username auth. |
-| `nats_password` / `NATS_PASSWORD` | — | Password auth (secret; masked). |
-| `nats_creds_file` / `NATS_CREDS_FILE` | — | Path to a NATS `.creds` file (NGS / operator JWT). |
-| `nats_ca_file` / `NATS_CA_FILE` | — | Path to a TLS CA certificate. |
+| `db` / `AGENT_MAIL_DB` | `$XDG_DATA_HOME/agent-mail/agent-mail.db` (i.e. `~/.local/share/agent-mail/agent-mail.db`) | Path to the SQLite file. Created on first use. In a container, use `/data/agent-mail.db` on a mounted volume. |
+| `ttl_days` / `AGENT_MAIL_TTL_DAYS` | `14` | Messages older than this are purged automatically when the mailbox opens. `0` disables expiry. |
+| `max_message_bytes` / `AGENT_MAIL_MAX_MESSAGE_BYTES` | `1048576` | Reject messages whose body exceeds this size (1 MiB by default). |
 
-Set at most one auth style. Point the `*_file` options at mounted Docker/Portainer secrets.
+Old messages are deleted automatically on mailbox open, so history is self-limiting —
+there is no compaction or retention job to run.
 
 ### Identity (two-part: project + agent)
 
@@ -99,15 +99,3 @@ Advertised (non-secret) to agents via the `hub_info` MCP tool and `GET /`.
 | Env var | Meaning |
 |---|---|
 | `AGENT_MAIL_CONFIG` | Path to the runtime TOML config file (same as `--config`). |
-
-## Planned settings
-
-On the [roadmap](missions/); not accepted yet (to avoid dead config):
-
-- **[SQLite backend](missions/0002-sqlite-backend.md)** — `backend` (`nats` | `sqlite`)
-  and `db` (file path). A zero-infrastructure single-box mode that needs no NATS server.
-- **[Elasticsearch audit log](missions/0001-elasticsearch-audit-log.md)** — `es_url`,
-  `es_api_key`, `es_index`, `es_ca_file`, `audit_bodies`. An optional NATS→ES subscriber;
-  if unset, agent-mail runs exactly as today.
-- **Retention** — how long unread mail persists (JetStream max age / size / count).
-- **Max message size** — the Claim-Check threshold for large payloads.

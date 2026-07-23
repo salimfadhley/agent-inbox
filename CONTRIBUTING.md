@@ -10,8 +10,8 @@ uv sync --dev
 uv run pre-commit install    # optional but recommended
 ```
 
-You need **Python 3.12+** and, for the integration test, a **NATS server with
-JetStream**.
+You need **Python 3.12+** and nothing else — storage is a single local SQLite file, so
+the test suite requires no external services.
 
 ## Quality gates
 
@@ -24,11 +24,8 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Live round-trip against a real JetStream (opt-in):
-
-```bash
-AGENT_MAIL_INTEGRATION=1 NATS_URL=nats://your-nats:4222 uv run pytest tests/test_integration.py
-```
+The whole suite (including the mailbox round-trip tests) runs against SQLite with no
+services to stand up and nothing gated behind an environment flag.
 
 ## Coding standards
 
