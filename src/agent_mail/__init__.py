@@ -1,4 +1,4 @@
-"""agent-mail — a NATS JetStream mailbox for local LLM agents."""
+"""agent-mail — a local SQLite mailbox for local LLM agents."""
 
 from __future__ import annotations
 

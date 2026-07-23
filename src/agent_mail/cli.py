@@ -100,7 +100,7 @@ def cli(
     as_json: bool,
     config_path: str | None,
 ) -> None:
-    """A NATS JetStream mailbox for local LLM agents.
+    """A local SQLite mailbox for local LLM agents.
 
     Addresses are two-part: project/agent (direct), project (any one agent), or
     project/* (broadcast to every agent).
