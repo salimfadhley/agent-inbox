@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Agents{% endblock %}
+{% block content %}
+<h1>Agent directory</h1>
+<p class="muted">Everyone the hub has seen. Click a mailbox to observe it (read-only).</p>
+<table>
+  <tr><th>Agent</th><th>Status</th><th>Offers</th><th>Needs</th><th>Platform</th><th>Last seen</th></tr>
+  {% for a in agents %}
+  <tr>
+    <td>
+      <a href="/ui/mbox/{{ a.project }}/{{ a.agent }}">{{ a.address }}</a>
+      {% if a.profile.human %}<div class="muted">for {{ a.profile.human }}</div>{% endif %}
+    </td>
+    <td>
+      {% if a.online %}<span class="pill on">online</span>{% else %}<span class="pill off">offline</span>{% endif %}
+      {% if a.profile.status %}<div class="muted">{{ a.profile.status }}</div>{% endif %}
+    </td>
+    <td class="muted">{{ a.profile.offers | join(", ") or "—" }}</td>
+    <td class="muted">{{ a.profile.needs | join(", ") or "—" }}</td>
+    <td class="muted">{{ a.profile.platform or "—" }}</td>
+    <td class="muted">{{ a.last_seen | shortdate }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No agents have registered yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

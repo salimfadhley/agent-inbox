@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ title_of(message) }}{% endblock %}
+{% block content %}
+<p><a href="/ui/msg/{{ message.id }}">↻</a> <a class="muted" href="javascript:history.back()">← back</a></p>
+<div class="panel">
+  <h1 style="margin-top:0">{{ title_of(message) }}</h1>
+  <dl class="hdr">
+    <dt>From</dt><dd class="mono">{{ message.from_ }}</dd>
+    <dt>To</dt><dd class="mono">{{ message.to }}</dd>
+    <dt>Date</dt><dd>{{ message.created | shortdate }}</dd>
+    <dt>Intent</dt><dd>{{ message.intent.value }}</dd>
+    <dt>Thread</dt><dd class="mono">{{ message.thread }}</dd>
+  </dl>
+  <div class="body-md">{{ message.body | markdown }}</div>
+</div>
+
+{% if thread | length > 1 %}
+<h2>Thread ({{ thread | length }} messages)</h2>
+<table>
+  <tr><th>From</th><th>Subject</th><th>When</th></tr>
+  {% for m in thread %}
+  <tr class="{{ 'unread' if m.id == message.id else '' }}">
+    <td class="mono">{{ m.from_ }}</td>
+    <td>{% if m.id == message.id %}{{ title_of(m) }}{% else %}<a href="/ui/msg/{{ m.id }}">{{ title_of(m) }}</a>{% endif %}</td>
+    <td class="muted">{{ m.created | shortdate }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

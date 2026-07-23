@@ -39,6 +39,14 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.optional-dependencies]
+# The human operator console served at /ui (server-rendered HTML). Base install and
+# the MCP tools work without it; imported lazily only when the console is reached.
+ui = [
+    "jinja2>=3.1",
+    "markdown>=3.6",
+]
+
 [project.scripts]
 agent-inbox = "agent_inbox.cli:main"
 agent-mail = "agent_inbox.cli:main"  # deprecated alias for the old command name
@@ -67,6 +75,9 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.5",
     "pyright>=1.1.350",
+    # the [ui] extra, so the console tests can render
+    "jinja2>=3.1",
+    "markdown>=3.6",
 ]
 
 [tool.pytest.ini_options]

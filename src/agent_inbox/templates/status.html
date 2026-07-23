@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Status{% endblock %}
+{% block content %}
+<h1>Status</h1>
+<div class="panel">
+  <dl class="hdr">
+    <dt>Hub</dt><dd>{{ hub_name }}</dd>
+    <dt>Version</dt><dd class="mono">{{ version }}</dd>
+    <dt>Base URL</dt><dd class="mono">{{ base_url }}</dd>
+    <dt>Operator</dt><dd class="mono">{{ operator }}</dd>
+    <dt>Database</dt><dd class="mono">{{ db }}</dd>
+    <dt>TTL</dt><dd>{{ ttl_days }} day(s)</dd>
+    <dt>Messages</dt><dd>{{ stats.total_messages }} ({{ stats.unread_messages }} unread)</dd>
+    <dt>Agents</dt><dd>{{ stats.agents_online }} online / {{ stats.agents_total }} known</dd>
+    <dt>Now (UTC)</dt><dd class="mono">{{ now | shortdate }}</dd>
+  </dl>
+</div>
+<p class="muted" style="margin-top:1rem"><a href="/ui/doctor">Run diagnostics →</a></p>
+{% endblock %}

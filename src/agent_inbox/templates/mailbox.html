@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ address }}{% endblock %}
+{% block content %}
+<h1><span class="mono">{{ address }}</span></h1>
+<p class="muted">
+  {% if interactive %}
+    This is the operator inbox — <a href="/ui/inbox">open it to read &amp; reply →</a>
+  {% else %}
+    Read-only view. Observing never consumes an agent's mail.
+  {% endif %}
+  {% if info %} · {% if info.online %}<span class="pill on">online</span>{% else %}<span class="pill off">offline</span>{% endif %}{% endif %}
+</p>
+<table>
+  <tr><th>From</th><th>Subject</th><th>Intent</th><th>When</th></tr>
+  {% for m, unread in items %}
+  <tr class="{{ 'unread' if unread else '' }}">
+    <td class="mono">{{ m.from_ }}</td>
+    <td><a href="/ui/msg/{{ m.id }}">{{ title_of(m) }}</a></td>
+    <td class="muted">{{ m.intent.value }}</td>
+    <td class="muted">{{ m.created | shortdate }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">This mailbox is empty.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

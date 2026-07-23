@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>{{ hub_name }} — dashboard</h1>
+
+<div class="cards">
+  <div class="card"><div class="n">{{ stats.total_messages }}</div><div class="l">messages (last {{ 14 }}d)</div></div>
+  <div class="card"><div class="n">{{ stats.unread_messages }}</div><div class="l">unread (claim kinds)</div></div>
+  <div class="card"><div class="n">{{ stats.agents_online }}</div><div class="l">agents online</div></div>
+  <div class="card"><div class="n">{{ stats.agents_total }}</div><div class="l">agents known</div></div>
+</div>
+
+{% if stats.per_day %}
+<h2>Traffic — last 7 days</h2>
+<div class="panel">
+  <div class="spark">
+    {% for day, n in stats.per_day %}
+      <i title="{{ day }}: {{ n }}" style="height:{{ (100 * n / peak) if peak else 0 }}%"></i>
+    {% endfor %}
+  </div>
+  <div class="muted mono" style="margin-top:.4rem">
+    {% for day, n in stats.per_day %}{{ day[5:] }}={{ n }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<h2>Who's online</h2>
+<table>
+  <tr><th>Agent</th><th>Status</th><th>Last seen</th></tr>
+  {% for a in agents %}
+  <tr>
+    <td><a href="/ui/mbox/{{ a.project }}/{{ a.agent }}">{{ a.address }}</a></td>
+    <td>{% if a.online %}<span class="pill on">online</span>{% else %}<span class="pill off">offline</span>{% endif %}</td>
+    <td class="muted">{{ a.last_seen | shortdate }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No agents have registered yet.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Recent activity</h2>
+<table>
+  <tr><th>From</th><th>To</th><th>Subject</th><th>When</th></tr>
+  {% for m in stats.recent %}
+  <tr>
+    <td class="mono">{{ m.from_ }}</td>
+    <td class="mono">{{ m.to }}</td>
+    <td><a href="/ui/msg/{{ m.id }}">{{ title_of(m) }}</a></td>
+    <td class="muted">{{ m.created | shortdate }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">No messages yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

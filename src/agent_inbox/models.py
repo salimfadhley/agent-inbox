@@ -47,7 +47,10 @@ class Message(BaseModel):
     to: str
     thread: str | None = None
     intent: Intent = Intent.message
-    subject: str
+    # Optional but encouraged: a one-line subject makes a message human-readable in
+    # the web console and email-style clients. Absent -> UIs fall back to a body
+    # snippet. (A later mission may auto-summarise a title where none is given.)
+    subject: str | None = None
     body: str
     created: datetime = Field(default_factory=_now)
 

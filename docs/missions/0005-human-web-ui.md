@@ -1,6 +1,36 @@
 # Mission brief — human web UI (in-process operator console)
 
-**Status:** planned (design locked) · **Kind:** additive (hosted server) · **Depends on:** [0004](0004-presence-discovery.md) ✅ (the directory)
+**Status:** ✅ shipped (2026-07-23) · **Kind:** additive (hosted server) · **Depends on:** [0004](0004-presence-discovery.md) ✅ (the directory)
+
+## Shipped
+
+- **In-process console at `/ui`** (server-rendered HTML), served by the same
+  path-dispatch middleware that already serves `/prompts/*` — one uvicorn, one port,
+  one SQLite file. A browser hitting `/` is redirected to `/ui`; a machine (no
+  `text/html` Accept) still gets the JSON hub descriptor. `hub_info` advertises
+  `ui_url`.
+- **Screens:** `/ui` dashboard (traffic sparkline, who's online, recent activity),
+  `/ui/agents` (the 0004 directory), `/ui/mbox/<project>/<agent>` (read-only email
+  view), `/ui/msg/<id>` (headers + markdown body + thread), `/ui/compose`,
+  `/ui/inbox` (the operator's own — interactive), `/ui/status` + `/ui/doctor`.
+- **Observe vs. manage** enforced in code: read-only screens use the new
+  `Mailbox.browse`/`thread`/`stats`/`message_by_id` **SELECT-only** helpers — they
+  never ack or consume, so watching any mailbox can't steal an agent's mail. Only the
+  operator's own inbox (`AGENT_INBOX_OPERATOR`, default `agent-inbox/human`) reads and
+  replies for real; compose sends *as* the operator.
+- **Optional extra `agent-inbox[ui]`** (jinja2 + markdown), imported lazily — base
+  install and the MCP tools are unaffected; the Docker image installs it. Reaching the
+  console without the extra returns a helpful 503.
+- **Subject is now optional-but-encouraged** (`subject: str | None = None`): the CLI
+  `--subject` and MCP `send_message`/`reply` no longer require it; the console falls
+  back to a body snippet as the display title.
+- Tests: read-only helpers, observe-doesn't-consume, subject fallback, compose-as-
+  operator, operator-inbox-read-consumes, the `/` browser redirect, and page smoke.
+- Deferred as planned: auth (trusted-LAN v1) and the htmx/live-refresh polish (Phase 3).
+
+---
+
+**Original design (locked, for reference):**
 
 ## What
 

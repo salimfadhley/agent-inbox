@@ -18,6 +18,7 @@ purged automatically after ``ttl_days`` (see :meth:`Mailbox._purge_expired`).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS messages (
     to_agent    TEXT,                   -- direct only; NULL for any/broadcast
     thread      TEXT,
     intent      TEXT NOT NULL,
-    subject     TEXT NOT NULL,
+    subject     TEXT,                   -- optional; NULL when the sender omitted one
     body        TEXT NOT NULL,
     created     TEXT NOT NULL,          -- ISO-8601 UTC
     acked_at    TEXT                    -- direct/any: set when consumed; NULL = unread
@@ -66,6 +67,18 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 CREATE INDEX IF NOT EXISTS idx_agents_last_seen ON agents (last_seen);
 """
+
+
+@dataclass(frozen=True)
+class MailboxStats:
+    """A read-only snapshot of hub traffic for the console dashboard."""
+
+    total_messages: int
+    unread_messages: int
+    agents_total: int
+    agents_online: int
+    per_day: list[tuple[str, int]] = field(default_factory=list)
+    recent: list[Message] = field(default_factory=list)
 
 
 def _now_iso() -> str:
@@ -395,6 +408,99 @@ class Mailbox:
         row = await cursor.fetchone()
         return self._row_to_agent_info(row) if row else None
 
+    # -- read-only console views (SELECT only — never consume) -------------
+    #
+    # These power the human web console. Unlike ``read``/``peek`` they NEVER ack or
+    # claim a message, so observing another agent's mailbox can't steal its mail.
 
-def _reply_subject(subject: str) -> str:
+    async def browse(self, project: str, agent: str) -> list[tuple[Message, bool]]:
+        """All messages routed to ``project/agent`` (read *and* unread), newest first.
+
+        Returns ``(message, unread)`` pairs. Purely observational — it never consumes,
+        so it is safe to point at *any* agent's mailbox.
+        """
+        reader = format_address(project, agent)
+        cursor = await self._conn.execute(
+            "SELECT * FROM messages WHERE "
+            "  (kind = 'direct' AND to_project = ? AND to_agent = ?)"
+            "  OR (kind = 'any' AND to_project = ?)"
+            "  OR (kind = 'global_any')"
+            "  OR (kind = 'broadcast' AND to_project = ?)"
+            "  OR (kind = 'public')"
+            " ORDER BY created DESC",
+            (project, agent, project, project),
+        )
+        rows = await cursor.fetchall()
+        read_ids = await self._reader_broadcast_ids(reader)
+        items: list[tuple[Message, bool]] = []
+        for row in rows:
+            if row["kind"] in ("broadcast", "public"):
+                unread = row["id"] not in read_ids
+            else:
+                unread = row["acked_at"] is None
+            items.append((_row_to_message(row), unread))
+        return items
+
+    async def _reader_broadcast_ids(self, reader: str) -> set[str]:
+        cursor = await self._conn.execute(
+            "SELECT message_id FROM broadcast_reads WHERE reader = ?", (reader,)
+        )
+        return {row["message_id"] for row in await cursor.fetchall()}
+
+    async def message_by_id(self, message_id: str) -> Message | None:
+        """Return one message by id without consuming it (read-only), or ``None``."""
+        cursor = await self._conn.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,)
+        )
+        row = await cursor.fetchone()
+        return _row_to_message(row) if row else None
+
+    async def thread(self, thread_id: str) -> list[Message]:
+        """Return every message on ``thread_id`` (oldest first), read-only."""
+        cursor = await self._conn.execute(
+            "SELECT * FROM messages WHERE thread = ? ORDER BY created ASC",
+            (thread_id,),
+        )
+        return [_row_to_message(row) for row in await cursor.fetchall()]
+
+    async def stats(self) -> MailboxStats:
+        """A read-only snapshot of hub traffic for the console dashboard."""
+        total = await self._scalar("SELECT COUNT(*) FROM messages")
+        # Unread = direct/any/global_any not yet acked. (Broadcast/public unread is
+        # per-reader; we count the simple claim kinds for an at-a-glance figure.)
+        unread = await self._scalar(
+            "SELECT COUNT(*) FROM messages "
+            "WHERE kind IN ('direct','any','global_any') AND acked_at IS NULL"
+        )
+        agents = await self.list_agents()
+        online = sum(1 for a in agents if a.online)
+        cutoff = (datetime.now(tz=UTC) - timedelta(days=7)).isoformat()
+        cursor = await self._conn.execute(
+            "SELECT substr(created, 1, 10) AS day, COUNT(*) AS n FROM messages "
+            "WHERE created >= ? GROUP BY day ORDER BY day ASC",
+            (cutoff,),
+        )
+        per_day = [(row["day"], row["n"]) for row in await cursor.fetchall()]
+        recent_cursor = await self._conn.execute(
+            "SELECT * FROM messages ORDER BY created DESC LIMIT 10"
+        )
+        recent = [_row_to_message(row) for row in await recent_cursor.fetchall()]
+        return MailboxStats(
+            total_messages=total,
+            unread_messages=unread,
+            agents_total=len(agents),
+            agents_online=online,
+            per_day=per_day,
+            recent=recent,
+        )
+
+    async def _scalar(self, sql: str, params: tuple[object, ...] = ()) -> int:
+        cursor = await self._conn.execute(sql, params)
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+
+def _reply_subject(subject: str | None) -> str | None:
+    if subject is None:
+        return None
     return subject if subject.lower().startswith("re:") else f"Re: {subject}"

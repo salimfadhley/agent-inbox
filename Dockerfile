@@ -27,8 +27,9 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
+# Include the [ui] extra so the hosted image serves the human console at /ui.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --frozen --no-editable
+    uv sync --no-dev --frozen --no-editable --extra ui
 
 
 FROM python:3.12-slim AS runtime

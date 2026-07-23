@@ -52,7 +52,7 @@ def _print_message_human(message: Message, *, full: bool) -> None:
     click.echo(f"  from:    {message.from_}")
     click.echo(f"  to:      {message.to}")
     click.echo(f"  thread:  {message.thread}")
-    click.echo(f"  subject: {message.subject}")
+    click.echo(f"  subject: {message.subject or '(none)'}")
     click.echo(f"  created: {message.created.isoformat()}")
     if full:
         click.echo("  ---")
@@ -121,7 +121,11 @@ def cli(
     required=True,
     help="project/agent · project or project/all · project/any · all/all · any/any",
 )
-@click.option("--subject", required=True, help="Message subject.")
+@click.option(
+    "--subject",
+    default=None,
+    help="Message subject (optional but encouraged — makes the message readable).",
+)
 @click.option("--body", required=True, help="Message body.")
 @click.option("--thread", default=None, help="Thread id to attach to (optional).")
 @click.option(
@@ -134,7 +138,7 @@ def cli(
 def send(
     ctx: click.Context,
     to: str,
-    subject: str,
+    subject: str | None,
     body: str,
     thread: str | None,
     intent: str,

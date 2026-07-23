@@ -38,6 +38,14 @@ path = "/mcp"                          # env AGENT_INBOX_PATH
 # public_url = "https://mail.example"  # env AGENT_INBOX_PUBLIC_URL
                                        # advertised base URL when behind a proxy
 
+# --- Human web console (agent-inbox mcp-serve, http transport) ------------
+# The operator console is served at /ui on the http server (a browser hitting /
+# is redirected there). It shows any mailbox read-only and lets the operator
+# compose + read their own inbox. Needs the [ui] extra: pip install agent-inbox[ui]
+ui = true                              # env AGENT_INBOX_UI  (serve /ui on http)
+# The identity console-sent mail is from, and the one inbox that is interactive.
+operator = "agent-inbox/human"         # env AGENT_INBOX_OPERATOR
+
 # --- Hub identity & administration (advertised to agents via hub_info) ----
 # hub_name = the name of this mailbox collection; set a distinct one per collection.
 hub_name = "agent-inbox"                # env AGENT_INBOX_HUB_NAME

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Doctor{% endblock %}
+{% block content %}
+<h1>Diagnostics</h1>
+<table>
+  <tr><th>Check</th><th>Result</th><th>Detail</th></tr>
+  {% for name, ok, detail in checks %}
+  <tr>
+    <td>{{ name }}</td>
+    <td>{% if ok %}<span class="pill on">ok</span>{% else %}<span class="pill" style="color:#b91c1c;border-color:#b91c1c">fail</span>{% endif %}</td>
+    <td class="muted mono">{{ detail }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

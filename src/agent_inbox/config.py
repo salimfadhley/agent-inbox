@@ -193,6 +193,17 @@ class Config(BaseSettings):
         default=None, validation_alias=_alias("public_url", "AGENT_MAIL_PUBLIC_URL")
     )
 
+    # -- human web console (/ui) ------------------------------------------
+    # Serve the operator console at /ui on the http server. Read-only over any
+    # mailbox; interactive only for the operator's own inbox.
+    ui: bool = Field(default=True, validation_alias=_alias("ui", "AGENT_MAIL_UI"))
+    # The identity human-sent mail (compose/reply from the console) is sent as, and
+    # the one inbox the console treats as interactive.
+    operator: str = Field(
+        default="agent-inbox/human",
+        validation_alias=_alias("operator", "AGENT_MAIL_OPERATOR"),
+    )
+
     # -- hub identity & administration (advertised via hub_info) ----------
     # The name of this mailbox collection (a "hub"). Set a distinct name per collection
     # if you run more than one on the same storage.
@@ -344,6 +355,7 @@ def hub_descriptor(
         },
         "connect_url_template": connect,
         "prompts_url": f"{base}/prompts" if config.transport == "http" else None,
+        "ui_url": (f"{base}/ui" if config.transport == "http" and config.ui else None),
         "transport": config.transport,
         "admin_agent": config.admin_agent,
         "host_agent": config.host_agent,

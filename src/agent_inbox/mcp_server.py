@@ -92,13 +92,17 @@ def _envelope(config: Config, project: str, agent: str) -> dict[str, Any]:
 @mcp.tool()
 async def send_message(
     to: str,
-    subject: str,
     body: str,
+    subject: str | None = None,
     thread: str | None = None,
     intent: str = Intent.message.value,
 ) -> dict[str, Any]:
     """Send a message. ``to`` is ``project/agent`` (direct), ``project`` (any one
-    agent), or ``project/*`` (broadcast to all). Returns the sent message."""
+    agent), or ``project/*`` (broadcast to all). Returns the sent message.
+
+    ``subject`` is optional but encouraged: a one-line subject makes your message
+    readable at a glance in the web console and email-style views.
+    """
     config = _config()
     project, agent = resolve_identity(config)
     message = Message(
@@ -309,11 +313,13 @@ class AgentIdentityMiddleware:
         mount_path: str,
         hub_json: bytes,
         config: Config | None = None,
+        web: ASGIApp | None = None,
     ) -> None:
         self._app = app
         self._mount = mount_path.rstrip("/") or "/mcp"
         self._hub_json = hub_json
         self._config = config
+        self._web = web
         self._pattern = re.compile(
             rf"^/(?P<project>[^/]+)/(?P<agent>[^/]+){re.escape(self._mount)}"
             r"(?P<rest>/.*)?$"
@@ -327,7 +333,19 @@ class AgentIdentityMiddleware:
         if path == "/health":
             await self._json(send, b'{"status":"ok"}')
             return
+        # The human console owns /ui; a browser hitting / is sent there, while a
+        # machine (no text/html Accept) still gets the JSON hub descriptor.
+        if (
+            self._web is not None
+            and path is not None
+            and (path == "/ui" or path.startswith("/ui/"))
+        ):
+            await self._web(scope, receive, send)
+            return
         if path in ("/", "/hub"):
+            if self._web is not None and path == "/" and self._wants_html(scope):
+                await self._redirect(send, "/ui")
+                return
             await self._json(send, self._hub_json)
             return
         if self._config is not None and (path == "/prompts" or path == "/prompts/"):
@@ -376,6 +394,23 @@ class AgentIdentityMiddleware:
         return None
 
     @staticmethod
+    def _wants_html(scope: Scope) -> bool:
+        headers = {k: v for k, v in (scope.get("headers") or [])}
+        accept = headers.get(b"accept", b"").decode().lower()
+        return "text/html" in accept
+
+    @staticmethod
+    async def _redirect(send: Send, location: str) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 303,
+                "headers": [(b"location", location.encode())],
+            }
+        )
+        await send({"type": "http.response.body", "body": b""})
+
+    @staticmethod
     async def _json(send: Send, body: bytes) -> None:
         await send(
             {
@@ -402,8 +437,13 @@ def build_http_app(config: Config, max_message_bytes: int | None = None) -> ASGI
     """Build the multi-tenant ASGI app for the hosted MCP server."""
     mcp.settings.streamable_http_path = config.path
     hub_json = json.dumps(hub_descriptor(config, max_message_bytes)).encode()
+    web: ASGIApp | None = None
+    if config.ui:
+        from agent_inbox.webui import WebConsole
+
+        web = WebConsole(config)
     return AgentIdentityMiddleware(
-        mcp.streamable_http_app(), config.path, hub_json, config
+        mcp.streamable_http_app(), config.path, hub_json, config, web
     )
 
 

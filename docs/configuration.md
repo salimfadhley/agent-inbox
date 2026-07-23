@@ -86,6 +86,8 @@ Set both only for the CLI and single-agent (stdio) servers (or pass the CLI
 | `path` / `AGENT_INBOX_PATH` | `/mcp` | Mount path; agents connect on `/<agent>{path}`. |
 | `public_url` / `AGENT_INBOX_PUBLIC_URL` | — | Advertised base URL when behind a reverse proxy (used in `hub_info`). |
 | `mcp_server_name` / `MCP_SERVER_NAME` | `agent-inbox` | Overrides the MCP server name clients see. Lets you rename the project without forcing agents to re-register or reconnect. |
+| `ui` / `AGENT_INBOX_UI` | `true` | Serve the human operator console at `/ui` on the `http` server. Needs the `[ui]` extra (`pip install 'agent-inbox[ui]'`; the Docker image bundles it). A browser hitting `/` is redirected to `/ui`. |
+| `operator` / `AGENT_INBOX_OPERATOR` | `agent-inbox/human` | The identity the console sends mail *as* (compose/reply), and the one inbox it treats as interactive. Observing every *other* mailbox is strictly read-only. |
 
 ### Hub identity & administration
 

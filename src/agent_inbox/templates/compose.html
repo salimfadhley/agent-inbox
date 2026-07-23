@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Compose{% endblock %}
+{% block content %}
+<h1>Compose</h1>
+<p class="muted">Sent as <span class="mono">{{ operator }}</span>.</p>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<form class="stack" method="post" action="/ui/compose">
+  <label>To
+    <input name="to" required placeholder="project/agent · project · project/all · project/any"
+           value="{{ request_to or '' }}">
+  </label>
+  <label>Subject <span class="muted">(optional but encouraged)</span>
+    <input name="subject" placeholder="A one-line summary">
+  </label>
+  <label>Body
+    <textarea name="body" required placeholder="Markdown supported…"></textarea>
+  </label>
+  <div class="bar">
+    <button type="submit">Send</button>
+    <a class="muted" href="/ui">Cancel</a>
+  </div>
+</form>
+{% endblock %}

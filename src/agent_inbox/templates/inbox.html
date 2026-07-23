@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}My inbox{% endblock %}
+{% block content %}
+<h1>My inbox — <span class="mono">{{ address }}</span></h1>
+<p class="muted">Your own mail. Reading here consumes the message (acks it); replying sends back to the sender.</p>
+{% for m, unread in items %}
+<div class="panel" style="margin-bottom:.8rem">
+  <div class="bar" style="justify-content:space-between">
+    <div>
+      <strong>{{ title_of(m) }}</strong>
+      {% if unread %}<span class="pill" style="color:var(--accent);border-color:var(--accent)">unread</span>{% endif %}
+    </div>
+    <span class="muted">{{ m.created | shortdate }}</span>
+  </div>
+  <div class="muted mono" style="margin:.2rem 0 .5rem">from {{ m.from_ }} · {{ m.intent.value }}</div>
+  <div class="body-md" style="border:0;padding:0;margin:0">{{ m.body | markdown }}</div>
+  <details style="margin-top:.7rem">
+    <summary>Reply</summary>
+    <form class="stack" method="post" action="/ui/inbox/reply" style="margin-top:.6rem">
+      <input type="hidden" name="message_id" value="{{ m.id }}">
+      <label>Subject (optional)
+        <input name="subject" placeholder="Re: {{ title_of(m) }}">
+      </label>
+      <label>Body
+        <textarea name="body" required placeholder="Markdown supported…"></textarea>
+      </label>
+      <div class="bar"><button type="submit">Send reply</button></div>
+    </form>
+  </details>
+  <form method="post" action="/ui/inbox/read" style="margin-top:.5rem">
+    <input type="hidden" name="message_id" value="{{ m.id }}">
+    <button class="secondary" type="submit">Mark read (consume)</button>
+  </form>
+</div>
+{% else %}
+<p class="muted">Your inbox is empty.</p>
+{% endfor %}
+{% endblock %}

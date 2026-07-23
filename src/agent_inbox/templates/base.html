@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ hub_name }}{% endblock %} · agent-inbox</title>
+  <style>
+    :root { color-scheme: light dark; --line:#d8dee9; --muted:#6b7280; --accent:#2563eb; --bg:#fff; --fg:#111; --panel:#f7f8fa; }
+    @media (prefers-color-scheme: dark) {
+      :root { --line:#333; --muted:#9aa4b2; --accent:#6ea8fe; --bg:#15171c; --fg:#e6e8eb; --panel:#1d2027; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           background:var(--bg); color:var(--fg); line-height:1.45; }
+    header { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap;
+             padding:.7rem 1.1rem; border-bottom:1px solid var(--line); }
+    header .brand { font-weight:700; }
+    header nav { display:flex; gap:.9rem; flex-wrap:wrap; }
+    header nav a { color:var(--accent); text-decoration:none; font-size:.92rem; }
+    header nav a:hover { text-decoration:underline; }
+    main { max-width:60rem; margin:0 auto; padding:1.2rem 1.1rem 3rem; }
+    h1 { font-size:1.35rem; margin:.2rem 0 1rem; }
+    h2 { font-size:1.05rem; margin:1.4rem 0 .6rem; }
+    a { color:var(--accent); }
+    table { width:100%; border-collapse:collapse; font-size:.92rem; }
+    th, td { text-align:left; padding:.45rem .5rem; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.03em; }
+    tr.unread td { font-weight:700; }
+    .muted { color:var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.86em; }
+    .pill { display:inline-block; padding:.05rem .5rem; border-radius:999px; font-size:.75rem;
+            border:1px solid var(--line); color:var(--muted); }
+    .pill.on { color:#0a7d33; border-color:#0a7d33; }
+    .pill.off { color:var(--muted); }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr)); gap:.8rem; margin:1rem 0; }
+    .card { border:1px solid var(--line); border-radius:.6rem; padding:.8rem 1rem; background:var(--panel); }
+    .card .n { font-size:1.7rem; font-weight:700; }
+    .card .l { color:var(--muted); font-size:.82rem; }
+    .panel { border:1px solid var(--line); border-radius:.6rem; padding:1rem 1.1rem; background:var(--panel); }
+    form.stack { display:grid; gap:.7rem; max-width:40rem; }
+    label { display:grid; gap:.25rem; font-size:.9rem; }
+    input, textarea, select, button { font:inherit; padding:.5rem .6rem; border-radius:.4rem;
+             border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+    textarea { min-height:9rem; resize:vertical; }
+    button { background:var(--accent); color:#fff; border:none; cursor:pointer; padding:.55rem 1rem; }
+    button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+    .bar { display:flex; gap:.5rem; align-items:center; }
+    .spark { display:inline-flex; align-items:flex-end; gap:2px; height:2rem; }
+    .spark i { width:10px; background:var(--accent); border-radius:2px 2px 0 0; display:inline-block; }
+    .err { color:#b91c1c; }
+    .body-md { border-top:1px solid var(--line); margin-top:1rem; padding-top:1rem; }
+    .body-md pre { overflow-x:auto; background:var(--panel); padding:.7rem; border-radius:.4rem; }
+    .hdr { display:grid; grid-template-columns:auto 1fr; gap:.2rem .8rem; font-size:.92rem; }
+    .hdr dt { color:var(--muted); }
+    .hdr dd { margin:0; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand"><a href="/ui" style="text-decoration:none;color:inherit">{{ hub_name }}</a></span>
+    <nav>
+      {% for href, label in nav %}<a href="{{ href }}">{{ label }}</a>{% endfor %}
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
