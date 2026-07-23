@@ -194,6 +194,11 @@ class Config(BaseSettings):
     admin_agent: str | None = Field(
         default=None, validation_alias=_alias("admin_agent", "AGENT_MAIL_ADMIN_AGENT")
     )
+    # The coordinator agents introduce themselves to on sign-on (keeps the who's-who
+    # roster). Distinct from admin_agent (hub operator contact); may be the same id.
+    host_agent: str | None = Field(
+        default=None, validation_alias=_alias("host_agent", "AGENT_MAIL_HOST_AGENT")
+    )
     issue_url: str | None = Field(
         default=None, validation_alias=_alias("issue_url", "AGENT_MAIL_ISSUE_URL")
     )
@@ -279,11 +284,16 @@ class Config(BaseSettings):
         return data
 
 
-def _hub_version() -> str:
+def hub_version() -> str:
+    """The running mailbox version (from the installed ``agent-inbox`` distribution)."""
     try:
         return _pkg_version("agent-inbox")
     except PackageNotFoundError:  # pragma: no cover - source checkout w/o metadata
         return "0.0.0"
+
+
+# Back-compat alias for internal callers.
+_hub_version = hub_version
 
 
 def hub_descriptor(
@@ -322,6 +332,7 @@ def hub_descriptor(
         "connect_url_template": connect,
         "transport": config.transport,
         "admin_agent": config.admin_agent,
+        "host_agent": config.host_agent,
         "issue_url": config.issue_url,
         "contact": config.contact,
         "tools": [

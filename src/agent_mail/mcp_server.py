@@ -19,14 +19,16 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import Awaitable, Callable, MutableMapping
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from agent_mail.config import Config, format_address, hub_descriptor
+from agent_mail.config import Config, format_address, hub_descriptor, hub_version
 from agent_mail.identity import (
     reset_current_agent,
     resolve_identity,
@@ -52,12 +54,32 @@ mcp = FastMCP(
 )
 
 
+_STARTED_MONO = time.monotonic()
+
+
 def _config() -> Config:
     return Config.from_env()
 
 
 def _dump(message: Message) -> dict[str, Any]:
     return message.model_dump(by_alias=True, mode="json")
+
+
+def _envelope(config: Config, project: str, agent: str) -> dict[str, Any]:
+    """Mailbox context returned alongside inbox responses (an 'envelope').
+
+    Per-message metadata (the sender ``from`` and the sent time ``created``) already
+    lives on each message; this adds the mailbox's own context.
+    """
+    now = datetime.now(tz=UTC)
+    return {
+        "hub": config.hub_name,
+        "version": hub_version(),
+        "now": now.isoformat(),
+        "timezone": "UTC",
+        "uptime_seconds": round(time.monotonic() - _STARTED_MONO, 1),
+        "your_address": format_address(project, agent),
+    }
 
 
 @mcp.tool()
@@ -86,23 +108,37 @@ async def send_message(
 
 
 @mcp.tool()
-async def check_inbox() -> list[dict[str, Any]]:
-    """List my unread messages without consuming them (peek). Call each turn."""
+async def check_inbox() -> dict[str, Any]:
+    """List my unread messages without consuming them (peek). Call each turn.
+
+    Returns an envelope: ``{"mailbox": {hub, version, now, timezone, uptime_seconds,
+    your_address}, "messages": [...]}``. Each message carries its sender (``from``)
+    and sent time (``created``).
+    """
     config = _config()
     project, agent = resolve_identity(config)
     async with Mailbox(config) as mailbox:
         messages = await mailbox.peek(project, agent)
-    return [_dump(m) for m in messages]
+    return {
+        "mailbox": _envelope(config, project, agent),
+        "messages": [_dump(m) for m in messages],
+    }
 
 
 @mcp.tool()
 async def read_message(message_id: str) -> dict[str, Any]:
-    """Read one message by id and ack (consume) it."""
+    """Read one message by id and ack (consume) it.
+
+    Returns ``{"mailbox": {...context...}, "message": {...}}``.
+    """
     config = _config()
     project, agent = resolve_identity(config)
     async with Mailbox(config) as mailbox:
         message = await mailbox.read(project, agent, message_id)
-    return _dump(message)
+    return {
+        "mailbox": _envelope(config, project, agent),
+        "message": _dump(message),
+    }
 
 
 @mcp.tool()

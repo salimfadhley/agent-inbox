@@ -41,6 +41,8 @@ hub_name = "agent-mail"                # env AGENT_MAIL_HUB_NAME
 # hub_description = "Homelab agent mail"        # env AGENT_MAIL_HUB_DESCRIPTION
 # admin_agent = "admin"                # env AGENT_MAIL_ADMIN_AGENT
                                        # agents can mail this id for help
+# host_agent = "host"                  # env AGENT_MAIL_HOST_AGENT
+                                       # coordinator agents introduce themselves to
 # issue_url = "https://github.com/you/repo/issues"   # env AGENT_MAIL_ISSUE_URL
 # contact = "ops@example.com"          # env AGENT_MAIL_CONTACT
 
