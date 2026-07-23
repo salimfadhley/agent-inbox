@@ -1,8 +1,13 @@
 name: Docker image
 
-# Build the hostable MCP server image and push it to GitHub Container Registry.
-# On every push to main -> :latest (+ :main-<sha>). On a v* tag -> :<version>.
-# Homelab / self-hosters pull ghcr.io/salimfadhley/agent-mail:latest.
+# Build the hostable MCP server image and push it to Docker Hub (and GHCR as a free
+# mirror). On every push to main -> :latest (+ :main-<sha>). On a v* tag -> :<version>.
+# Users pull  docker.io/<DOCKERHUB_USERNAME>/agent-mail:latest.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   DOCKERHUB_USERNAME  your Docker Hub account/namespace
+#   DOCKERHUB_TOKEN     a Docker Hub access token (hub.docker.com -> Account
+#                       Settings -> Security -> New Access Token, Read/Write)
 
 on:
   push:
@@ -18,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write  # for the GHCR mirror
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +32,12 @@ jobs:
       - name: Compute version (hatch-vcs style)
         id: version
         run: echo "value=$(git describe --tags --always | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -39,7 +50,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: |
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/agent-mail
+            ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=main-,enable={{is_default_branch}}
