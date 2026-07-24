@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "mission_slug": "cli-primary-client-01KYA42E",
+  "mission_id": "01KYA42EN1KZ8GQYGDNF35BPDT",
+  "mission_branch": "kitty/mission-cli-primary-client-01KYA42E",
+  "target_branch": "feat/cli-primary-client",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01"
+      ],
+      "write_scope": [
+        "pyproject.toml",
+        "src/agent_inbox/api.py",
+        "tests/test_api.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_inbox/conf_file.py",
+        "tests/test_conf_file.py"
+      ],
+      "predicted_surfaces": [
+        "api"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-c",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        "src/agent_inbox/client.py",
+        "tests/test_client.py"
+      ],
+      "predicted_surfaces": [
+        "api"
+      ],
+      "depends_on_lanes": [
+        "lane-a",
+        "lane-b"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "lane_id": "lane-d",
+      "wp_ids": [
+        "WP04"
+      ],
+      "write_scope": [
+        "src/agent_inbox/cli.py",
+        "tests/test_cli.py"
+      ],
+      "predicted_surfaces": [
+        "api"
+      ],
+      "depends_on_lanes": [
+        "lane-c"
+      ],
+      "parallel_group": 2
+    },
+    {
+      "lane_id": "lane-e",
+      "wp_ids": [
+        "WP05"
+      ],
+      "write_scope": [
+        "src/agent_inbox/mcp_server.py",
+        "src/agent_inbox/stdio_proxy.py",
+        "tests/test_stdio_proxy.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-d"
+      ],
+      "parallel_group": 3
+    },
+    {
+      "lane_id": "lane-f",
+      "wp_ids": [
+        "WP06"
+      ],
+      "write_scope": [
+        "docs/missions/README.md",
+        "src/agent_inbox/prompts/admin.md",
+        "src/agent_inbox/prompts/agent.md",
+        "src/agent_inbox/prompts/host.md",
+        "src/agent_inbox/templates/prompts.html"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-e"
+      ],
+      "parallel_group": 4
+    }
+  ],
+  "computed_at": "2026-07-24T13:24:30.999158+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": []
+}
