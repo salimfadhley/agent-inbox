@@ -42,7 +42,11 @@ services:
     command: ["console", "--host", "0.0.0.0", "--port", "8090"]
     restart: unless-stopped
     depends_on:
-      - agent-mailbox
+      # Wait for the hub's healthcheck, not just for its container to exist. The console
+      # claims its own mailbox once at startup; if it raced ahead of a not-yet-ready hub
+      # that join would quietly fail and compose/inbox would not work until a restart.
+      agent-mailbox:
+        condition: service_healthy
     ports:
       - "${CONSOLE_PORT:-8082}:8090"
     environment:

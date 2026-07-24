@@ -29,7 +29,11 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --python ${{ matrix.python-version }} --dev
+        # `--extra clients` matters: mcp_client.py imports `mcp`, which lives in the
+        # clients extra, not the dev group. Without it pyright cannot resolve the import
+        # and the type check fails on code that is perfectly fine — the hub image omits
+        # these deps deliberately (ADR 0009), but CI type-checks the whole source tree.
+        run: uv sync --python ${{ matrix.python-version }} --dev --extra clients
 
       - name: Lint (ruff check)
         run: uv run ruff check src tests
@@ -45,6 +49,73 @@ jobs:
 
       - name: Tests (pytest)
         run: uv run pytest
+
+  # Live smoke: build the real image, run the deploy topology (hub + console sidecar),
+  # and hit it over HTTP. This catches what the unit suite structurally cannot — that the
+  # image starts, the ASGI server serves, the routes are wired into the app that ships,
+  # and the console can reach the hub. Every past live break was of exactly this shape
+  # and passed every unit test. Because the release build (docker.yml) only fires after
+  # CI is green, this gates the release on the stack actually working.
+  smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build the image (single-arch, for speed)
+        # Tagged as the name compose expects, so `compose up` uses this local build
+        # rather than pulling. VERSION is cosmetic here; the smoke test does not assert
+        # on it.
+        run: docker build --build-arg VERSION=0.0.0 -t salimfadhley/agent-mailbox:latest .
+
+      - name: Launch the stack (hub + console sidecar)
+        env:
+          AGENT_MAILBOX_PUBLIC_URL: http://localhost:8080
+        run: docker compose up -d
+
+      - name: Wait for the hub to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "hub is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the hub did not become healthy in 60s"
+          docker compose ps
+          docker compose logs
+          exit 1
+
+      - name: Wait for the console
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:8082/ >/dev/null 2>&1; then
+              echo "console is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the console did not answer in 40s"
+          docker compose logs console
+          exit 1
+
+      - name: Run the live smoke tests
+        env:
+          LIVE_HUB_URL: http://localhost:8080
+          LIVE_CONSOLE_URL: http://localhost:8082
+        run: uv run pytest tests/live -v
+
+      - name: Stack logs (always, for debugging a failure)
+        if: always()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
 
   build:
     needs: test
