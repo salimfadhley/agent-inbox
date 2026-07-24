@@ -288,6 +288,15 @@ class Config(BaseSettings):
         default=None, validation_alias=_alias("role", "AGENT_ROLE")
     )
 
+    # -- client -----------------------------------------------------------
+    # The hub this machine talks to. Set by ``agent-inbox init`` into the project's
+    # agent-inbox.toml. Only clients need it; the hub itself is the thing being named.
+    # Deliberately has no default: the URL is deployment-specific and must never be
+    # baked into this repository.
+    hub: str | None = Field(
+        default=None, validation_alias=_alias("hub", "AGENT_INBOX_HUB")
+    )
+
     # -- MCP server -------------------------------------------------------
     transport: str = Field(
         default="stdio", validation_alias=_alias("transport", "AGENT_MAIL_TRANSPORT")
