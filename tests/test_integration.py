@@ -402,7 +402,8 @@ async def test_migration_preserves_a_pre_three_part_store(tmp_path: Path) -> Non
     now = datetime.now(tz=UTC).isoformat()
     con.executemany(
         "INSERT INTO messages (id, from_addr, to_addr, kind, to_project, to_agent, "
-        "thread, intent, subject, body, created, acked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "thread, intent, subject, body, created, acked_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             # a direct message still waiting to be read
             (
@@ -493,3 +494,77 @@ async def test_migration_is_idempotent(tmp_path: Path) -> None:
     async with Mailbox(config) as mb:
         assert await mb._scalar("SELECT COUNT(*) FROM messages") == 1
         assert await mb.storage_initialized_at() == stamp
+
+
+# -- mission 0013: friction fixes ---------------------------------------------
+
+
+async def test_reply_works_after_reading(mailbox: Mailbox) -> None:
+    """read-then-reply is the NATURAL sequence; it must not be the broken one.
+
+    Reported by goldberg/system: reading acks, after which reply_message could not
+    find the message at all.
+    """
+    project = _project()
+    original = Message(
+        from_=f"{project}/alice", to=f"{project}/bob", subject="q", body="question?"
+    )
+    await mailbox.send(original)
+
+    await mailbox.read(project, "bob", original.id)  # consumed
+    reply = await mailbox.reply(
+        project, "bob", original.id, "answer"
+    )  # must still work
+
+    assert reply.intent is Intent.reply
+    assert reply.to == f"{project}/alice"
+    assert reply.thread == original.thread
+    assert reply.subject == "Re: q"
+
+    # ...but you still cannot reply to mail that was never addressed to you
+    with pytest.raises(MailboxError):
+        await mailbox.reply("other", "eve", original.id, "nope")
+
+
+async def test_storage_stamp_never_postdates_its_own_data(
+    mailbox: Mailbox,
+) -> None:
+    """A live hub claimed it was created 38 minutes AFTER its oldest message.
+
+    Reported by woking_improv_website: the stamp made rejoining agents distrust a
+    directory that had never been reset.
+    """
+    project = _project()
+    await mailbox.send(
+        Message(from_=f"{project}/a", to=f"{project}/b", subject="s", body="b")
+    )
+    # simulate the v0.5.0 upgrade case: hub_meta written long after the real data
+    await mailbox._conn.execute(
+        "UPDATE hub_meta SET value = ? WHERE key = 'initialized_at'",
+        ((datetime.now(tz=UTC) + timedelta(days=1)).isoformat(),),
+    )
+    await mailbox._conn.commit()
+
+    stamp = await mailbox.storage_initialized_at()
+    oldest = await mailbox._oldest_record()
+    assert stamp is not None and oldest is not None
+    assert stamp <= oldest, "the stamp must never post-date the data it holds"
+
+
+async def test_reach_lets_an_agent_triage_at_a_glance(mailbox: Mailbox) -> None:
+    """Was this aimed at me, or at everyone? Previously only derivable by parsing `to`.
+
+    Reported by steele_fcpxml, whose sharpest point was that the broadcast asking
+    people NOT to reply is exactly the one they cannot tell from a direct request.
+    """
+    project = _project()
+    await mailbox.send(
+        Message(from_=f"{project}/a", to=f"{project}/bob", subject="d", body="x")
+    )
+    await mailbox.send(
+        Message(from_=f"{project}/a", to=f"{project}/all", subject="p", body="x")
+    )
+    await mailbox.send(Message(from_="other/a", to="all/all", subject="b", body="x"))
+
+    reach = {m.subject: m.reach for m in await mailbox.peek(project, "bob")}
+    assert reach == {"d": "direct", "p": "project", "b": "broadcast"}

@@ -118,7 +118,7 @@ def test_every_role_prompt_covers_the_four_setup_steps() -> None:
 
 
 def test_short_prompt_is_a_one_paste_bootstrap() -> None:
-    """The short form assigns the role and defers to the live page for everything else."""
+    """The short form assigns a role and defers to the live page for the rest."""
     config = _config()
     for name in ("agent", "host", "admin"):
         short = prompts.render_short(name, config)

@@ -147,6 +147,18 @@ def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
+def _reach(row: aiosqlite.Row) -> str:
+    """How widely this message was addressed, from its routing columns."""
+    keys = row.keys()
+    project = row["to_project"] if "to_project" in keys else None
+    agent = row["to_agent"] if "to_agent" in keys else None
+    if agent is not None:
+        return "direct"  # aimed at a named agent
+    if project is not None:
+        return "project"  # every agent on one project
+    return "broadcast"  # everyone, everywhere
+
+
 def _row_to_message(row: aiosqlite.Row) -> Message:
     return Message(
         id=row["id"],
@@ -157,6 +169,7 @@ def _row_to_message(row: aiosqlite.Row) -> Message:
         subject=row["subject"],
         body=row["body"],
         created=row["created"],
+        reach=_reach(row),
     )
 
 
@@ -517,8 +530,21 @@ class Mailbox:
         subject: str | None = None,
         role: str | None = None,
     ) -> Message:
-        """Consume message ``message_id`` and reply directly to its sender."""
-        original = await self.read(project, agent, message_id, role)
+        """Reply directly to the sender of ``message_id``, consuming it if unread.
+
+        Replying works whether or not you have already read the message. Reading is
+        the natural *precondition* for replying, so requiring it to be unread made the
+        obvious read-then-reply sequence the one that failed. Acking is incidental
+        here — what a reply actually needs is the original's sender and thread.
+        """
+        try:
+            original = await self.read(project, agent, message_id, role)
+        except MailboxError:
+            # Already consumed (or a fan-out copy this agent has read). Replying is
+            # still legitimate — but only to a message actually routed to us.
+            original = await self._readable_message(project, agent, message_id, role)
+            if original is None:
+                raise
         reply = Message(
             from_=format_address(project, agent, role),
             to=original.from_,
@@ -528,6 +554,23 @@ class Mailbox:
             body=body,
         )
         return await self.send(reply)
+
+    async def _readable_message(
+        self, project: str, agent: str, message_id: str, role: str | None = None
+    ) -> Message | None:
+        """A message routed to this agent, read or unread — else ``None``.
+
+        Same routing predicate as ``peek``/``read``, minus the unread requirement, so
+        an agent can still act on mail it has legitimately consumed but cannot reach
+        mail that was never addressed to it.
+        """
+        params = self._reader(project, agent, role)
+        params["id"] = message_id
+        cursor = await self._conn.execute(
+            f"SELECT * FROM messages WHERE id = :id AND {self._ROUTES_TO}", params
+        )
+        row = await cursor.fetchone()
+        return _row_to_message(row) if row else None
 
     async def notify(self, to: str, thread: str | None = None) -> None:
         """Best-effort 'you have mail' wake.
@@ -654,13 +697,36 @@ class Mailbox:
         """When this hub's storage was created (ISO-8601), or ``None`` if unknown.
 
         A rejoining agent compares this against when it last registered: if the store
-        is newer, the directory was **reset** and remembered addresses may be stale.
+        is newer, the directory may have been **reset** and remembered addresses may
+        be stale.
+
+        The stamp is never allowed to post-date the data it holds. The ``hub_meta``
+        table only arrived in v0.5.0, so on any older store the raw value records when
+        the hub was *upgraded* — which had a live hub claiming it was created 38
+        minutes after its own oldest message, and sent rejoining agents off to
+        re-verify counterparts for nothing. So we take the earlier of the stamp and
+        the oldest thing actually stored.
         """
         cursor = await self._conn.execute(
             "SELECT value FROM hub_meta WHERE key = 'initialized_at'"
         )
         row = await cursor.fetchone()
-        return row["value"] if row else None
+        stamped = row["value"] if row else None
+        oldest = await self._oldest_record()
+        if stamped and oldest:
+            return min(stamped, oldest)
+        return stamped or oldest
+
+    async def _oldest_record(self) -> str | None:
+        """The earliest timestamp in the store — evidence of when it really began."""
+        cursor = await self._conn.execute(
+            "SELECT MIN(t) FROM ("
+            "  SELECT MIN(created) AS t FROM messages"
+            "  UNION ALL SELECT MIN(first_seen) FROM agents"
+            ")"
+        )
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else None
 
     async def list_agents(
         self, project: str | None = None, include_stale: bool = False

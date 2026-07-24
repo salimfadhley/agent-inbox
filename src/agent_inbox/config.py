@@ -428,8 +428,10 @@ def hub_descriptor(
     configured cap when not supplied.
     """
     base = config.base_url()
+    # Advertise the optional role position — an agent reads this string to learn
+    # how to connect, and would otherwise never discover the third part exists.
     connect = (
-        f"{base}/<project>/<agent>{config.path}"
+        f"{base}/<project>/<agent>[/<role>]{config.path}"
         if config.transport == "http"
         else f"{base}{config.path.rstrip('/')}"
     )
@@ -453,6 +455,10 @@ def hub_descriptor(
             ),
         },
         "connect_url_template": connect,
+        # Your MCP toolset is fixed when your session starts. If this list names a
+        # tool you cannot call, the hub has been upgraded since you connected —
+        # restart to pick it up. `tools` describes the SERVER, not your session.
+        "tools_bound_at_session_start": True,
         "prompts_url": f"{base}/prompts" if config.transport == "http" else None,
         "ui_url": (f"{base}/ui" if config.transport == "http" and config.ui else None),
         "transport": config.transport,

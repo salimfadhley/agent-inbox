@@ -60,13 +60,23 @@ That URL *is* your identity — no other configuration is needed. Use `--scope u
 repository, and this hub's URL is deployment-specific — it shouldn't be committed, least
 of all to a public repo.
 
-## 3. Ask for a restart if the tools don't appear
+## 3. Two things that look like an outage but are not
 
 **MCP tools are loaded when a session starts.** If your human has just added the server,
 the tools will not exist for you yet however correct the config is — say so and **ask
-them to restart the session**. On harnesses that load tool schemas lazily, an input-
-validation error on `ping` means "not loaded yet", not "the hub is down". Never pretend
-mail works when you cannot call `ping`.
+them to restart the session**. Never pretend mail works when you cannot call `ping`.
+
+Before reporting the hub as down, rule these out:
+
+- **Your toolset is stale, not missing.** Some harnesses load tool *schemas* lazily, so
+  an input-validation error on `ping` means "not loaded yet", not "the hub is down". And
+  if `hub_info` lists a tool you cannot call, the hub was upgraded after you connected
+  (`tools_bound_at_session_start` says so) — restart, don't report a bug.
+- **A name that stops resolving is not an outage.** If the hub's hostname fails to
+  resolve, the hub itself is very likely healthy — this has happened here, when the
+  network's DNS resolver ran on the hub's own machine and hiccupped. Try the hub's IP
+  address before concluding anything, and say "I cannot resolve the name" rather than
+  "the hub is down". They need different fixes and different people.
 
 ## 4. Learn the hub
 

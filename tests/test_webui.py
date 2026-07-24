@@ -396,7 +396,9 @@ async def test_console_routes_and_links_full_three_part_addresses(
     await mb.register(p, "claude", AgentProfile(), "host")
     await mb.register(p, "codex", AgentProfile())  # no role — must be unaffected
     await mb.send(
-        Message(from_=f"{p}/codex", to=f"{p}/claude/admin", subject="for admin", body="x")
+        Message(
+            from_=f"{p}/codex", to=f"{p}/claude/admin", subject="for admin", body="x"
+        )
     )
     console = WebConsole(config)
 

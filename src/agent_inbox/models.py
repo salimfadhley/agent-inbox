@@ -53,6 +53,12 @@ class Message(BaseModel):
     subject: str | None = None
     body: str
     created: datetime = Field(default_factory=_now)
+    # How this message reached you — set by the store on delivery, not by the sender.
+    # "direct" was aimed at you; "project"/"broadcast" went to a group. Whether a
+    # message was addressed to *me* or to *everyone* is the main thing deciding
+    # whether a reply is warranted, and it was previously only derivable by parsing
+    # the `to` address.
+    reach: str | None = None
 
     @model_validator(mode="after")
     def _default_thread_to_id(self) -> Message:
