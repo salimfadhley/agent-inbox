@@ -22,6 +22,7 @@ from litestar import Litestar, MediaType, get
 from litestar.response import Response
 
 from agent_mailbox.client import HubClient
+from agent_mailbox.prompts import onboarding, role_note
 
 STYLE = """
 :root { color-scheme: light dark; --line: #8884; }
@@ -68,7 +69,8 @@ def _page(title: str, body: str, hub: dict[str, Any] | None = None) -> str:
 <body>
 <h1><a href="/">{name}</a></h1>
 <p class="sub">{html.escape(title)}{f" · v{version}" if version else ""}</p>
-<nav><a href="/">Overview</a><a href="/agents">Agents</a></nav>
+<nav><a href="/">Overview</a><a href="/agents">Agents</a>
+<a href="/prompts">Prompt</a></nav>
 {warning}
 {body}
 </body></html>"""
@@ -193,4 +195,36 @@ def build_console(client: HubClient) -> Litestar:
             _page(f"{name}'s mailbox", body, hub), media_type=MediaType.HTML
         )
 
-    return Litestar(route_handlers=[overview, agents, mailbox])
+    @get("/prompts", media_type=MediaType.HTML, sync_to_thread=True)
+    def prompts() -> Response:
+        """The one onboarding prompt, ready to paste.
+
+        One page, because there used to be three and they drifted. Which role an agent
+        holds is configuration, not a different prompt.
+
+        The hub's own address is filled in, so the commands can be pasted as they
+        stand — a placeholder is something to get wrong.
+        """
+        hub = client.hub_info()
+        text = onboarding(client.config.base)
+        note = role_note().replace("**", "")
+        body = (
+            f"<p>{html.escape(note)}</p>"
+            "<p>Paste the whole of this to an agent. Select it and copy — it is plain "
+            "text, deliberately, so it survives being pasted anywhere.</p>"
+            "<textarea readonly rows='28' style='width:100%;font:13px ui-monospace,"
+            "monospace;padding:.75rem;border:1px solid var(--line);border-radius:4px;"
+            "background:transparent;color:inherit'>"
+            f"{html.escape(text)}</textarea>"
+            "<p class='dim'>Written for "
+            f"<code>{html.escape(client.config.base)}</code>. "
+            "Also served as plain text at <a href='/prompts.txt'>/prompts.txt</a>.</p>"
+        )
+        return Response(_page("Prompt", body, hub), media_type=MediaType.HTML)
+
+    @get("/prompts.txt", media_type=MediaType.TEXT, sync_to_thread=True)
+    def prompt_text() -> str:
+        """The same prompt as plain text, for `curl` and for pasting."""
+        return onboarding(client.config.base)
+
+    return Litestar(route_handlers=[overview, agents, mailbox, prompts, prompt_text])
