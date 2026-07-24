@@ -33,7 +33,7 @@ rather than being absorbed into whatever feature surfaced them.
 | [0013](0013-friction-tidy-up.md) | Friction backlog | 7 reported/found bugs, each reproduced | ✅ v0.9.0 |
 | [0014](0014-fallback-cli.md) | Fallback CLI | Teach the CLI to reach the hub; `agent-inbox.toml` | **unblocked, next** |
 | [0015](0015-public-notices.md) | Messages = notices | One item, two axes: audience (`to`) + attachment (`parent`) | 📐 design settled |
-| [0016](0016-gc-decapitates-threads.md) | GC decapitates threads | TTL purges live conversations' roots | in spec-kitty (spec + plan ✅) |
+| [0016](0016-gc-decapitates-threads.md) | GC decapitates threads | TTL purges live conversations' roots | ✅ v0.10.1 |
 | [0017](0017-channels-push.md) | Channels — push into a live session | Protocol-level push; may supersede the wake hook | planned |
 | [0018](0018-spec-kitty-adoption.md) | Adopt spec-kitty properly | Finish the port, review panels, merge discipline | planned |
 
