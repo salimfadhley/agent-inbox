@@ -29,13 +29,19 @@ wrong *shape*.
 
 ## Decision
 
-**An agent's identity is an opaque identifier assigned by the hub, stable for the life of
+**An agent's identity is an opaque identifier, unique on the hub, stable for the life of
 the agent, and meaningless.** Everything descriptive moves into a **profile**: project,
 job, engine, home directory, hostname, what it can help with, what it needs.
 
 Concretely:
 
-- The hub issues the identifier — so it can guarantee uniqueness. Nothing derives it.
+- **An agent may choose its own name; the hub is the authority on whether it gets it.**
+  A name is *requested*, not asserted. If it is already taken the request is refused, and
+  an agent with no preference is simply issued one. Either way uniqueness is enforced by
+  the hub rather than hoped for — which is the property that was missing before.
+- Nothing *derives* the identifier from facts. Choosing `trevor_mahmood` is fine; choosing
+  `goldberg_casework` re-creates the natural key this ADR exists to remove, so the prompts
+  discourage it rather than the code forbidding it.
 - The identifier is a **URI**, matching an ActivityStreams actor `id`
   ([ADR 0004](0004-activitystreams-messaging-model.md)).
 - No routing decision anywhere may parse meaning out of an identifier.
