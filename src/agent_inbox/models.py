@@ -59,6 +59,9 @@ class Message(BaseModel):
     # whether a reply is warranted, and it was previously only derivable by parsing
     # the `to` address.
     reach: str | None = None
+    # Set when the address you sent to has been renamed: the message was delivered
+    # to this address instead. Update your reference — the forward will expire.
+    forwarded_to: str | None = None
 
     @model_validator(mode="after")
     def _default_thread_to_id(self) -> Message:

@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 #   v1 = the original two-part store
 #   v2 = three-part addressing (a `role` position)
 #   v3 = one delivery mode: `any` retired, so consumption is always per-reader
-SCHEMA_VERSION = 3
+#   v4 = agent renames: a forwarding table so mail follows a moved agent
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -89,6 +90,16 @@ CREATE INDEX IF NOT EXISTS idx_agents_last_seen ON agents (last_seen);
 CREATE TABLE IF NOT EXISTS hub_meta (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
+);
+
+-- Agents rename themselves; their mail follows. A name exists to describe who an
+-- agent is, and that changes. Forwards EXPIRE, so a retired name can eventually be
+-- reused and the directory does not accumulate ghosts forever.
+CREATE TABLE IF NOT EXISTS forwards (
+    old_address TEXT PRIMARY KEY,
+    new_address TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL
 );
 """
 
@@ -268,6 +279,9 @@ class Mailbox:
         if version < 3:
             await self._migrate_v2_to_v3()
             version = 3
+        if version < 4:
+            # purely additive: _SCHEMA creates the forwards table below
+            version = 4
 
         await self._conn.execute(f"PRAGMA user_version = {version}")
         await self._conn.commit()
@@ -430,7 +444,25 @@ class Mailbox:
         return self._config.max_message_bytes
 
     async def send(self, message: Message) -> Message:
-        """Store ``message`` for the recipient(s) named by its ``to`` address."""
+        """Store ``message`` for the recipient(s) named by its ``to`` address.
+
+        If the address was renamed, the message is delivered to the new one and
+        ``message.forwarded_to`` is set so the sender learns the address moved —
+        delivering silently would let the stale name live forever.
+        """
+        forwarded_to: str | None = None
+        forward = await self.resolve_forward(message.to.strip())
+        if forward is not None:
+            new_address, expired = forward
+            if expired:
+                raise MailboxError(
+                    f"{message.to!r} was renamed to {new_address!r} and the "
+                    "forwarding period has ended — send to the new address."
+                )
+            forwarded_to = new_address
+            message = message.model_copy(
+                update={"to": new_address, "forwarded_to": new_address}
+            )
         payload = message.to_json_bytes()
         cap = self._config.max_message_bytes
         if cap and len(payload) > cap:
@@ -460,6 +492,8 @@ class Mailbox:
             ),
         )
         await self._conn.commit()
+        if forwarded_to:
+            logger.info("forwarded a message to the renamed %s", forwarded_to)
         logger.debug("sent %s -> %s (%s)", message.from_, message.to, message.id)
         return message
 
@@ -662,6 +696,151 @@ class Mailbox:
         info = await self.whois(project, agent, role)
         assert info is not None  # just inserted
         return info
+
+    # -- renames -----------------------------------------------------------
+
+    async def rename(
+        self, project: str, agent: str, to: str, role: str | None = None
+    ) -> tuple[str, str, int]:
+        """Rename this agent to ``to``; its mail follows. Returns (old, new, moved).
+
+        Called **from the old address** — that is the whole authorization story. If
+        you can still connect as X, you are X; letting the *new* name claim the old
+        one would let anyone hijack an address.
+
+        Mail already waiting at the old address is moved, the directory entry moves
+        with its profile, and a forward is recorded so later mail is delivered onward
+        and its sender told. Forwards expire (see ``rename_grace_days``).
+        """
+        old = format_address(project, agent, role)
+        target = parse_address(to)
+        if not target.is_specific:
+            raise MailboxError(
+                f"cannot rename to {to!r}: a new name must be a specific address, "
+                "not a wildcard"
+            )
+        new = format_address(target.project or "", target.agent or "", target.role)
+        if new == old:
+            raise MailboxError("the new name is the same as the current one")
+
+        # Refuse to displace a LIVE agent. A stale entry may be taken over — that is
+        # how an abandoned name gets reused.
+        occupant = await self.whois(
+            target.project or "", target.agent or "", target.role
+        )
+        if occupant is not None and not occupant.stale:
+            raise MailboxError(
+                f"cannot rename to {new!r}: that address is already held by an active "
+                "agent. Choose another name, or wait until it goes stale."
+            )
+        # A cycle would make delivery loop forever.
+        if await self._resolves_to(new, old):
+            raise MailboxError(
+                f"cannot rename to {new!r}: it already forwards back to {old!r}"
+            )
+
+        now = datetime.now(tz=UTC)
+        expires = now + timedelta(days=max(self._config.rename_grace_days, 0))
+
+        # carry the directory entry over, keeping the profile and first_seen
+        info = await self.whois(project, agent, role)
+        if info is not None:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO agents "
+                "(project, agent, role, first_seen, last_seen, profile) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    target.project,
+                    target.agent,
+                    target.role or "",
+                    info.first_seen.isoformat(),
+                    _now_iso(),
+                    info.profile.model_dump_json(),
+                ),
+            )
+            await self._conn.execute(
+                "DELETE FROM agents WHERE project = ? AND agent = ? AND role = ?",
+                (project, agent, role or ""),
+            )
+
+        # mail already delivered to the old address belongs to the same agent
+        moved = await self._conn.execute(
+            "UPDATE messages SET to_addr = ?, to_project = ?, to_agent = ?, "
+            "to_role = ? WHERE to_project = ? AND to_agent = ? "
+            "AND (to_role IS ? OR to_role = ?)",
+            (
+                new,
+                target.project,
+                target.agent,
+                target.role,
+                project,
+                agent,
+                role,
+                role or "",
+            ),
+        )
+        # Messages it SENT move too. This is the same agent under a new name, so
+        # rewriting the sender keeps `list_threads` ("what have I sent") coherent —
+        # and, less obviously, stops the agent receiving its OWN old broadcasts: the
+        # self-exclusion guard matches on from_addr, so leaving the old name behind
+        # would resurrect every fan-out it had ever sent into its own inbox.
+        await self._conn.execute(
+            "UPDATE messages SET from_addr = ? WHERE from_addr = ?", (new, old)
+        )
+        # anything it had already read stays read under the new name
+        await self._conn.execute(
+            "UPDATE OR IGNORE broadcast_reads SET reader = ? WHERE reader = ?",
+            (new, old),
+        )
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO forwards "
+            "(old_address, new_address, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (old, new, now.isoformat(), expires.isoformat()),
+        )
+        # any forward that pointed at the old name now points at the new one, so a
+        # chain of renames stays one hop and can never loop
+        await self._conn.execute(
+            "UPDATE forwards SET new_address = ? WHERE new_address = ?", (new, old)
+        )
+        await self._conn.commit()
+        logger.info("renamed %s -> %s (%d message(s) moved)", old, new, moved.rowcount)
+        return old, new, max(moved.rowcount, 0)
+
+    async def _resolves_to(self, start: str, target: str) -> bool:
+        """Whether following forwards from ``start`` reaches ``target``."""
+        seen: set[str] = set()
+        current = start
+        while current not in seen:
+            seen.add(current)
+            row = await (
+                await self._conn.execute(
+                    "SELECT new_address FROM forwards WHERE old_address = ?", (current,)
+                )
+            ).fetchone()
+            if row is None:
+                return False
+            current = row["new_address"]
+            if current == target:
+                return True
+        return False
+
+    async def resolve_forward(self, address: str) -> tuple[str, bool] | None:
+        """Where ``address`` now delivers, and whether the forward has expired.
+
+        Returns ``(new_address, expired)``, or ``None`` if the address was never
+        renamed. An expired forward still reports its destination so the sender can be
+        told where the agent went — it simply stops delivering.
+        """
+        row = await (
+            await self._conn.execute(
+                "SELECT new_address, expires_at FROM forwards WHERE old_address = ?",
+                (address,),
+            )
+        ).fetchone()
+        if row is None:
+            return None
+        expired = row["expires_at"] <= _now_iso()
+        return row["new_address"], expired
 
     async def retire(self, project: str, agent: str, role: str | None = None) -> bool:
         """Remove a directory entry. Returns whether one was actually removed.

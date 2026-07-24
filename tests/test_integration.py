@@ -548,3 +548,119 @@ async def test_reach_lets_an_agent_triage_at_a_glance(mailbox: Mailbox) -> None:
 
     reach = {m.subject: m.reach for m in await mailbox.peek(project, "bob")}
     assert reach == {"d": "direct", "p": "project", "b": "broadcast"}
+
+
+# -- mission 0012 part 2: renames with forwarding ------------------------------
+
+
+async def test_rename_moves_mail_profile_and_forwards(mailbox: Mailbox) -> None:
+    project = _project()
+    await mailbox.register(project, "claude", AgentProfile(offers=["deploys"]))
+    waiting = Message(
+        from_=f"{project}/peer", to=f"{project}/claude", subject="waiting", body="x"
+    )
+    await mailbox.send(waiting)
+
+    old, new, moved = await mailbox.rename(
+        project, "claude", f"{project}/claude/system"
+    )
+    assert (old, new) == (f"{project}/claude", f"{project}/claude/system")
+    assert moved == 1
+
+    # mail already waiting came with them, under the new name
+    assert [m.subject for m in await mailbox.peek(project, "claude", "system")] == [
+        "waiting"
+    ]
+    # the profile moved too
+    moved_info = await mailbox.whois(project, "claude", "system")
+    assert moved_info is not None and moved_info.profile.offers == ["deploys"]
+    assert await mailbox.whois(project, "claude") is None
+
+    # later mail to the OLD name is delivered onward, and the sender is told
+    sent = await mailbox.send(
+        Message(
+            from_=f"{project}/peer", to=f"{project}/claude", subject="later", body="y"
+        )
+    )
+    assert sent.forwarded_to == new
+    assert sent.to == new
+    assert "later" in {
+        m.subject for m in await mailbox.peek(project, "claude", "system")
+    }
+
+
+async def test_rename_refuses_to_displace_a_live_agent(mailbox: Mailbox) -> None:
+    project = _project()
+    await mailbox.register(project, "alice", AgentProfile())
+    await mailbox.register(project, "bob", AgentProfile())
+    with pytest.raises(MailboxError, match="already held"):
+        await mailbox.rename(project, "alice", f"{project}/bob")
+
+
+async def test_rename_refuses_wildcards_and_cycles(mailbox: Mailbox) -> None:
+    project = _project()
+    await mailbox.register(project, "a", AgentProfile())
+    with pytest.raises(MailboxError, match="wildcard"):
+        await mailbox.rename(project, "a", project)
+
+    # a -> b, then b -> a would make delivery loop
+    await mailbox.rename(project, "a", f"{project}/b")
+    with pytest.raises(MailboxError, match="forwards back"):
+        await mailbox.rename(project, "b", f"{project}/a")
+
+
+async def test_forwarding_expires_into_a_pointer(mailbox: Mailbox) -> None:
+    """After the grace period mail stops being delivered, but still says where to go."""
+    project = _project()
+    await mailbox.register(project, "old", AgentProfile())
+    await mailbox.rename(project, "old", f"{project}/new")
+
+    past = (datetime.now(tz=UTC) - timedelta(days=1)).isoformat()
+    await mailbox._conn.execute("UPDATE forwards SET expires_at = ?", (past,))
+    await mailbox._conn.commit()
+
+    with pytest.raises(MailboxError, match="renamed"):
+        await mailbox.send(
+            Message(from_=f"{project}/p", to=f"{project}/old", subject="s", body="b")
+        )
+
+
+async def test_a_rename_chain_stays_one_hop(mailbox: Mailbox) -> None:
+    """a -> b -> c: mail to the ORIGINAL name must reach the final one."""
+    project = _project()
+    await mailbox.register(project, "a", AgentProfile())
+    await mailbox.rename(project, "a", f"{project}/b")
+    await mailbox.rename(project, "b", f"{project}/c")
+
+    sent = await mailbox.send(
+        Message(from_=f"{project}/p", to=f"{project}/a", subject="chain", body="x")
+    )
+    assert sent.forwarded_to == f"{project}/c"
+    assert "chain" in {m.subject for m in await mailbox.peek(project, "c")}
+
+
+async def test_rename_does_not_resurrect_your_own_broadcasts(
+    mailbox: Mailbox,
+) -> None:
+    """Renaming must not make an agent start receiving its own old fan-outs.
+
+    The self-exclusion guard matches on from_addr, so leaving sent mail under the
+    old name reintroduces the self-broadcast bug fixed in v0.5.0 — caught by running
+    a rename against a copy of real hub data.
+    """
+    project = _project()
+    await mailbox.register(project, "alice", AgentProfile())
+    await mailbox.send(
+        Message(from_=f"{project}/alice", to="all/all", subject="mine", body="x")
+    )
+    before = len(await mailbox.peek(project, "alice"))
+
+    await mailbox.rename(project, "alice", f"{project}/alice/lead")
+
+    after = [m.subject for m in await mailbox.peek(project, "alice", "lead")]
+    assert "mine" not in after, "an agent must never receive its own broadcast"
+    assert len(after) == before
+
+    # and the sent message is still discoverable as theirs
+    threads = await mailbox.list_threads(project, "alice", role="lead")
+    assert any(t.last_from == f"{project}/alice/lead" for t in threads)

@@ -40,6 +40,7 @@ DEFAULT_MAX_MESSAGE_BYTES = 1_048_576  # 1 MiB
 DEFAULT_TTL_DAYS = 14
 DEFAULT_ONLINE_SECONDS = 300  # an agent is "online" if seen within this window
 DEFAULT_STALE_DAYS = 7  # a directory entry unseen this long is hidden by default
+DEFAULT_RENAME_GRACE_DAYS = 30  # how long mail follows a renamed agent
 
 _BAKED_DEFAULTS = Path(__file__).parent / "defaults.toml"
 _VALID_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
@@ -268,6 +269,13 @@ class Config(BaseSettings):
         default=DEFAULT_STALE_DAYS,
         validation_alias=_alias("stale_days", "AGENT_MAIL_STALE_DAYS"),
     )
+    # How long mail keeps following a renamed agent. After this the forward stops
+    # delivering and becomes a loud "that agent is now X" error, so a retired name
+    # can eventually be reused instead of aliasing forever.
+    rename_grace_days: int = Field(
+        default=DEFAULT_RENAME_GRACE_DAYS,
+        validation_alias=_alias("rename_grace_days", "AGENT_MAIL_RENAME_GRACE_DAYS"),
+    )
 
     # -- identity (two-part: project + agent) -----------------------------
     project: str | None = Field(
@@ -485,5 +493,6 @@ def hub_descriptor(
             "whois",
             "list_threads",
             "read_thread",
+            "rename",
         ],
     }

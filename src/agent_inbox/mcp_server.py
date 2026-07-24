@@ -117,7 +117,7 @@ async def send_message(
     )
     async with Mailbox(config) as mailbox:
         await mailbox.touch(project, agent, role)
-        await mailbox.send(message)
+        message = await mailbox.send(message)
     return _dump(message)
 
 
@@ -360,6 +360,34 @@ async def read_thread(thread_id: str) -> dict[str, Any]:
         "turns": [
             {**_dump(t.message), "read_at": t.read_at, "mine": t.mine} for t in turns
         ],
+    }
+
+
+@mcp.tool()
+async def rename(to: str) -> dict[str, Any]:
+    """Change the name I answer to; my mail follows me.
+
+    A name exists to describe who you are, and that changes. Call this **as your
+    current self** — that is the authorization: if you can connect as X, you are X.
+
+    Mail already waiting is moved, your profile comes with you, and later mail sent
+    to your old address is delivered here while its sender is told you moved. That
+    forwarding expires, so update your own config (and the URL you connect on) to the
+    new address.
+    """
+    config = _config()
+    project, agent, role = resolve_identity(config)
+    async with Mailbox(config) as mailbox:
+        old, new, moved = await mailbox.rename(project, agent, to, role)
+    return {
+        "renamed": True,
+        "from": old,
+        "to": new,
+        "messages_moved": moved,
+        "note": (
+            f"Connect on .../{new}/mcp from now on, and update your config. Mail to "
+            f"{old} will be forwarded for a limited period, then rejected."
+        ),
     }
 
 
