@@ -415,13 +415,27 @@ class Mailbox:
         return self._db
 
     async def _purge_expired(self) -> None:
-        """Delete messages older than ``ttl_days`` (and orphaned broadcast reads)."""
+        """Drop conversations nobody has touched for ``ttl_days``, whole.
+
+        Expiry follows **thread activity**, not message age. An old message inside a
+        live conversation is not stale — the conversation is what is alive. Deleting
+        per message decapitated discussions: a thread commented on today but rooted
+        three weeks ago lost its beginning, leaving a reply that reads as a complete
+        statement while silently missing the question it answers.
+
+        So a thread survives whole while anyone is still talking, and disappears whole
+        once nobody is. Our own housekeeping then never manufactures an orphan.
+        """
         ttl = self._config.ttl_days
         if ttl <= 0:
             return
         cutoff = (datetime.now(tz=UTC) - timedelta(days=ttl)).isoformat()
         cur = await self._conn.execute(
-            "DELETE FROM messages WHERE created < ?", (cutoff,)
+            "DELETE FROM messages WHERE thread IN ("
+            "  SELECT thread FROM messages GROUP BY thread"
+            "  HAVING MAX(created) < ?"
+            ")",
+            (cutoff,),
         )
         deleted = cur.rowcount
         await self._conn.execute(
@@ -430,7 +444,11 @@ class Mailbox:
         )
         await self._conn.commit()
         if deleted:
-            logger.info("purged %d message(s) older than %d day(s)", deleted, ttl)
+            logger.info(
+                "purged %d message(s) in conversations quiet for %d day(s)",
+                deleted,
+                ttl,
+            )
 
     def _not_found(self, project: str, agent: str, message_id: str) -> MailboxError:
         return MailboxError(
