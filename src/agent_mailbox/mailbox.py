@@ -23,7 +23,8 @@ import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 
-from agent_mailbox import naming, rules
+from agent_mailbox import addressing, naming, rules
+from agent_mailbox.addressing import LOCAL
 from agent_mailbox.exceptions import (
     NameUnavailable,
     NoSuchMessage,
@@ -53,12 +54,31 @@ class Mailbox:
         self,
         store: MessageStore,
         *,
+        hub_name: str = LOCAL,
         retention_days: int = 14,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._store = store
+        self._hub_name = hub_name
         self._retention_days = retention_days
         self._clock = clock
+
+    @property
+    def hub_name(self) -> str:
+        """What this mailbox calls itself. It also always answers to ``local``."""
+        return self._hub_name
+
+    def address_of(self, name: str) -> str:
+        """The address an actor is reachable at, from outside this module."""
+        return str(addressing.Address(name, LOCAL))
+
+    def _local(self, text: str) -> str:
+        """Resolve an address to a local actor name, refusing what we cannot reach.
+
+        Everything above this line speaks addresses; everything below speaks names.
+        Keeping the translation in one place is what lets the rules stay hub-agnostic.
+        """
+        return addressing.local_name(text, self._hub_name)
 
     def _now(self) -> str:
         return self._clock().isoformat()
@@ -134,7 +154,8 @@ class Mailbox:
         return updated
 
     async def _require_actor(self, name: str) -> ActorRecord:
-        actor = await self._store.get_actor(name)
+        resolved = self._local(name)
+        actor = await self._store.get_actor(resolved)
         if actor is None:
             raise UnknownActor(f"{name!r} has not joined this mailbox")
         return actor
@@ -157,23 +178,25 @@ class Mailbox:
         **silently starts its own thread** instead of joining. The silence is the point:
         an error would confirm which threads exist, which is what the refusal protects.
         """
-        await self._require_actor(caller)
-        recipients = (to,) if isinstance(to, str) else tuple(to)
+        sender = (await self._require_actor(caller)).name
+        raw = (to,) if isinstance(to, str) else tuple(to)
+        recipients = tuple(self._local(one) for one in raw)
+        copies = tuple(self._local(one) for one in cc)
         all_actors, memberships = await self._context()
 
         parent = in_reply_to
         if parent is not None:
             objects = tuple(await self._store.objects())
             if not rules.may_attach_to(
-                objects, caller, parent, all_actors, memberships
+                objects, sender, parent, all_actors, memberships
             ):
                 parent = None
 
         obj = ObjectRecord(
             id=uuid.uuid4().hex,
-            attributed_to=caller,
+            attributed_to=sender,
             to=recipients,
-            cc=tuple(cc),
+            cc=copies,
             in_reply_to=parent,
             summary=subject,
             content=body,
@@ -203,11 +226,11 @@ class Mailbox:
 
     async def peek(self, caller: str) -> tuple[ObjectRecord, ...]:
         """What is waiting, without consuming any of it."""
-        await self._require_actor(caller)
+        me = (await self._require_actor(caller)).name
         all_actors, memberships = await self._context()
         objects = tuple(await self._store.objects())
-        read_ids = await self._read_by(caller, objects)
-        return rules.unread(objects, caller, read_ids, all_actors, memberships)
+        read_ids = await self._read_by(me, objects)
+        return rules.unread(objects, me, read_ids, all_actors, memberships)
 
     async def unread_count(self, caller: str) -> int:
         """How much is waiting. Cheap enough for an agent to ask every turn."""
@@ -219,8 +242,9 @@ class Mailbox:
         The only call that acknowledges mail, and it acknowledges it **for this reader
         only** — another recipient's copy is untouched.
         """
+        me = (await self._require_actor(caller)).name
         obj = await self._visible_object(caller, object_id)
-        await self._store.mark_read(ReadRecord(obj.id, caller, self._now()))
+        await self._store.mark_read(ReadRecord(obj.id, me, self._now()))
         return obj
 
     async def thread(self, caller: str, root_id: str) -> tuple[ObjectRecord, ...]:
@@ -231,19 +255,19 @@ class Mailbox:
         such thread" or "none of it is yours", and the two are indistinguishable on
         purpose.
         """
-        await self._require_actor(caller)
+        me = (await self._require_actor(caller)).name
         all_actors, memberships = await self._context()
         objects = tuple(await self._store.objects())
-        return rules.visible_turns(objects, root_id, caller, all_actors, memberships)
+        return rules.visible_turns(objects, root_id, me, all_actors, memberships)
 
     async def _visible_object(self, caller: str, object_id: str) -> ObjectRecord:
         """Fetch a message the caller is party to, or refuse indistinguishably."""
-        await self._require_actor(caller)
+        me = (await self._require_actor(caller)).name
         obj = await self._store.get_object(object_id)
         if obj is None:
             raise NoSuchMessage(f"no message {object_id!r} available to you")
         all_actors, memberships = await self._context()
-        if not rules.is_party_to(obj, caller, all_actors, memberships):
+        if not rules.is_party_to(obj, me, all_actors, memberships):
             raise NoSuchMessage(f"no message {object_id!r} available to you")
         return obj
 

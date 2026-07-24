@@ -30,6 +30,29 @@ A third asks for a name already taken.
 
 **Rules**
 
+- An address is **`name@hub`**. These three are the same actor, today and always:
+
+  ```
+  trevor_mahmood            a bare name means this mailbox
+  trevor_mahmood@local      `local` always means the mailbox you are on
+  trevor_mahmood@workshop   the mailbox's own name, if it has one
+  ```
+
+  And this one is **refused**, loudly rather than silently:
+
+  ```
+  trevor_mahmood@some_other_mailbox   -> this mailbox does not federate yet
+  ```
+
+  Refusing out loud matters: an agent learns at once, and when federation arrives it
+  turns an error into a delivery rather than changing what silence meant.
+
+- **`@local` is a guarantee of non-egress**, not merely a default. An address ending
+  `@local` can never leave this mailbox, whatever peering is arranged later — so
+  containment is something you get by choosing an address, checkable by reading it.
+  A hub's own name is equivalent for delivery but makes no such promise, because that
+  name means something to other mailboxes and `local` does not.
+
 - A name is **requested**, and the mailbox decides. Uniqueness is enforced, not hoped for:
   two agents sharing a name would silently share an inbox.
 - A name is **opaque**. Nothing routes on what it says. `goldberg_casework` would be legal
@@ -232,4 +255,5 @@ Sal looked; nothing was consumed.
 | Intrusion | Attaching to an unseen thread silently starts a new one. |
 | Expiry | By conversation, whole, never partial. |
 | Operator | Sees everything, consumes nothing. |
+| Addressing | `name@hub`. Bare, `@local` and `@<hub>` are one actor; another mailbox is refused. |
 | Scope | One mailbox. Mail between mailboxes is a later mission. |
