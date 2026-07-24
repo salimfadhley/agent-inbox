@@ -29,7 +29,7 @@ Generated: 2026-07-22T21:09:38Z · Refreshed: 2026-07-24 (ActivityStreams re-pla
 
 - Deployment constraints: Releasable via PyPI (Trusted Publishing / OIDC on `v*` tags) and as a multi-arch Docker image (`linux/amd64` + `linux/arm64`) pushed to **Docker Hub** with a GHCR mirror. **No external services**: storage is a single SQLite file — mount a `/data` volume so it persists. No secrets in the repo.
 
-- **Deployment freeze (2026-07-24, owner):** *nothing is deployed until the new `agent-mailbox` system is ready.* The hub stays on the last released version meanwhile. This is an experimental system with zero production impact, so breaking the new one freely is expected and cheap — but the running one is left alone rather than half-migrated.
+- **Deployment, during the rebuild (2026-07-24, owner):** the new `agent-mailbox` system is deployed to the homelab **alongside** the old hub, on its own endpoint — that is part of M2's definition of done. It is not a migration and not a cutover: the old hub stays on its last release, serving agents, untouched, until the new system is ready to replace it. Breaking the *new* deployment freely is expected and cheap; half-migrating the old one is not.
 
 
 ## Governance Activation
