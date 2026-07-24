@@ -193,9 +193,9 @@ def test_hub_descriptor_defaults_limit_to_config() -> None:
 # "every value"; `any` also matches every value but asks for exactly one recipient.
 
 
-def _t(address: str) -> tuple[str | None, str | None, str | None, bool]:
+def _t(address: str) -> tuple[str | None, str | None, str | None]:
     target = parse_address(address)
-    return target.project, target.agent, target.role, target.claim
+    return target.project, target.agent, target.role
 
 
 @pytest.mark.parametrize(
@@ -218,17 +218,26 @@ def test_equivalent_address_spellings(forms: list[str]) -> None:
 
 
 def test_positions_narrow_independently() -> None:
-    assert _t("a/b/c") == ("a", "b", "c", False)
-    assert _t("a/all/c") == ("a", None, "c", False)  # whoever holds role c on a
-    assert _t("a/b") == ("a", "b", None, False)
+    assert _t("a/b/c") == ("a", "b", "c")
+    assert _t("a/all/c") == ("a", None, "c")  # whoever holds role c on a
+    assert _t("a/b") == ("a", "b", None)
 
 
-def test_any_asks_for_exactly_one_recipient() -> None:
-    assert parse_address("a/any").claim is True
-    assert parse_address("a/any/c").claim is True  # one holder of role c
-    assert parse_address("any").claim is True  # one agent anywhere
-    assert parse_address("a").claim is False  # ...but a bare project is everyone
-    assert parse_address("all").claim is False
+@pytest.mark.parametrize("address", ["a/any", "any", "a/any/c", "//any", "ANY"])
+def test_any_is_retired_and_fails_loudly(address: str) -> None:
+    """`any` must not silently become "an agent literally named any".
+
+    Retiring it changed what an address means, so an old one has to fail with an
+    explanation rather than quietly routing somewhere new.
+    """
+    with pytest.raises(ConfigError, match="retired"):
+        parse_address(address)
+
+
+def test_one_delivery_mode() -> None:
+    """Every address fans out: each matching agent consumes its own copy."""
+    for address in ("a/b", "a", "all", "//host", "a/b/c"):
+        assert parse_address(address).kind == "fanout"
 
 
 @pytest.mark.parametrize("token", ["all", "ALL", "any", "Any", "*"])

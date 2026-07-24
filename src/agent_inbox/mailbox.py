@@ -32,17 +32,20 @@ from agent_inbox.models import AgentInfo, AgentProfile, Intent, Message
 logger = logging.getLogger(__name__)
 
 # Bumped whenever the on-disk shape changes; stamped into SQLite's `user_version`
-# so an opening server knows exactly which upgrades it still owes. v1 = the
-# original two-part store; v2 = three-part addressing (a `role` position).
-SCHEMA_VERSION = 2
+# so an opening server knows exactly which upgrades it still owes.
+#   v1 = the original two-part store
+#   v2 = three-part addressing (a `role` position)
+#   v3 = one delivery mode: `any` retired, so consumption is always per-reader
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
     id          TEXT PRIMARY KEY,
     from_addr   TEXT NOT NULL,
     to_addr     TEXT NOT NULL,
-    -- Delivery: 'claim' = exactly one matching agent gets it (first read wins);
-    -- 'fanout' = every matching agent consumes its own copy.
+    -- Delivery mode. Only 'fanout' exists: every matching agent consumes its own
+    -- copy, tracked per-reader in `reads`. (v3 retired 'claim'/exactly-once along
+    -- with the `any` keyword that was its only user.)
     kind        TEXT NOT NULL,
     -- Each routing column is the literal it must match, or NULL for "any value"
     -- (i.e. the address had `all`/`any`/nothing in that position).
@@ -53,19 +56,20 @@ CREATE TABLE IF NOT EXISTS messages (
     intent      TEXT NOT NULL,
     subject     TEXT,                   -- optional; NULL when the sender omitted one
     body        TEXT NOT NULL,
-    created     TEXT NOT NULL,          -- ISO-8601 UTC
-    acked_at    TEXT                    -- direct/any: set when consumed; NULL = unread
+    created     TEXT NOT NULL           -- ISO-8601 UTC
 );
 CREATE INDEX IF NOT EXISTS idx_messages_route
-    ON messages (to_project, to_agent, kind, acked_at);
+    ON messages (to_project, to_agent, to_role);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages (created);
 
+-- Who has consumed what. The single record of consumption since v3.
 CREATE TABLE IF NOT EXISTS broadcast_reads (
     message_id  TEXT NOT NULL,
-    reader      TEXT NOT NULL,          -- 'project/agent' that consumed the broadcast
+    reader      TEXT NOT NULL,          -- the address that consumed it
     acked_at    TEXT NOT NULL,
     PRIMARY KEY (message_id, reader)
 );
+CREATE INDEX IF NOT EXISTS idx_reads_message ON broadcast_reads (message_id);
 
 CREATE TABLE IF NOT EXISTS agents (
     project     TEXT NOT NULL,
@@ -261,6 +265,9 @@ class Mailbox:
         if version < 2:
             await self._migrate_v1_to_v2()
             version = 2
+        if version < 3:
+            await self._migrate_v2_to_v3()
+            version = 3
 
         await self._conn.execute(f"PRAGMA user_version = {version}")
         await self._conn.commit()
@@ -323,6 +330,48 @@ class Mailbox:
             )
             await self._conn.execute("DROP TABLE agents")
             await self._conn.execute("ALTER TABLE agents_v2 RENAME TO agents")
+            await self._conn.commit()
+
+    async def _migrate_v2_to_v3(self) -> None:
+        """v2 -> v3: one delivery mode. `any` is retired, so nothing is "claimed".
+
+        Consumption used to live in two places: ``acked_at`` on the row for claim
+        kinds, and ``broadcast_reads`` for fan-out kinds. Everything moves to
+        ``broadcast_reads``, so there is a single answer to "has this been read".
+
+        Attributing an acked claim is safe precisely because ``any`` was never used:
+        every such row names a concrete recipient in ``to_addr``, so we know exactly
+        who consumed it. (Verified on the live hub before running: 31 claim rows, 0
+        without a named recipient.)
+        """
+        logger.info("migrating store v2 -> v3 (single delivery mode)")
+        # the old route index named a column that is about to disappear
+        await self._conn.execute("DROP INDEX IF EXISTS idx_messages_route")
+        if "acked_at" in await self._columns("messages"):
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO broadcast_reads (message_id, reader, acked_at) "
+                "SELECT id, to_addr, acked_at FROM messages "
+                "WHERE acked_at IS NOT NULL AND to_agent IS NOT NULL"
+            )
+            # anything acked but unattributable would silently become unread again;
+            # refuse rather than resurrect mail people have already dealt with.
+            cursor = await self._conn.execute(
+                "SELECT COUNT(*) FROM messages "
+                "WHERE acked_at IS NOT NULL AND to_agent IS NULL"
+            )
+            row = await cursor.fetchone()
+            if row and row[0]:
+                raise MailboxError(
+                    f"cannot migrate: {row[0]} consumed message(s) have no named "
+                    "recipient, so their reader is unknown. This store used the "
+                    "retired `any` keyword; migrate it by hand."
+                )
+            await self._conn.execute("UPDATE messages SET kind = 'fanout'")
+            # SQLite >= 3.35 supports DROP COLUMN; keep the column if it doesn't.
+            try:
+                await self._conn.execute("ALTER TABLE messages DROP COLUMN acked_at")
+            except Exception:  # noqa: BLE001 - older SQLite; harmless to keep
+                logger.info("leaving vestigial acked_at column (old SQLite)")
             await self._conn.commit()
 
     async def close(self) -> None:
@@ -393,8 +442,8 @@ class Mailbox:
         # Each routing column is the literal to match, or NULL for "any value".
         await self._conn.execute(
             "INSERT INTO messages (id, from_addr, to_addr, kind, to_project, "
-            "to_agent, to_role, thread, intent, subject, body, created, acked_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            "to_agent, to_role, thread, intent, subject, body, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 message.id,
                 message.from_,
@@ -439,11 +488,11 @@ class Mailbox:
         """Return unread messages routed to this agent, without consuming them."""
         params = self._reader(project, agent, role)
         cursor = await self._conn.execute(
-            "SELECT * FROM messages WHERE acked_at IS NULL"
-            f" AND {self._ROUTES_TO}"
+            "SELECT * FROM messages"
+            f" WHERE {self._ROUTES_TO}"
             f" AND {self._NOT_MY_OWN_FANOUT}"
-            " AND (kind = 'claim' OR id NOT IN ("
-            "     SELECT message_id FROM broadcast_reads WHERE reader = :me))"
+            " AND id NOT IN ("
+            "     SELECT message_id FROM broadcast_reads WHERE reader = :me)"
             " ORDER BY created ASC",
             params,
         )
@@ -460,11 +509,11 @@ class Mailbox:
         """
         params = self._reader(project, agent, role)
         cursor = await self._conn.execute(
-            "SELECT from_addr, COUNT(*) AS n FROM messages WHERE acked_at IS NULL"
-            f" AND {self._ROUTES_TO}"
+            "SELECT from_addr, COUNT(*) AS n FROM messages"
+            f" WHERE {self._ROUTES_TO}"
             f" AND {self._NOT_MY_OWN_FANOUT}"
-            " AND (kind = 'claim' OR id NOT IN ("
-            "     SELECT message_id FROM broadcast_reads WHERE reader = :me))"
+            " AND id NOT IN ("
+            "     SELECT message_id FROM broadcast_reads WHERE reader = :me)"
             " GROUP BY from_addr ORDER BY n DESC",
             params,
         )
@@ -493,30 +542,18 @@ class Mailbox:
         if row is None:  # no such message, or not routed to this agent
             raise self._not_found(project, agent, message_id)
 
+        # One delivery mode: consuming is always "this reader has now seen it".
+        # INSERT on a (message_id, reader) primary key is itself the idempotency
+        # guard — a second read affects no rows and is reported as not-found.
         reader = params["me"]
-        if row["kind"] == "fanout":
-            seen = await (
-                await self._conn.execute(
-                    "SELECT 1 FROM broadcast_reads WHERE message_id = ? AND reader = ?",
-                    (message_id, reader),
-                )
-            ).fetchone()
-            if seen is not None:
-                raise self._not_found(project, agent, message_id)
-            await self._conn.execute(
-                "INSERT INTO broadcast_reads (message_id, reader, acked_at) "
-                "VALUES (?, ?, ?)",
-                (message_id, reader, _now_iso()),
-            )
-            await self._conn.commit()
-        else:  # claim: exactly one reader may take it
-            claim = await self._conn.execute(
-                "UPDATE messages SET acked_at = ? WHERE id = ? AND acked_at IS NULL",
-                (_now_iso(), message_id),
-            )
-            await self._conn.commit()
-            if claim.rowcount != 1:  # already consumed (another agent won the claim)
-                raise self._not_found(project, agent, message_id)
+        consumed = await self._conn.execute(
+            "INSERT OR IGNORE INTO broadcast_reads (message_id, reader, acked_at) "
+            "VALUES (?, ?, ?)",
+            (message_id, reader, _now_iso()),
+        )
+        await self._conn.commit()
+        if consumed.rowcount != 1:  # this reader had already consumed it
+            raise self._not_found(project, agent, message_id)
 
         logger.debug("read %s from %s/%s", message_id, project, agent)
         return _row_to_message(row)
@@ -785,11 +822,7 @@ class Mailbox:
         read_ids = await self._reader_broadcast_ids(reader)
         items: list[tuple[Message, bool]] = []
         for row in rows:
-            if row["kind"] == "fanout":
-                unread = row["id"] not in read_ids
-            else:
-                unread = row["acked_at"] is None
-            items.append((_row_to_message(row), unread))
+            items.append((_row_to_message(row), row["id"] not in read_ids))
         return items
 
     async def _reader_broadcast_ids(self, reader: str) -> set[str]:
@@ -820,7 +853,8 @@ class Mailbox:
         # Unread = direct/any/global_any not yet acked. (Broadcast/public unread is
         # per-reader; we count the simple claim kinds for an at-a-glance figure.)
         unread = await self._scalar(
-            "SELECT COUNT(*) FROM messages WHERE kind = 'claim' AND acked_at IS NULL"
+            "SELECT COUNT(*) FROM messages WHERE id NOT IN "
+            "(SELECT message_id FROM broadcast_reads)"
         )
         agents = await self.list_agents()
         online = sum(1 for a in agents if a.online)
@@ -863,29 +897,19 @@ class Mailbox:
     async def _read_state(self, message_ids: list[str]) -> dict[str, str | None]:
         """When each message was consumed, whichever delivery mode it used.
 
-        A `claim` records consumption on the row (`acked_at`); a `fanout` records it
-        per-reader in `broadcast_reads`. Callers asking "have they read it yet?" must
-        not care which — so this normalises both into one map.
+        Since v3 there is one delivery mode, so consumption has exactly one home:
+        ``broadcast_reads``. The value is the *first* read, which is what a sender
+        asking "have they seen it yet?" wants.
         """
         if not message_ids:
             return {}
         marks = ",".join("?" * len(message_ids))
-        state: dict[str, str | None] = {}
-        cursor = await self._conn.execute(
-            f"SELECT id, acked_at FROM messages WHERE id IN ({marks})",
-            tuple(message_ids),
-        )
-        for row in await cursor.fetchall():
-            state[row["id"]] = row["acked_at"]
         cursor = await self._conn.execute(
             f"SELECT message_id, MIN(acked_at) AS first_read FROM broadcast_reads "
             f"WHERE message_id IN ({marks}) GROUP BY message_id",
             tuple(message_ids),
         )
-        for row in await cursor.fetchall():
-            if not state.get(row["message_id"]):
-                state[row["message_id"]] = row["first_read"]
-        return state
+        return {r["message_id"]: r["first_read"] for r in await cursor.fetchall()}
 
     async def list_threads(
         self,

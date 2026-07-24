@@ -92,54 +92,34 @@ async def test_broadcast_reaches_every_agent(mailbox: Mailbox) -> None:
     assert any(m.subject == "all" for m in await mailbox.peek(project, "bob"))
 
 
-async def test_any_delivers_to_exactly_one_agent(mailbox: Mailbox) -> None:
+async def test_any_addresses_are_rejected(mailbox: Mailbox) -> None:
+    """The retired keyword fails at send time, with an explanation."""
+    project = _project()
+    with pytest.raises(ConfigError, match="retired"):
+        await mailbox.send(
+            Message(from_=f"{project}/sys", to=f"{project}/any", subject="t", body="x")
+        )
+
+
+async def test_every_recipient_gets_its_own_copy(mailbox: Mailbox) -> None:
+    """One delivery mode: a project broadcast reaches everyone, independently."""
     project = _project()
     await mailbox.send(
-        Message(from_=f"{project}/sys", to=f"{project}/any", subject="task", body="x")
+        Message(from_=f"{project}/sys", to=project, subject="task", body="x")
+    )
+    alice = [m for m in await mailbox.peek(project, "alice") if m.subject == "task"]
+    assert alice and any(
+        m.subject == "task" for m in await mailbox.peek(project, "bob")
     )
 
-    # both see the unclaimed task
-    pending = [m for m in await mailbox.peek(project, "alice") if m.subject == "task"]
-    assert pending
+    # alice consuming her copy leaves bob's untouched
+    await mailbox.read(project, "alice", alice[0].id)
+    assert not any(m.subject == "task" for m in await mailbox.peek(project, "alice"))
     assert any(m.subject == "task" for m in await mailbox.peek(project, "bob"))
 
-    # alice claims it
-    await mailbox.read(project, "alice", pending[0].id)
-
-    # bob no longer sees it, and can't claim it either — consumed exactly once
-    assert not any(m.subject == "task" for m in await mailbox.peek(project, "bob"))
+    # and a second read by the same agent is still refused
     with pytest.raises(MailboxError):
-        await mailbox.read(project, "bob", pending[0].id)
-
-
-async def test_public_broadcast_reaches_agents_across_projects(
-    mailbox: Mailbox,
-) -> None:
-    await mailbox.send(
-        Message(from_="ops/sys", to="all/all", subject="townhall", body="hi all")
-    )
-    # agents on unrelated projects all see it, and each consumes its own copy
-    a = await mailbox.peek("proj-a", "alice")
-    b = await mailbox.peek("proj-b", "bob")
-    assert any(m.subject == "townhall" for m in a)
-    assert any(m.subject == "townhall" for m in b)
-    await mailbox.read("proj-a", "alice", a[0].id)
-    a2 = await mailbox.peek("proj-a", "alice")
-    assert not any(m.subject == "townhall" for m in a2)
-    assert any(m.subject == "townhall" for m in await mailbox.peek("proj-b", "bob"))
-
-
-async def test_global_any_delivers_to_one_agent_anywhere(mailbox: Mailbox) -> None:
-    await mailbox.send(
-        Message(from_="ops/sys", to="any/any", subject="whoever", body="grab me")
-    )
-    a = [m for m in await mailbox.peek("proj-a", "alice") if m.subject == "whoever"]
-    assert a
-    await mailbox.read("proj-a", "alice", a[0].id)
-    # nobody else, on any project, can still claim it
-    assert not any(m.subject == "whoever" for m in await mailbox.peek("proj-b", "bob"))
-    with pytest.raises(MailboxError):
-        await mailbox.read("proj-b", "bob", a[0].id)
+        await mailbox.read(project, "alice", alice[0].id)
 
 
 async def test_ping_roundtrip(mailbox: Mailbox) -> None:

@@ -44,9 +44,16 @@ DEFAULT_STALE_DAYS = 7  # a directory entry unseen this long is hidden by defaul
 _BAKED_DEFAULTS = Path(__file__).parent / "defaults.toml"
 _VALID_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
-# Address wildcards, usable in either position (project or agent). ``*`` is a synonym
-# for ``all``. They are reserved: a real project or agent may not be named these.
+# Address wildcards, usable in any position. ``*`` is a synonym for ``all``. Both are
+# reserved: a real project, agent or role may not be named either.
+#
+# ``any`` is RETIRED, not merely unused. It selected exactly one recipient from a set
+# ("a shared work queue"), which was the sole reason the store carried a second,
+# exactly-once delivery mode — the riskiest code here. Measured usage on a live hub was
+# 0 of 75 messages. It stays reserved so an old address fails loudly instead of silently
+# becoming "an agent literally named any".
 RESERVED_TOKENS = frozenset({"all", "any"})
+RETIRED_TOKENS = frozenset({"any"})
 
 # No secret settings today (SQLite needs no credentials); kept so redacted() stays
 # generic if secret-bearing settings are ever added.
@@ -113,12 +120,11 @@ class Target:
     project: str | None  # None = wildcard
     agent: str | None  # None = wildcard
     role: str | None  # None = wildcard
-    claim: bool  # `any` appeared somewhere: deliver to exactly one
 
     @property
     def kind(self) -> str:
-        """Storage kind: ``claim`` (exactly once) or ``fanout`` (per-reader copy)."""
-        return "claim" if self.claim else "fanout"
+        """Storage kind. One delivery mode: every matching agent gets its own copy."""
+        return "fanout"
 
     @property
     def is_specific(self) -> bool:
@@ -126,51 +132,50 @@ class Target:
         return self.project is not None and self.agent is not None
 
 
-def _parse_part(part: str) -> tuple[str | None, bool]:
-    """Resolve one address position to ``(literal_or_None, is_any)``."""
+def _parse_part(part: str, address: str) -> str | None:
+    """Resolve one address position to a literal, or ``None`` meaning "every value"."""
     token = part.strip().replace("*", "all") or "all"
     lowered = token.lower()
     if lowered == "all":
-        return None, False
-    if lowered == "any":
-        return None, True
-    return token, False
+        return None
+    if lowered in RETIRED_TOKENS:
+        raise ConfigError(
+            f"the {lowered!r} keyword was retired from addresses (in {address!r}). "
+            "Address a specific agent (project/agent), or the whole project "
+            "(project, or project/all) — every matching agent then gets its own copy."
+        )
+    return token
 
 
 def parse_address(to: str) -> Target:
     """Parse ``<project>[/<agent>[/<role>]]`` into a :class:`Target`.
 
-    Omitted trailing positions default to ``all``, so ``goldberg`` means every agent on
-    goldberg and ``goldberg/claude`` means every claude on it, whatever their role.
-    A bare ``any`` means one agent anywhere; a bare ``all`` (or ``*``) means everyone.
+    Each position narrows independently. A literal matches only itself; ``all``, ``*``
+    and an empty position all mean "every value". Omitted trailing positions default to
+    ``all``, so ``goldberg`` means every agent on goldberg and ``goldberg/claude`` means
+    every role-instance of claude. ``//host`` reaches whoever holds that role anywhere.
 
-    Raises :class:`ConfigError` on a malformed address or one with too many parts.
+    Every matching agent receives its own copy. Raises :class:`ConfigError` on a
+    malformed address, one with too many parts, or one using the retired ``any``.
     """
     raw = to.strip()
-    parts = [p for p in raw.split("/")]
+    parts = raw.split("/")
     if len(parts) > 3:
         raise ConfigError(
             f"too many parts in address {to!r}: expected <project>[/<agent>[/<role>]]"
         )
-    # A bare `any` means any/any/any; everything else defaults omitted parts to `all`.
-    if len(parts) == 1 and parts[0].strip().lower() == "any":
-        parts = ["any", "any", "any"]
     parts += ["all"] * (3 - len(parts))
 
-    project, p_any = _parse_part(parts[0])
-    agent, a_any = _parse_part(parts[1])
-    role, r_any = _parse_part(parts[2])
+    project = _parse_part(parts[0], raw)
+    agent = _parse_part(parts[1], raw)
+    role = _parse_part(parts[2], raw)
     if project is not None:
         project = validate_project(project)
     if agent is not None:
         agent = validate_agent_id(agent)
     if role is not None:
         role = validate_role(role)
-    # A role can only be addressed under a concrete agent-or-wildcard; there is no
-    # ordering constraint beyond that, since each position narrows independently.
-    return Target(
-        project=project, agent=agent, role=role, claim=p_any or a_any or r_any
-    )
+    return Target(project=project, agent=agent, role=role)
 
 
 def parse_target(to: str) -> tuple[str, str | None, str | None]:
