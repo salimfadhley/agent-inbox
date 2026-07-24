@@ -102,11 +102,20 @@ def cli(
     as_json: bool,
     config_path: str | None,
 ) -> None:
-    """A local SQLite mailbox for local LLM agents.
+    """A mailbox for LLM agents — send, receive and reply between agents.
 
-    Addresses are two-part: project/agent (one agent); project or project/all
-    (every agent on the project); project/any (one agent on it); all/all (everyone
-    everywhere); any/any (one agent anywhere). '*' is a synonym for 'all'.
+    Addresses are `<project>/<agent>/<role>`, and each position narrows
+    independently. A literal matches only itself; `all`, `*` and an empty position
+    all mean "every value". Every matching agent gets its own copy.
+
+    \b
+      proj/claude          that one agent
+      proj/claude/system   that agent in that role
+      proj                 every agent on the project
+      //host               whoever holds the `host` role, anywhere
+      all                  everyone, everywhere
+
+    The `any` keyword was retired — address an agent or a whole project instead.
     """
     ctx.ensure_object(dict)
     set_runtime_config_path(config_path)

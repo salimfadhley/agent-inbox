@@ -34,11 +34,35 @@ for every hosted agent. *"No mail"* and *"wrong mailbox"* must never look the sa
 
 ## Design
 
-### Transport: the CLI is an MCP client
+### Transport: build it transport-agnostic; decide later
 
 The CLI reaches the hub with the MCP client library already in our dependencies
 (`streamablehttp_client`). **One server surface**, so CLI and MCP agents cannot drift
 apart, and no second API to maintain or secure.
+
+**Open question, deliberately deferred (2026-07-24):** whether **stdio** should eventually
+replace HTTP MCP as the primary way agents connect. The forces are real on both sides:
+
+*For stdio* — Channels ([0017](0017-channels-push.md)) are **stdio-only**, so if they
+become the primary wake mechanism, Claude Code agents run a stdio server anyway and a
+second HTTP connection is redundant. Hostname fragility bit us twice on 2026-07-24, and
+with HTTP the hub URL is baked into every agent's MCP config, so changing it means editing
+config *and* restarting everywhere; a shim reads `agent-inbox.toml` and can fall back to an
+IP without touching MCP config. stdio is also universally supported, whereas HTTP support
+varies and carries the timeout quirks that killed [0003](0003-wait-for-message.md).
+
+*Against* — it abandons **"the URL *is* your identity"**, the project's central design idea
+(zero config, nothing installed, works from any machine), which is in every prompt, the
+README and the charter. It also **regresses installability** ([0010](0010-installability.md))
+by requiring `agent-inbox` on every agent's machine, and introduces **version skew**: tool
+definitions would come from each agent's locally installed CLI, so upgrading the hub would
+no longer upgrade everyone.
+
+**Decision: build so the transport is an implementation detail**, and settle the question
+once 0017 tells us whether stdio is actually forced on us. If it is, the likely shape is an
+**adapter, not a replacement** — the shim speaks stdio to the client and HTTP to the same
+hub, keeping the hub central and authoritative, per 0017's rule that every adapter is
+client-side.
 
 Local-file mode stays for single-machine use, but the two modes must be **impossible to
 confuse**: `doctor` states plainly which one is active, and any command that could be
@@ -76,16 +100,40 @@ deployment's hostname. That rule constrains this repo's own files; it does not c
 users configuring their own projects, where naming your hub is exactly the point.
 
 Layering already exists (`defaults.toml < --config < env`); what is missing is
-**project-root discovery** (walk up from cwd). If this lands well, `CLAUDE.md`/`AGENTS.md`
+**project-root discovery** (walk up from cwd). Precedence: `flags > env > toml > defaults`.
+
+**`doctor` must show provenance** — which value won, and from which layer. The single most
+dangerous failure here is a CLI silently reading the *wrong mailbox* (the local-SQLite trap
+nearly shipped in `hook-check`), and *"no mail"* must never look like *"wrong mailbox"*. If this lands well, `CLAUDE.md`/`AGENTS.md`
 no longer need to carry identity as prose at all.
 
+### Help text is a tool description, not documentation
+
+The CLI's audience is **agents**, so `--help` is read by an LLM deciding what to call. It
+is the same content problem as our MCP tool descriptions — and the two have already
+**drifted**: on 2026-07-24 the top-level help still described two-part addresses and the
+retired `any` keyword, months of design after both changed. (Corrected immediately; the
+drift is the point.)
+
+- **Generate both from one source** so a description cannot be right in MCP and wrong in
+  the CLI.
+- **State consequences, not just syntax** — `read` *consumes*; browsing does not. An agent
+  that misses this steals its own mail.
+- **Say when to use it**, not only what it does.
+- **Keep it short**: agents pay context for every line.
+
 ### Commands
+
+Four verbs exist in MCP with **no CLI equivalent** and must be added:
+`update_status`, `list_threads`, `read_thread`, `rename`.
 
 Existing verbs gain hub mode. New:
 
 - **`agent-inbox status <id>`** — "did they get it?". The core already knows:
   `list_threads` returns `awaiting_them` and `read_thread` carries per-turn `read_at`;
   this only surfaces it.
+
+Later, from [0015](0015-public-notices.md): `comment`, `post`, `board`.
 
 **`agent-inbox wait` was dropped.** It depended on 0003, which is **cancelled** — a
 blocking wait breaks on real clients (5 s on the OpenAI Agents SDK), freezes subagents and
