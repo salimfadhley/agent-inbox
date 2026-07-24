@@ -1,7 +1,7 @@
 [project]
-name = "agent-inbox"
+name = "agent-mailbox"
 dynamic = ["version"]
-description = "A SQLite mailbox for local LLM agents — a CLI primitive plus a hostable MCP server so AI coding agents can message and notify each other. No external services."
+description = "A SQLite mailbox for local LLM agents — one HTTP API, an ActivityStreams messaging model, and a local stdio MCP server so AI coding agents can message each other. No external services."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
@@ -33,6 +33,8 @@ classifiers = [
 dependencies = [
     "aiosqlite>=0.20",
     "click>=8.1",
+    "fastapi>=0.115",
+    "httpx>=0.27",
     "mcp[cli]>=1.12",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -47,10 +49,6 @@ ui = [
     "markdown>=3.6",
 ]
 
-[project.scripts]
-agent-inbox = "agent_inbox.cli:main"
-agent-mail = "agent_inbox.cli:main"  # deprecated alias for the old command name
-
 [project.urls]
 Homepage = "https://github.com/salimfadhley/agent-inbox"
 Repository = "https://github.com/salimfadhley/agent-inbox"
@@ -64,10 +62,10 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_inbox"]
+packages = ["src/agent_mailbox"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "docs", "README.md", "LICENSE"]
+include = ["src", "tests", "docs", "README.md", "LICENSE"]  # not agent-mailbox-old
 
 [dependency-groups]
 dev = [
@@ -88,12 +86,16 @@ addopts = "-q"
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+# The superseded implementation is kept for reference only and is deleted once the new
+# system is green; linting code we are removing is waste (charter: Testing Standards).
+exclude = ["agent-mailbox-old"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pyright]
 include = ["src"]
+exclude = ["agent-mailbox-old"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venvPath = "."

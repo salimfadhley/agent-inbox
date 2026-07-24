@@ -31,8 +31,8 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-from agent_inbox.config_env import RUNTIME_CONFIG_ENV, runtime_config_path
-from agent_inbox.exceptions import ConfigError
+from agent_mailbox_old.config_env import RUNTIME_CONFIG_ENV, runtime_config_path
+from agent_mailbox_old.exceptions import ConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +286,15 @@ class Config(BaseSettings):
     # own infrastructure nodes (host, admin) do.
     role: str | None = Field(
         default=None, validation_alias=_alias("role", "AGENT_ROLE")
+    )
+
+    # -- client -----------------------------------------------------------
+    # The hub this machine talks to. Set by ``agent-inbox init`` into the project's
+    # agent-inbox.toml. Only clients need it; the hub itself is the thing being named.
+    # Deliberately has no default: the URL is deployment-specific and must never be
+    # baked into this repository.
+    hub: str | None = Field(
+        default=None, validation_alias=_alias("hub", "AGENT_INBOX_HUB")
     )
 
     # -- MCP server -------------------------------------------------------

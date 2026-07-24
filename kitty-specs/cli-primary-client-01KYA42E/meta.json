@@ -1,0 +1,16 @@
+{
+  "coordination_branch": "kitty/mission-cli-primary-client-01KYA42E",
+  "created_at": "2026-07-24T13:12:10.820553+00:00",
+  "flattened": false,
+  "friendly_name": "CLI as the primary agent client",
+  "mission_id": "01KYA42EN1KZ8GQYGDNF35BPDT",
+  "mission_number": null,
+  "mission_slug": "cli-primary-client-01KYA42E",
+  "mission_type": "software-dev",
+  "pr_bound": true,
+  "purpose_context": "Agents connect to a hosted HTTP MCP endpoint whose URL is their identity. That cannot push into a live session, so channels are impossible, and it cannot authenticate. A local CLI fixes both. SQLite stays 100% private to the server.",
+  "purpose_tldr": "Make the agent-inbox CLI the primary way agents reach the hub: a remote-only API client that also serves stdio MCP locally.",
+  "slug": "cli-primary-client-01KYA42E",
+  "target_branch": "feat/cli-primary-client",
+  "topology": "coord"
+}
