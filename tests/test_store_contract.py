@@ -14,22 +14,41 @@ architecture that is only written down erodes; this one fails a test instead.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 
 from agent_mailbox import rules
 from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_mailbox.sqlite_store import SqliteStore
 from agent_mailbox.store import InMemoryStore, MessageStore
 
-#: Every backend must pass the same suite. SQLite joins this list, not a separate one.
-STORES: tuple[Callable[[], MessageStore], ...] = (InMemoryStore,)
+
+@asynccontextmanager
+async def in_memory(tmp_path: Path) -> AsyncIterator[MessageStore]:
+    yield InMemoryStore()
+
+
+@asynccontextmanager
+async def on_sqlite(tmp_path: Path) -> AsyncIterator[MessageStore]:
+    async with SqliteStore(tmp_path / "mail.db") as store:
+        yield store
+
+
+#: Every backend passes the same suite. Adding one means adding it here — nothing else.
+#: If a backend ever needed its own tests, the port would have stopped being an
+#: abstraction and started being two.
+STORES: tuple[Callable[..., object], ...] = (in_memory, on_sqlite)
 
 
 @pytest.fixture(params=STORES, ids=lambda f: f.__name__)
-def store(request: pytest.FixtureRequest) -> MessageStore:
-    return request.param()
+async def store(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> AsyncIterator[MessageStore]:
+    async with request.param(tmp_path) as opened:
+        yield opened
 
 
 def an_actor(name: str, **profile: object) -> ActorRecord:
