@@ -1,17 +1,24 @@
 name: Release
 
-# Publish to PyPI on a v* tag using Trusted Publishing (OIDC) — no stored token.
+# On a v* tag: build the Python distributions and, if opted in, publish to PyPI.
 #
-# One-time PyPI setup before the first publish:
-#   1. Sign in at https://pypi.org -> "Your projects" -> "Publishing"
-#      (create a "pending publisher" if the project does not exist yet).
-#   2. Add a GitHub trusted publisher:
-#        Owner:         salimfadhley
-#        Repository:    agent-inbox
-#        Workflow name: release.yaml
-#        Environment:   pypi
-#   3. Bump nothing (version comes from the tag via hatch-vcs); just push a tag:
-#        git tag v0.1.0 && git push origin v0.1.0
+# The Docker image is the artifact you deploy — see docker.yml, which builds :X.Y.Z +
+# :latest on the same tag. This workflow is about PyPI, which is optional for an
+# experimental tool and OFF by default so a tag never fails for want of PyPI setup.
+#
+# To turn PyPI publishing on:
+#   1. Repo -> Settings -> Secrets and variables -> Actions -> Variables:
+#        add PUBLISH_PYPI = true
+#   2. One-time Trusted Publishing on PyPI (https://pypi.org -> Your projects ->
+#      Publishing; create a pending publisher if the project does not exist yet):
+#        Owner: salimfadhley · Repository: agent-inbox · Workflow: release.yaml
+#        Environment: pypi
+#   3. Push a tag (the version comes from it via hatch-vcs):
+#        git tag v0.2.0 && git push origin v0.2.0
+#
+# With PUBLISH_PYPI unset, the build job still runs and uploads the wheel/sdist as
+# workflow artifacts, so a release is always downloadable — it just is not pushed to
+# PyPI.
 
 on:
   push:
@@ -42,6 +49,9 @@ jobs:
 
   publish:
     needs: build
+    # Off unless explicitly opted in, so a plain tag push does not fail for want of the
+    # one-time PyPI trusted-publisher setup.
+    if: ${{ vars.PUBLISH_PYPI == 'true' }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

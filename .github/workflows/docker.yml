@@ -1,27 +1,42 @@
 name: Docker image
 
-# Build the hostable MCP server image (multi-arch: linux/amd64 + linux/arm64, so it
-# runs on Intel/AMD servers, Apple Silicon, and 64-bit Raspberry Pi) and push it.
-# On every push to main -> :latest (+ :main-<sha>). On a v* tag -> :<version>.
+# The one automated build. It runs only after CI is green (see the `workflow_run`
+# gate below), builds the hub image multi-arch (linux/amd64 + linux/arm64 — Intel/AMD
+# servers, Apple Silicon, 64-bit Raspberry Pi), and pushes it.
 #
-# It always publishes to GHCR (ghcr.io/<owner>/agent-inbox, no setup needed) and ALSO
-# to Docker Hub as soon as these repo secrets exist (Settings -> Secrets and variables
-# -> Actions); until then the Docker Hub push is skipped, not failed:
-#   DOCKERHUB_USERNAME  your Docker Hub account/namespace
-#   DOCKERHUB_TOKEN     a Docker Hub access token (hub.docker.com -> Account
-#                       Settings -> Security -> New Access Token, Read/Write)
+#   push to main       -> :edge  (+ :main-<sha>)   — the newest build, NOT for deploy
+#   a v* release tag   -> :X.Y.Z (+ :X.Y and :latest) — the official release
+#
+# `:latest` moves ONLY on a release tag, never on a plain main merge. That is the whole
+# point: **deploy pulls :latest (or a pinned :X.Y.Z), and those are only ever an
+# official release.** A merge to main gives you :edge to try, not something to ship.
+#
+# Publishes to Docker Hub (docker.io/<user>/agent-mailbox) and, for free, to GHCR
+# (ghcr.io/<owner>/agent-mailbox). Docker Hub needs two repo secrets (Settings ->
+# Secrets and variables -> Actions); without them the Docker Hub push is skipped, not
+# failed, and only GHCR is written:
+#   DOCKERHUB_USERNAME  the Docker Hub account/namespace
+#   DOCKERHUB_TOKEN     a Read/Write access token (hub.docker.com -> Account Settings
+#                       -> Security -> New Access Token)
 
 on:
-  push:
-    branches: ["main"]
-    tags: ["v*"]
+  # Build only what has passed CI. The CI workflow runs on the same pushes; this waits
+  # for it to finish and then checks it succeeded, so a red build is never published.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 concurrency:
-  group: docker-${{ github.ref }}
+  group: docker-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
   image:
+    # Only when CI passed, and only for a real push to main or a tag — never for a pull
+    # request's CI run (event == 'pull_request'), so a PR never publishes an image.
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,30 +44,43 @@ jobs:
     env:
       HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     steps:
+      # workflow_run does not check out the triggering commit by default, so pin to the
+      # exact SHA CI validated — not whatever main happens to be now.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # for git-describe version
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0  # full history + tags, for the hatch-vcs version
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
       - name: Compute version (hatch-vcs — the same one PyPI gets)
         id: version
-        # A v* tag -> a clean release version (0.1.0); a commit on main -> an
-        # auto-incrementing dev version (0.1.1.dev1, .dev2, … = commits since the tag).
+        # A v* tag -> a clean release (0.2.0); a commit on main -> an auto-incrementing
+        # dev version (0.2.0.dev4 = 4 commits since the tag). Docker tags forbid '+', so
+        # keep the core before any local segment.
         run: |
           VER=$(uvx --with hatch-vcs hatch version)
           echo "pep440=$VER" >> "$GITHUB_OUTPUT"
-          # Docker tags may not contain '+'; keep the clean core (e.g. 0.1.1.dev3).
           echo "docker=${VER%%+*}" >> "$GITHUB_OUTPUT"
+
+      - name: Is this a release tag?
+        id: kind
+        # workflow_run carries the original event; a tag push has head_branch = the tag.
+        run: |
+          ref='${{ github.event.workflow_run.head_branch }}'
+          case "$ref" in
+            v[0-9]*) echo "release=true"  >> "$GITHUB_OUTPUT" ;;
+            *)       echo "release=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Resolve target registries
         id: reg
         # GHCR always; Docker Hub only when its secrets are configured.
         run: |
-          imgs="ghcr.io/${{ github.repository_owner }}/agent-inbox"
+          imgs="ghcr.io/${{ github.repository_owner }}/agent-mailbox"
           if [ "${HAS_DOCKERHUB}" = "true" ]; then
-            imgs=$(printf 'docker.io/%s/agent-inbox\n%s' "${{ secrets.DOCKERHUB_USERNAME }}" "$imgs")
+            imgs=$(printf 'docker.io/%s/agent-mailbox\n%s' "${{ secrets.DOCKERHUB_USERNAME }}" "$imgs")
           fi
           { echo 'images<<EOF'; printf '%s\n' "$imgs"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
@@ -75,10 +103,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.reg.outputs.images }}
+          # A release tag gets the version, the major.minor line, and latest. A main
+          # build gets edge + main-<sha>, and deliberately NOT latest.
           tags: |
-            type=raw,value=${{ steps.version.outputs.docker }}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.version.outputs.docker }},enable=${{ steps.kind.outputs.release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.kind.outputs.release == 'true' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.docker }},enable=${{ steps.kind.outputs.release == 'true' }}
+            type=raw,value=edge,enable=${{ steps.kind.outputs.release == 'false' }}
+            type=raw,value=main-${{ github.event.workflow_run.head_sha }},enable=${{ steps.kind.outputs.release == 'false' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

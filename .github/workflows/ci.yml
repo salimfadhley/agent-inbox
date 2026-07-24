@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]  # so a release tag is gated by the same suite before its image builds
   pull_request:
 
 concurrency:
@@ -37,7 +38,10 @@ jobs:
         run: uv run ruff format --check src tests
 
       - name: Type check (pyright)
-        run: uv run pyright
+        # Pinned to the exact version the project's gate uses, and to src/ — an
+        # unpinned pyright silently upgrades and can fail a build on a rule that did
+        # not exist when the code was written.
+        run: uvx pyright@1.1.411 src
 
       - name: Tests (pytest)
         run: uv run pytest

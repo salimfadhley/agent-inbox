@@ -1,32 +1,58 @@
-# Host the agent-inbox MCP server with Docker Compose.
+# Deploy the agent-mailbox hub and its console from the official release image.
 #
-# No external services: storage is a single SQLite file on a Docker volume.
-# Agents configure a single URL:  http://<this-host>:8080/<project>/<agent>/mcp
+#   docker compose pull && docker compose up -d
 #
-#   docker compose up -d
+# `:latest` is only ever an official release (a v* tag) — a plain merge to main
+# publishes `:edge`, never `:latest` — so `pull` here always brings a released build,
+# not an in-progress one. Pin AGENT_MAILBOX_VERSION to a specific release (e.g. 0.2.0)
+# when you want to control exactly what runs.
 #
-# By default mail is kept in the named volume `agent-inbox-data`. To inspect the
-# SQLite file from the host instead, replace the volume line with a bind mount:
-#     - ./agent-inbox-data:/data
-# then open ./agent-inbox-data/agent-inbox.db with any sqlite tool.
+# Two services from ONE image (they are the same program, run in two modes):
+#   agent-mailbox  — the hub. Owns the SQLite file on a named volume. The only stateful
+#                    part; the only thing with a volume.
+#   console        — the human web UI. A client. No volume, no database, no credential —
+#                    it reads the hub over HTTP like any other client and cannot reach
+#                    the store even if it wanted to (nothing is mounted). Remove it and
+#                    the hub is untouched.
+#
+# Set AGENT_MAILBOX_PUBLIC_URL to how agents actually reach the hub from where THEY run
+# (its LAN name/IP and port). It is baked into every identifier and prompt the hub hands
+# out, so a wrong value sends agents nowhere.
 
 services:
-  agent-inbox:
-    image: salimfadhley/agent-inbox:latest
+  agent-mailbox:
+    image: salimfadhley/agent-mailbox:${AGENT_MAILBOX_VERSION:-latest}
     # To build locally instead of pulling, comment out `image:` and uncomment:
     # build: .
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${AGENT_MAILBOX_PORT:-8080}:8080"
     environment:
-      AGENT_INBOX_TRANSPORT: http
-      AGENT_INBOX_HOST: 0.0.0.0
-      AGENT_INBOX_PORT: "8080"
-      AGENT_INBOX_DB: /data/agent-inbox.db
-      AGENT_INBOX_TTL_DAYS: ${AGENT_INBOX_TTL_DAYS:-14}
-      AGENT_INBOX_LOG_LEVEL: ${AGENT_INBOX_LOG_LEVEL:-INFO}
+      # No default that pretends to know the answer: the hub cannot guess how it is
+      # reached, and a wrong value would be wrong in every identifier it emits. localhost
+      # is the honest fallback; override it for a real deployment.
+      AGENT_MAILBOX_PUBLIC_URL: ${AGENT_MAILBOX_PUBLIC_URL:-http://localhost:8080}
+      AGENT_MAILBOX_HUB_NAME: ${AGENT_MAILBOX_HUB_NAME:-agent-mailbox}
     volumes:
-      - agent-inbox-data:/data
+      - agent-mailbox-data:/data
+
+  console:
+    image: salimfadhley/agent-mailbox:${AGENT_MAILBOX_VERSION:-latest}
+    # ENTRYPOINT is `agent-mailbox`; this selects the console mode instead of `serve`.
+    command: ["console", "--host", "0.0.0.0", "--port", "8090"]
+    restart: unless-stopped
+    depends_on:
+      - agent-mailbox
+    ports:
+      - "${CONSOLE_PORT:-8082}:8090"
+    environment:
+      # Over the compose network the hub is reachable by its service name. The console
+      # still advertises the hub's *public* id on its prompt page, not this internal
+      # address — that distinction is deliberate (a sidecar reaches the hub by a name no
+      # agent could use).
+      AGENT_MAILBOX_HUB: http://agent-mailbox:8080
+      AGENT_MAILBOX_NAME: console
+    # No volume. That absence is the guarantee: the console cannot touch the store.
 
 volumes:
-  agent-inbox-data:
+  agent-mailbox-data:
