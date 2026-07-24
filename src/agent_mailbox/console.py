@@ -89,6 +89,15 @@ def _table(headers: list[str], rows: list[list[str]], empty: str) -> str:
     )
 
 
+def _advertised(hub: dict[str, Any], fallback: str) -> str:
+    """The address the hub publishes for itself, for putting in front of a human.
+
+    Prefer the hub's `id` over however this console reaches it: as a sidecar those
+    differ, and only one of them is any use to an agent on the network.
+    """
+    return str(hub.get("id") or "").rstrip("/") or fallback
+
+
 def _leaf(value: Any) -> str:
     return str(value or "").rstrip("/").rsplit("/", 1)[-1]
 
@@ -204,9 +213,15 @@ def build_console(client: HubClient) -> Litestar:
 
         The hub's own address is filled in, so the commands can be pasted as they
         stand — a placeholder is something to get wrong.
+
+        The address comes from the hub's **`id`**, not from how this console happens
+        to reach it. As a sidecar the console talks to `http://agent-mailbox:8080` over
+        a container network, and pasting that to an agent would send it nowhere. `id`
+        is the address the hub publishes as its identity, which is the one an agent can
+        actually use.
         """
         hub = client.hub_info()
-        text = onboarding(client.config.base)
+        text = onboarding(_advertised(hub, client.config.base))
         note = role_note().replace("**", "")
         body = (
             f"<p>{html.escape(note)}</p>"
@@ -217,7 +232,7 @@ def build_console(client: HubClient) -> Litestar:
             "background:transparent;color:inherit'>"
             f"{html.escape(text)}</textarea>"
             "<p class='dim'>Written for "
-            f"<code>{html.escape(client.config.base)}</code>. "
+            f"<code>{html.escape(_advertised(hub, client.config.base))}</code>. "
             "Also served as plain text at <a href='/prompts.txt'>/prompts.txt</a>.</p>"
         )
         return Response(_page("Prompt", body, hub), media_type=MediaType.HTML)
@@ -225,6 +240,6 @@ def build_console(client: HubClient) -> Litestar:
     @get("/prompts.txt", media_type=MediaType.TEXT, sync_to_thread=True)
     def prompt_text() -> str:
         """The same prompt as plain text, for `curl` and for pasting."""
-        return onboarding(client.config.base)
+        return onboarding(_advertised(client.hub_info(), client.config.base))
 
     return Litestar(route_handlers=[overview, agents, mailbox, prompts, prompt_text])

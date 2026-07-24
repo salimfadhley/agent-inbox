@@ -27,7 +27,12 @@ class StubHub(HubClient):
         super().__init__(Config(hub=HUB, name="operator"))
 
     def hub_info(self) -> dict[str, Any]:
-        return {"name": "testhub", "version": "1.2.3", "authenticated": False}
+        return {
+            "id": HUB,
+            "name": "testhub",
+            "version": "1.2.3",
+            "authenticated": False,
+        }
 
     def list_agents(self) -> dict[str, Any]:
         return {"items": []}
@@ -44,6 +49,24 @@ def test_the_prompt_names_this_hub_not_a_placeholder(console: TestClient) -> Non
     body = console.get("/prompts").text
     assert HUB in body
     assert "&lt;host&gt;" not in body and "localhost" not in body
+
+
+def test_the_prompt_advertises_the_hub_not_the_sidecar_route_to_it() -> None:
+    """The sidecar trap: the console reaches the hub by a name no agent can use.
+
+    Over a container network the console talks to `http://agent-mailbox:8080`. Pasting
+    that into a prompt sends an agent nowhere. The hub's published `id` is the address
+    it claims as its own, and that is the one a reader needs.
+    """
+
+    class Sidecar(StubHub):
+        def __init__(self) -> None:
+            HubClient.__init__(self, Config(hub="http://agent-mailbox:8080", name="c"))
+
+    with TestClient(app=build_console(Sidecar())) as c:
+        text = c.get("/prompts.txt").text
+    assert HUB in text
+    assert "agent-mailbox:8080" not in text
 
 
 def test_the_plain_text_form_is_the_same_prompt(console: TestClient) -> None:
