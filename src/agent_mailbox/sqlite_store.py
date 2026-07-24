@@ -32,6 +32,7 @@ from typing import Any, Self
 import aiosqlite
 
 from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_mailbox.store import MessageStore
 from agent_mailbox.vocabulary import ActorType, ObjectType
 
 #: Bumped when the schema changes shape. There is nothing to migrate *from* yet: this
@@ -292,3 +293,9 @@ class SqliteStore:
                 ReadRecord(row["object_id"], row["reader"], row["at"])
             )
         return {object_id: tuple(reads) for object_id, reads in found.items()}
+
+
+# A static conformance check. `runtime_checkable` only verifies that method *names*
+# exist, so this assignment is what actually holds the adapter to the port's
+# signatures — pyright rejects the module if they drift.
+_conforms: MessageStore = SqliteStore(":memory:")

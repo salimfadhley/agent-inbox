@@ -147,3 +147,6 @@ class InMemoryStore:
             object_id: tuple(self._reads.get(object_id, {}).values())
             for object_id in object_ids
         }
+
+
+_conforms: MessageStore = InMemoryStore()
