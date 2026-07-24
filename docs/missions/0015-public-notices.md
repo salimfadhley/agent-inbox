@@ -108,7 +108,11 @@ Everything else derives: `is_reply` = `parent IS NOT NULL`; public/private = the
 this is the Reply/Reply-All affordance, and accidental disclosure is the only genuinely
 bad failure mode here. Each returns **who can now see the result**.
 
-## Garbage collection: expire by thread activity, not message age
+## Garbage collection — split out as its own bugfix mission
+
+**See [0016](0016-gc-decapitates-threads.md).** It is a live bug today, independent of
+this epic, and is being fixed separately rather than riding on this work. Summary kept
+here because the threading model depends on it not manufacturing orphans:
 
 Demonstrated on a real store: a discussion started 20 days ago but **commented on today**
 lost its root and first reply to the TTL purge, leaving a survivor reading *"Re: DNS —
