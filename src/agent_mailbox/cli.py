@@ -52,6 +52,26 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_console(args: argparse.Namespace) -> int:
+    """Serve the human console — a browser window onto the hub."""
+    try:
+        import uvicorn
+
+        from agent_mailbox.console import build_console
+    except ImportError as exc:  # pragma: no cover - only without server extras
+        print(f"the console needs the server dependencies: {exc}", file=sys.stderr)
+        return 1
+    config = load_config()
+    print(f"console for {config.hub} on http://{args.host}:{args.port}")
+    uvicorn.run(
+        build_console(HubClient(config)),
+        host=args.host,
+        port=args.port,
+        log_level="warning",
+    )
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Run the hub itself. Needs the server dependencies."""
     try:
@@ -188,6 +208,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     hub = subs.add_parser("serve", help="run the hub")
     hub.set_defaults(func=cmd_serve)
+
+    con = subs.add_parser("console", help="serve the human console in a browser")
+    con.add_argument("--host", default="127.0.0.1", help="bind address")
+    con.add_argument("--port", type=int, default=8090)
+    con.set_defaults(func=cmd_console)
 
     join = subs.add_parser("join", help="claim a name and configure this engine")
     join.add_argument(
