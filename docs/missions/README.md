@@ -33,8 +33,8 @@ real data has repeatedly caught what synthetic tests missed. Agents re-register 
 
 | | Mission | What it is | Absorbs | Status |
 |---|---|---|---|---|
-| **M1** | Messaging model | Actors, activities, objects with URI ids, `to`/`cc`, `inReplyTo`. The foundation everything else derives from. | 0015, 0023 | **next** |
-| **M2** | API as inbox/outbox | The API *is* the model: actor documents and collections, not bespoke routes. | reshapes the cancelled mission's WP01 | planned |
+| **M1** | Messaging model | Actors, addressing, threading, visibility, expiry, storage port, policy layer. | 0015, 0023 | ✅ **complete** |
+| **M2** | API as inbox/outbox | The API *is* the model: actor documents and collections, not bespoke routes. | reshapes the cancelled mission's WP01 | **next** |
 | **M3** | One API, three clients | CLI, stdio MCP, and the console all become API clients. Putting the console here is what forces the API to be genuinely sufficient. | 0021, cancelled WP03–WP06 | planned |
 | **M4** | Authentication | Credentials issued with identity; RFC 9421 signatures. | | planned |
 | **M5** | Channels | Push into a live session — possible at last, because the agent talks to a local process. | 0017 | planned |
@@ -63,6 +63,10 @@ model, the client topology or storage:
 - [ADR 0005 — One API; every client is a client](../decisions/0005-one-api-every-client-is-a-client.md)
 - [ADR 0006 — SQLite hybrid storage](../decisions/0006-sqlite-hybrid-storage.md)
   · *and why not Elasticsearch*
+- [ADR 0007 — Authentication at the edge](../decisions/0007-authentication-at-the-edge.md)
+  · *identity is always an argument*
+- [ADR 0008 — No actor has authority](../decisions/0008-no-actor-has-authority.md)
+  · *`admin` is a drop box, not an office*
 
 ## Shipped
 
