@@ -11,6 +11,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Version-agnostic gates run once, on the primary Python. Style and types do not
+  # differ across 3.12/3.13, so running them in the matrix would only multiply the ways
+  # they can flake. pyright needs the clients extra installed (see below); pytest does
+  # not, which is why they are separate jobs.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history + tags for hatch-vcs version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (with the clients extra, for pyright)
+        # `--extra clients` matters: mcp_client.py imports `mcp`, which lives in the
+        # clients extra, not the dev group. Without it pyright cannot resolve the import
+        # and fails on code that is fine — the hub image omits these deps deliberately
+        # (ADR 0009), but the type check covers the whole source tree.
+        run: uv sync --python 3.12 --dev --extra clients
+
+      - name: Lint (ruff check)
+        run: uv run ruff check src tests
+
+      - name: Format check (ruff format)
+        run: uv run ruff format --check src tests
+
+      - name: Type check (pyright)
+        # Pinned to the exact version the project's gate uses, and run via `uv run` so it
+        # analyses the project venv (where mcp is installed) rather than an isolated one.
+        run: uv run --with pyright==1.1.411 pyright src
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -29,23 +63,9 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        # `--extra clients` matters: mcp_client.py imports `mcp`, which lives in the
-        # clients extra, not the dev group. Without it pyright cannot resolve the import
-        # and the type check fails on code that is perfectly fine — the hub image omits
-        # these deps deliberately (ADR 0009), but CI type-checks the whole source tree.
-        run: uv sync --python ${{ matrix.python-version }} --dev --extra clients
-
-      - name: Lint (ruff check)
-        run: uv run ruff check src tests
-
-      - name: Format check (ruff format)
-        run: uv run ruff format --check src tests
-
-      - name: Type check (pyright)
-        # Pinned to the exact version the project's gate uses, and to src/ — an
-        # unpinned pyright silently upgrades and can fail a build on a rule that did
-        # not exist when the code was written.
-        run: uvx pyright@1.1.411 src
+        # No clients extra here: no test imports mcp, and mcp's Python support need not
+        # constrain the versions the core is tested on.
+        run: uv sync --python ${{ matrix.python-version }} --dev
 
       - name: Tests (pytest)
         run: uv run pytest
@@ -57,7 +77,7 @@ jobs:
   # and passed every unit test. Because the release build (docker.yml) only fires after
   # CI is green, this gates the release on the stack actually working.
   smoke:
-    needs: test
+    needs: [check, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -118,7 +138,7 @@ jobs:
         run: docker compose down -v
 
   build:
-    needs: test
+    needs: [check, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
