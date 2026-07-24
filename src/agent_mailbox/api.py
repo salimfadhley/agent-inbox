@@ -31,6 +31,7 @@ from agent_mailbox.errors import mailbox_error_handler
 from agent_mailbox.exceptions import MailboxError
 from agent_mailbox.house import House
 from agent_mailbox.wire import (
+    BLIND_FIELDS,
     Actor,
     Collection,
     Create,
@@ -148,6 +149,7 @@ class Api:
     async def outbox(self, name: str, request: Request, caller: str) -> Note:
         owns(name, caller, self.wire)
         raw: dict[str, Any] = await request.json()
+        _refuse_blind_addressing(raw)
         activity = decode_activity(raw)
         note = activity.object
 
@@ -206,6 +208,34 @@ class Api:
                     "mission 0024 (Pen Pals) and mission 0025 (fediverse profile)."
                 ),
             },
+        )
+
+
+def _refuse_blind_addressing(raw: dict[str, Any]) -> None:
+    """Refuse `bto`/`bcc` rather than pretending to honour them.
+
+    This hub has no blind delivery. Accepting the fields and dropping them would leave
+    the sender believing a blind recipient got the message; accepting and echoing them
+    — which is what happened before this check — showed every recipient the very list
+    the field exists to hide. Saying no is the only honest answer.
+    """
+    inner = raw.get("object")
+    present = sorted(
+        {k for k in raw if k in BLIND_FIELDS}
+        | (
+            {k for k in inner if k in BLIND_FIELDS}
+            if isinstance(inner, dict)
+            else set()
+        )
+    )
+    if present:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "this mailbox does not support blind addressing "
+                f"({', '.join(present)}). Send separate messages, or address "
+                "everyone in `to`."
+            ),
         )
 
 

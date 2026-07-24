@@ -157,7 +157,20 @@ class House:
     async def reply(
         self, caller: str, object_id: str, body: str, *, subject: str | None = None
     ) -> ObjectRecord:
-        original = await self._mailbox.view(caller, object_id)
+        try:
+            original = await self._mailbox.view(caller, object_id)
+        except Exception as exc:
+            # Replying to something not yours is a probe too, and failed here before
+            # any observer saw it.
+            await self._record(
+                Outcome(
+                    Attempt(action="reply", actor=caller, detail={"id": object_id}),
+                    ok=False,
+                    error=exc,
+                    detail={"not_yours": True},
+                )
+            )
+            raise
         return await self.send(
             caller,
             original.attributed_to,
@@ -178,12 +191,17 @@ class House:
         """One message, without consuming it. Goes through the house like everything
         else — reading it changes nothing, but a deployment's observers should still
         see that it happened."""
-        got = await self._mailbox.view(caller, object_id)
-        await self._record(
-            Outcome(
-                Attempt(action="view", actor=caller, detail={"id": object_id}), ok=True
+        attempt = Attempt(action="view", actor=caller, detail={"id": object_id})
+        try:
+            got = await self._mailbox.view(caller, object_id)
+        except Exception as exc:
+            # A refused view is the same probe signal as a refused read, and was
+            # invisible to observers because the exception escaped before recording.
+            await self._record(
+                Outcome(attempt, ok=False, error=exc, detail={"not_yours": True})
             )
-        )
+            raise
+        await self._record(Outcome(attempt, ok=True))
         return got
 
     async def peek(self, caller: str) -> tuple[ObjectRecord, ...]:

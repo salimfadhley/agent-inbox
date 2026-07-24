@@ -438,3 +438,81 @@ class TestReviewFindings:
         assert sent["extra"]["x:onTheActivity"] == "kept", (
             "properties on the Create were dropped before storage"
         )
+
+
+class TestSecondReviewFindings:
+    """Three more, from a review of the *fixes*. One was caused by them."""
+
+    def test_blind_addressing_is_refused_not_echoed(self, client: TestClient) -> None:
+        """`bto`/`bcc` were preserved as unknown properties and rendered back.
+
+        A recipient was shown exactly the list bcc exists to hide — a leak introduced
+        by the "render unknown properties back" fix, which is why the review ran twice.
+        Refusing is the only honest answer: silently dropping would leave the sender
+        believing a blind recipient received it.
+        """
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        join(client, YITZHAK)
+        r = client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json={
+                "type": "Note",
+                "to": [TREVOR],
+                "bto": [YITZHAK],
+                "bcc": ["admin"],
+                "content": "x",
+            },
+            headers=as_(ROSEMARY),
+        )
+        assert r.status_code == 422
+        assert "blind addressing" in r.json()["detail"]
+
+    def test_the_audience_cannot_be_spoofed(self, client: TestClient) -> None:
+        """Inbound `audience` used to override what the hub computed.
+
+        No content leaked, but a recipient could be shown false routing metadata —
+        "this went to everyone" when it went to one person — and act on it.
+        """
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        sent = client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json={
+                "type": "Note",
+                "to": [TREVOR],
+                "audience": ["everyone"],
+                "content": "x",
+            },
+            headers=as_(ROSEMARY),
+        ).json()
+        assert sent["audience"] == [TREVOR], (
+            "the hub decides the audience, not the sender"
+        )
+
+    def test_a_refused_view_is_observable(self, client: TestClient) -> None:
+        """Failed views escaped before any observer saw them.
+
+        Refused reads were recorded and refused views were not, so a prober could
+        enumerate with GET instead of POST and stay invisible — contradicting
+        ProbeDetector's own docstring.
+        """
+        from agent_mailbox.house import House
+        from agent_mailbox.mailbox import Mailbox
+        from agent_mailbox.policy import ProbeDetector, StandingResidents
+        from agent_mailbox.store import InMemoryStore
+
+        detector = ProbeDetector(threshold=99)
+        house = House(Mailbox(InMemoryStore()), [StandingResidents(), detector])
+        with TestClient(app=build_api(house, HUB)) as c:
+            for who in (ROSEMARY, TREVOR, YITZHAK):
+                c.post("/actors", json={"preferredUsername": who})
+            private = c.post(
+                f"/actors/{ROSEMARY}/outbox",
+                json=note([TREVOR], "private"),
+                headers=as_(ROSEMARY),
+            ).json()
+            ident = private["id"].rsplit("/", 1)[-1]
+
+            assert c.get(f"/objects/{ident}", headers=as_(YITZHAK)).status_code == 404
+            assert detector.refusals_for(YITZHAK) == 1, "a refused view must be seen"

@@ -42,8 +42,27 @@ MODELLED = frozenset(
         "content",
         "inReplyTo",
         "published",
+        # Modelled so an inbound value cannot override what the engine computed:
+        # `audience` is what the *sender addressed*, and the hub decides that, not the
+        # client. Left unmodelled it arrived as an unknown property and won.
+        "audience",
+        # Blind addressing. Modelled so they are never treated as unknown properties
+        # and echoed back — see BLIND_FIELDS.
+        "bto",
+        "bcc",
     }
 )
+
+#: ActivityStreams' *blind* addressing fields.
+#:
+#: We do not implement blind delivery, and there are only two honest options: reject
+#: them, or deliver blindly and strip them before rendering. Silently dropping is not
+#: one, because the sender would believe a blind recipient had received something.
+#:
+#: They are named here rather than merely absent, because "absent" is what caused the
+#: leak: unmodelled properties are preserved verbatim and rendered back, so a recipient
+#: was shown exactly the list bcc exists to hide.
+BLIND_FIELDS = frozenset({"bto", "bcc"})
 
 
 class Note(
