@@ -19,6 +19,7 @@ import json
 import os
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -361,6 +362,26 @@ class HubClient:
 
     def read_thread(self, object_id: str) -> Any:
         return self._call("GET", f"/objects/{_leaf(object_id)}/thread")
+
+    # -- observation -------------------------------------------------------
+    #
+    # The operator's view. These do not send this client's name as anyone's identity —
+    # they read the hub's `/observe/*` routes, which take no caller. That is the whole
+    # difference from the methods above: the console used to `check_inbox` *as* the
+    # agent it wanted to look at, and that impersonation is what this replaces.
+
+    def survey(self, since: str = "") -> Any:
+        query = f"?since={urllib.parse.quote(since)}" if since else ""
+        return self._call("GET", f"/observe/stats{query}")
+
+    def observe_mailbox(self, name: str) -> Any:
+        return self._call("GET", f"/observe/mailbox/{name}")
+
+    def observe_object(self, object_id: str) -> Any:
+        return self._call("GET", f"/observe/objects/{_leaf(object_id)}")
+
+    def observe_thread(self, object_id: str) -> Any:
+        return self._call("GET", f"/observe/objects/{_leaf(object_id)}/thread")
 
     def role_definition(self, role: str) -> Any:
         """What a role means, according to the hub.

@@ -249,6 +249,91 @@ class TestThreads:
         assert r.status_code == 404
 
 
+class TestObservation:
+    """The operator's view (M2 FR-010) — the routes that replace impersonation.
+
+    The property that matters is that these answer a *different* question from the
+    agent routes: they show what is on the hub, take no caller, and consume nothing.
+    """
+
+    def _send(self, client: TestClient, frm: str, to: list[str], **kw: object) -> str:
+        r = client.post(
+            f"/actors/{frm}/outbox", json=note(to, "body", **kw), headers=as_(frm)
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"].rsplit("/", 1)[-1]
+
+    def test_a_mailbox_can_be_observed_without_a_caller(
+        self, client: TestClient
+    ) -> None:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        self._send(client, ROSEMARY, [TREVOR], summary="first")
+        r = client.get(f"/observe/mailbox/{TREVOR}")  # no X-Agent-Name at all
+        assert r.status_code == 200
+        assert [n["summary"] for n in r.json()["items"]] == ["first"]
+
+    def test_observing_does_not_consume(self, client: TestClient) -> None:
+        """The whole point: an operator looking must not mark the agent's mail read."""
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        self._send(client, ROSEMARY, [TREVOR], summary="untouched")
+        client.get(f"/observe/mailbox/{TREVOR}")
+        still = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        assert still["totalItems"] == 1, "observing stole the agent's mail"
+
+    def test_observe_sees_a_whole_thread_no_participant_can(
+        self, client: TestClient
+    ) -> None:
+        """The clearest way the operator view differs from an agent's.
+
+        Rosemary broadcasts; Trevor replies to Rosemary privately. Yitzhak, a
+        bystander on the broadcast, cannot see Trevor's reply — but the operator sees
+        the conversation entire.
+        """
+        for who in (ROSEMARY, TREVOR, YITZHAK):
+            join(client, who)
+        root = self._send(client, ROSEMARY, [TREVOR, YITZHAK], summary="all hands")
+        reply = client.post(
+            f"/actors/{TREVOR}/outbox",
+            json=note([ROSEMARY], "just you", inReplyTo=f"{HUB}/objects/{root}"),
+            headers=as_(TREVOR),
+        )
+        assert reply.json()["inReplyTo"] == f"{HUB}/objects/{root}", (
+            "the reply did not attach to the thread — the test would prove nothing"
+        )
+        # Yitzhak, party only to the opener, sees one turn.
+        seen = client.get(f"/objects/{root}/thread", headers=as_(YITZHAK)).json()
+        assert seen["totalItems"] == 1
+        # The operator sees both.
+        whole = client.get(f"/observe/objects/{root}/thread").json()
+        assert whole["totalItems"] == 2
+
+    def test_observe_object_reports_who_read_it(self, client: TestClient) -> None:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        oid = self._send(client, ROSEMARY, [TREVOR], summary="ack me")
+        before = client.get(f"/observe/objects/{oid}").json()
+        assert before["readBy"] == []
+        client.post(f"/objects/{oid}/read", headers=as_(TREVOR))
+        after = client.get(f"/observe/objects/{oid}").json()
+        assert after["readBy"] == [TREVOR]
+
+    def test_stats_count_the_traffic(self, client: TestClient) -> None:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        self._send(client, ROSEMARY, [TREVOR])
+        self._send(client, ROSEMARY, [TREVOR])
+        stats = client.get("/observe/stats").json()
+        assert stats["messages"] == 2
+        # flow is a list of [from, to, count]; one pair, twice.
+        assert [ROSEMARY, TREVOR, 2] in [list(e) for e in stats["flow"]]
+
+    def test_observing_an_absent_message_is_a_404(self, client: TestClient) -> None:
+        assert client.get("/observe/objects/nope").status_code == 404
+        assert client.get("/observe/objects/nope/thread").status_code == 404
+
+
 class TestForeignProperties:
     def test_unknown_as2_properties_survive(self, client: TestClient) -> None:
         """ADR 0006: preserve what we do not understand.

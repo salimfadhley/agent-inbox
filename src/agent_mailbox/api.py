@@ -198,6 +198,46 @@ class Api:
             raise HTTPException(status_code=404, detail="no such thread")
         return self.wire.collection([self.wire.note(m) for m in turns])
 
+    # -- observation (M2 FR-010) -------------------------------------------
+    #
+    # The operator's view of the hub, on its own route prefix. Everything above this
+    # answers "what may this agent see"; everything here answers "what is on this hub",
+    # which is a different question and must look different.
+    #
+    # The console used to get this by **impersonating** — sending `X-Agent-Name` for
+    # whoever it wanted to look at — which worked only because nothing authenticates.
+    # These routes replace that. They take no caller, so nobody's mail is marked read
+    # by being looked at, and when authentication arrives there is exactly one prefix
+    # to put an operator credential in front of.
+    #
+    # They are **not** privileged today, because nothing on this hub is. That is stated
+    # on every console page rather than implied by a route prefix.
+
+    async def survey(self, since: str = "") -> dict[str, Any]:
+        return await self.house.survey(since=since)
+
+    async def observe_mailbox(self, name: str) -> Collection:
+        items = await self.house.observe_mailbox(self.wire.name_from(name))
+        return self.wire.collection([self.wire.note(m) for m in items])
+
+    async def observe_object(self, object_id: str) -> dict[str, Any]:
+        got = await self.house.observe_object(self.wire.object_id_from(object_id))
+        if got is None:
+            raise HTTPException(status_code=404, detail="no such message")
+        note = self.wire.note(got)
+        # Who has consumed it — the operator's question that an agent never asks, and
+        # the reason this is not just `GET /objects/{id}` without a caller.
+        return {
+            **msgspec.to_builtins(note),
+            "readBy": list(await self.house.observe_reads(got.id)),
+        }
+
+    async def observe_thread(self, object_id: str) -> Collection:
+        turns = await self.house.observe_thread(self.wire.object_id_from(object_id))
+        if not turns:
+            raise HTTPException(status_code=404, detail="no such thread")
+        return self.wire.collection([self.wire.note(m) for m in turns])
+
     async def federation_inbox(self, name: str) -> Response:
         return Response(
             status_code=501,
@@ -317,6 +357,22 @@ def build_api(house: House, public_url: str, *, debug: bool = False) -> Litestar
     async def thread(object_id: str, caller: str) -> Collection:
         return await api.thread(object_id, caller)
 
+    @get("/observe/stats")
+    async def observe_stats(since: str = "") -> dict[str, Any]:
+        return await api.survey(since)
+
+    @get("/observe/mailbox/{name:str}")
+    async def observe_mailbox(name: str) -> Collection:
+        return await api.observe_mailbox(name)
+
+    @get("/observe/objects/{object_id:str}")
+    async def observe_object(object_id: str) -> dict[str, Any]:
+        return await api.observe_object(object_id)
+
+    @get("/observe/objects/{object_id:str}/thread")
+    async def observe_thread(object_id: str) -> Collection:
+        return await api.observe_thread(object_id)
+
     async def open_the_house(_: Litestar) -> None:
         """Establish standing invariants once, at startup.
 
@@ -338,6 +394,10 @@ def build_api(house: House, public_url: str, *, debug: bool = False) -> Litestar
             federation_inbox,
             outbox,
             view_object,
+            observe_stats,
+            observe_mailbox,
+            observe_object,
+            observe_thread,
             read_object,
             thread,
         ],

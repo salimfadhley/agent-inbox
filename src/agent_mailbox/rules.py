@@ -244,3 +244,64 @@ def expired_object_ids(objects: Iterable[ObjectRecord], cutoff: str) -> frozense
         latest[root] = max(latest.get(root, ""), obj.published)
     dead = {root for root, last in latest.items() if last < cutoff}
     return frozenset(obj.id for obj in objects if thread_root(objects, obj.id) in dead)
+
+
+def traffic_by_day(
+    objects: Iterable[ObjectRecord], *, since: str = ""
+) -> tuple[tuple[str, int], ...]:
+    """How many messages were sent on each day, oldest first.
+
+    Days with no traffic are absent rather than zero: this counts what happened, and
+    filling the gaps is a presentation decision that belongs to whatever draws the
+    chart, not to the count.
+
+    ``since`` is an ISO timestamp passed in rather than read from a clock, so this
+    stays pure — the same objects always give the same answer.
+    """
+    tally: dict[str, int] = {}
+    for obj in objects:
+        if obj.published and obj.published >= since:
+            tally[obj.published[:10]] = tally.get(obj.published[:10], 0) + 1
+    return tuple(sorted(tally.items()))
+
+
+def flow_edges(
+    objects: Iterable[ObjectRecord], *, since: str = ""
+) -> tuple[tuple[str, str, int], ...]:
+    """Who wrote to whom, and how often — as ``(from, to, count)``, busiest first.
+
+    Counted per *recipient*, so one message to three agents is three edges. That is
+    the honest reading of a fan-out: the sender addressed three mailboxes, and a graph
+    that drew one edge would hide two of them.
+
+    ``cc`` counts the same as ``to``. From the point of view of who is talking to whom
+    the distinction does not survive: both delivered.
+    """
+    tally: dict[tuple[str, str], int] = {}
+    for obj in objects:
+        if not obj.published or obj.published < since:
+            continue
+        for recipient in (*obj.to, *obj.cc):
+            if recipient == obj.attributed_to:
+                continue  # A copy of your own broadcast is not correspondence.
+            key = (obj.attributed_to, recipient)
+            tally[key] = tally.get(key, 0) + 1
+    ordered = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))
+    return tuple((frm, to, count) for (frm, to), count in ordered)
+
+
+def correspondents(
+    objects: Iterable[ObjectRecord], name: str
+) -> tuple[tuple[str, int], ...]:
+    """Everyone who has exchanged messages with ``name``, busiest first.
+
+    Both directions count as one relationship. "Who does this agent work with" is not
+    a question about who spoke first.
+    """
+    tally: dict[str, int] = {}
+    for frm, to, count in flow_edges(objects):
+        if frm == name:
+            tally[to] = tally.get(to, 0) + count
+        elif to == name:
+            tally[frm] = tally.get(frm, 0) + count
+    return tuple(sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))

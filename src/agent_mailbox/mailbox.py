@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from agent_mailbox import addressing, naming, rules
 from agent_mailbox.addressing import LOCAL
@@ -365,6 +366,86 @@ class Mailbox:
         )
 
     # -- housekeeping ------------------------------------------------------
+
+    # -- observation ------------------------------------------------------------
+    #
+    # These deliberately do **not** take a caller, and deliberately do not apply the
+    # party rule. They are the operator's view: someone running the hub can see what is
+    # on it, which is not a loophole in the messaging model but a different question
+    # being asked of the same data.
+    #
+    # Keeping them as separate verbs rather than a flag on `peek` is the point. An
+    # operator's authority is visible in the method name and in the route, so it can be
+    # authorised in one place when authentication arrives — rather than being smuggled
+    # in by a console that impersonates whoever it wants to look at, which is what this
+    # replaces (M2 FR-010).
+    #
+    # **None of them consumes.** Watching an agent's mail must never mark it read, or
+    # the operator steals what they were only trying to look at.
+
+    async def observe_mailbox(self, name: str) -> tuple[ObjectRecord, ...]:
+        """Everything addressed to one agent, read or not, newest last."""
+        all_actors, memberships = await self._context()
+        objects = tuple(await self._store.objects())
+        return tuple(
+            sorted(
+                (
+                    obj
+                    for obj in objects
+                    if name in rules.recipients_of(obj, all_actors, memberships)
+                ),
+                key=lambda obj: obj.published,
+            )
+        )
+
+    async def observe_object(self, object_id: str) -> ObjectRecord | None:
+        """One message, whoever it belongs to."""
+        return await self._store.get_object(object_id)
+
+    async def observe_thread(self, object_id: str) -> tuple[ObjectRecord, ...]:
+        """A whole conversation, including turns no single participant can see.
+
+        This is the one that most obviously is not an agent's view: `thread` shows a
+        caller their own turns, and side conversations between others stay private.
+        The operator sees the conversation entire.
+        """
+        objects = tuple(await self._store.objects())
+        root = rules.thread_root(objects, object_id)
+        members = rules.thread_members(objects, root)
+        return tuple(sorted(members, key=lambda obj: obj.published))
+
+    async def observe_reads(self, object_id: str) -> tuple[str, ...]:
+        """Who has consumed a given message. Useful for "did they get it?"."""
+        reads = await self._store.reads_of([object_id])
+        return tuple(sorted(record.reader for record in reads.get(object_id, ())))
+
+    async def survey(self, *, since: str = "") -> dict[str, Any]:
+        """Traffic, in aggregate. One pass over the store, several answers.
+
+        Gathered together rather than as four routes because a dashboard wants all of
+        it at once, and four round trips over the same data would be four chances for
+        the numbers to disagree with each other.
+        """
+        actors = tuple(await self._store.actors())
+        objects = tuple(await self._store.objects())
+        recent = tuple(obj for obj in objects if obj.published >= since)
+        return {
+            "actors": len(actors),
+            "messages": len(objects),
+            "messages_since": len(recent),
+            "threads": len({rules.thread_root(objects, obj.id) for obj in objects}),
+            "per_day": rules.traffic_by_day(objects, since=since),
+            "flow": rules.flow_edges(objects, since=since),
+            "busiest": tuple(
+                sorted(
+                    (
+                        (a.name, sum(1 for o in objects if o.attributed_to == a.name))
+                        for a in actors
+                    ),
+                    key=lambda pair: (-pair[1], pair[0]),
+                )
+            ),
+        }
 
     async def expire(self) -> int:
         """Remove conversations that have gone quiet. Returns messages removed.

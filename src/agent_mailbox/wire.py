@@ -99,7 +99,11 @@ class Create(msgspec.Struct, rename={"context": "@context"}):
 
 class Actor(
     msgspec.Struct,
-    rename={"context": "@context", "preferred_username": "preferredUsername"},
+    rename={
+        "context": "@context",
+        "preferred_username": "preferredUsername",
+        "last_seen": "lastSeen",
+    },
 ):
     """An actor document — the profile, in AS2's words."""
 
@@ -114,6 +118,10 @@ class Actor(
     profile: dict[str, Any] = {}
     inbox: str = ""
     outbox: str = ""
+    #: When this actor was last seen acting. There is no heartbeat and no "online"
+    #: flag — presence is inferred from recency by whoever reads this, because a
+    #: stored boolean would lie the moment a process died without saying goodbye.
+    last_seen: str | None = None
 
 
 class Collection(
@@ -212,6 +220,7 @@ class Renderer:
             profile=dict(record.profile),
             inbox=f"{uri}/inbox",
             outbox=f"{uri}/outbox",
+            last_seen=record.last_seen or None,
         )
 
     def collection(self, items: list[Any]) -> Collection:

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 from agent_mailbox.mailbox import Mailbox, _reply_subject
 from agent_mailbox.policy import Attempt, Outcome, Policy, default_policies
@@ -226,3 +226,25 @@ class House:
 
     async def expire(self) -> int:
         return await self._mailbox.expire()
+
+    # -- observation -------------------------------------------------------
+    #
+    # The operator's view, passed through unfiltered on purpose. Policy does not get a
+    # veto here: a rule that could hide traffic from whoever is running the hub would
+    # make the audit log unauditable, and the first thing anyone would want to inspect
+    # after a policy misfired is exactly what the policy touched.
+
+    async def observe_mailbox(self, name: str) -> tuple[ObjectRecord, ...]:
+        return await self._mailbox.observe_mailbox(name)
+
+    async def observe_object(self, object_id: str) -> ObjectRecord | None:
+        return await self._mailbox.observe_object(object_id)
+
+    async def observe_thread(self, object_id: str) -> tuple[ObjectRecord, ...]:
+        return await self._mailbox.observe_thread(object_id)
+
+    async def observe_reads(self, object_id: str) -> tuple[str, ...]:
+        return await self._mailbox.observe_reads(object_id)
+
+    async def survey(self, *, since: str = "") -> dict[str, Any]:
+        return await self._mailbox.survey(since=since)

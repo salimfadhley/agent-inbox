@@ -1,7 +1,9 @@
 # Mission brief — the console as a sidecar
 
-**Status:** planned · **Kind:** deployment · **Raised:** 2026-07-24 by the owner
-**Blocked on:** the `/observe/*` routes — see below. Do not deploy before them.
+**Status:** unblocked · **Kind:** deployment · **Raised:** 2026-07-24 by the owner
+**Was blocked on:** the `/observe/*` routes. Those now exist (M2 FR-010), the console
+reads through them instead of impersonating, and the image's `CMD` selects the mode —
+so the sidecar can ship. The security prerequisite below has been met, not waived.
 
 ## The idea
 
