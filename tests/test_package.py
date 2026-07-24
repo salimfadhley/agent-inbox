@@ -21,8 +21,8 @@ def test_package_reports_a_version() -> None:
 def test_new_package_never_imports_the_superseded_one() -> None:
     """We are starting from scratch, not refactoring the old implementation.
 
-    The old package remains installed for reference, so this would otherwise fail
-    silently — right up until it is deleted, which is the worst moment to find out.
+    Checked by source text rather than by import, so it catches a reference even
+    before it would fail at runtime.
     """
     root = Path(agent_mailbox.__file__).parent
     offenders: list[str] = []
@@ -31,8 +31,3 @@ def test_new_package_never_imports_the_superseded_one() -> None:
         if source.is_file() and "agent_mailbox_old" in source.read_text():
             offenders.append(module.name)
     assert not offenders, f"new code must not reference the old package: {offenders}"
-
-
-def test_the_superseded_package_is_still_available_as_reference() -> None:
-    """It is kept deliberately until the new system is green; then it goes."""
-    import agent_mailbox_old  # noqa: F401

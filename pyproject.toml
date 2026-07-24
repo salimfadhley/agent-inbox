@@ -49,11 +49,6 @@ ui = [
     "markdown>=3.6",
 ]
 
-[project.scripts]
-# The new command arrives with M3. The superseded implementation keeps an entry point
-# only so the package remains importable as reference; it is deleted with the package.
-agent-mailbox-old = "agent_mailbox_old.cli:main"
-
 [project.urls]
 Homepage = "https://github.com/salimfadhley/agent-inbox"
 Repository = "https://github.com/salimfadhley/agent-inbox"
@@ -67,10 +62,10 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_mailbox", "src/agent_mailbox_old"]
+packages = ["src/agent_mailbox"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "docs", "README.md", "LICENSE"]
+include = ["src", "tests", "docs", "README.md", "LICENSE"]  # not agent-mailbox-old
 
 [dependency-groups]
 dev = [
@@ -85,9 +80,7 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-# tests/legacy holds the superseded package's suite — historical reference, not a gate.
 testpaths = ["tests"]
-norecursedirs = ["legacy"]
 addopts = "-q"
 
 [tool.ruff]
@@ -95,14 +88,14 @@ line-length = 88
 target-version = "py312"
 # The superseded implementation is kept for reference only and is deleted once the new
 # system is green; linting code we are removing is waste (charter: Testing Standards).
-exclude = ["src/agent_mailbox_old", "tests/legacy"]
+exclude = ["agent-mailbox-old"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pyright]
 include = ["src"]
-exclude = ["src/agent_mailbox_old"]
+exclude = ["agent-mailbox-old"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venvPath = "."
