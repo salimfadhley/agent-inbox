@@ -341,11 +341,15 @@ async def list_threads(limit: int = 50) -> dict[str, Any]:
 
 @mcp.tool()
 async def read_thread(thread_id: str) -> dict[str, Any]:
-    """Read a whole conversation in order, both directions. Does NOT consume anything.
+    """Read a conversation in order, both directions. Does NOT consume anything.
 
     Each turn carries `read_at` (when the recipient consumed it; null = still unread)
-    and `mine`. Use this to catch up on a thread you were handed mid-way. You can only
-    read threads you are party to.
+    and `mine`. Use this to catch up on a thread you were handed mid-way.
+
+    You see the turns **you are party to** — the ones you sent, and the ones routed to
+    you. Turns exchanged privately between others on the same thread are not shown, so
+    a thread you joined via a broadcast shows you the broadcast, not the side
+    conversations that followed.
     """
     config = _config()
     project, agent, role = resolve_identity(config)

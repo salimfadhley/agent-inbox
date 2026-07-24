@@ -315,6 +315,92 @@ async def test_read_thread_shows_read_state_and_is_party_restricted(
     assert await mailbox.read_thread(project, "alice", "no-such-thread") is None
 
 
+async def test_read_thread_hides_private_turns_from_broadcast_recipients(
+    mailbox: Mailbox,
+) -> None:
+    """A fan-out recipient must not read 1:1 turns that continue the same thread.
+
+    Regression for mission 0020. The membership test used to ask "am I party to *any*
+    message on this thread?" and unlock *every* row, so an ordinary broadcast that two
+    recipients then continued privately leaked those private turns to everyone who got
+    the original. No malice needed — three live threads already had this shape.
+    """
+    project = _project()
+    announcement = Message(
+        from_=f"{project}/alice", to=project, subject="sync", body="10am"
+    )
+    await mailbox.send(announcement)
+    thread = announcement.thread or announcement.id
+
+    # eve is a legitimate recipient of the broadcast
+    assert any(m.id == announcement.id for m in await mailbox.peek(project, "eve"))
+
+    # alice and bob continue *that thread* one-to-one
+    for frm, to, body in (
+        ("alice", "bob", "private one"),
+        ("bob", "alice", "private two"),
+    ):
+        await mailbox.send(
+            Message(
+                from_=f"{project}/{frm}",
+                to=f"{project}/{to}",
+                thread=thread,
+                subject="Re: sync",
+                body=body,
+            )
+        )
+
+    # eve sees only the turn she was actually party to
+    eve_turns = await mailbox.read_thread(project, "eve", thread)
+    assert eve_turns is not None
+    assert [t.message.body for t in eve_turns] == ["10am"]
+
+    # the actual participants still see the whole conversation
+    alice_turns = await mailbox.read_thread(project, "alice", thread)
+    assert alice_turns is not None
+    assert [t.message.body for t in alice_turns] == [
+        "10am",
+        "private one",
+        "private two",
+    ]
+
+
+async def test_read_thread_cannot_be_joined_by_naming_the_thread(
+    mailbox: Mailbox,
+) -> None:
+    """Naming someone else's thread on a send must not grant read access to it.
+
+    Regression for mission 0020. ``thread`` is caller-supplied and exposed over MCP, so
+    a single ``send`` naming a private thread used to make the sender party to it all.
+    """
+    project = _project()
+    first = Message(
+        from_=f"{project}/alice",
+        to=f"{project}/bob",
+        subject="salary",
+        body="confidential",
+    )
+    await mailbox.send(first)
+    thread = first.thread or first.id
+
+    assert await mailbox.read_thread("other-proj", "eve", thread) is None
+
+    # eve names that thread on a message to herself
+    await mailbox.send(
+        Message(
+            from_="other-proj/eve",
+            to="other-proj/eve",
+            thread=thread,
+            subject="hi",
+            body="me too",
+        )
+    )
+
+    turns = await mailbox.read_thread("other-proj", "eve", thread)
+    bodies = [t.message.body for t in turns or []]
+    assert "confidential" not in bodies
+
+
 async def test_stale_entries_hidden_and_supersede_protects_the_living(
     mailbox: Mailbox, tmp_path: Path
 ) -> None:

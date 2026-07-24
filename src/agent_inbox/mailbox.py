@@ -1037,7 +1037,13 @@ class Mailbox:
         return _row_to_message(row) if row else None
 
     async def thread(self, thread_id: str) -> list[Message]:
-        """Return every message on ``thread_id`` (oldest first), read-only."""
+        """Return every message on ``thread_id`` (oldest first), read-only.
+
+        **Omniscient by design** — unlike :meth:`read_thread`, this applies no party
+        filter, because it backs the human operator console, which observes the whole
+        hub. Never expose it on an agent-facing path: that is precisely the disclosure
+        mission 0020 removed from ``read_thread``.
+        """
         cursor = await self._conn.execute(
             "SELECT * FROM messages WHERE thread = ? ORDER BY created ASC",
             (thread_id,),
@@ -1165,28 +1171,31 @@ class Mailbox:
         thread_id: str,
         role: str | None = None,
     ) -> list[ThreadTurn] | None:
-        """Every turn on a thread, in order, with read-state. Read-only — never acks.
+        """The turns on a thread *you are party to*, in order, with read-state.
 
-        Returns ``None`` if the thread doesn't exist **or the caller isn't party to
-        it** (the two are deliberately indistinguishable from outside).
+        Read-only — never acks. Returns ``None`` if the thread doesn't exist **or you
+        are party to none of it** (the two are deliberately indistinguishable).
+
+        Membership is per **turn**, not per thread: you see the messages you sent or
+        that were routed to you, and nothing else. A thread is therefore a partial
+        view, exactly as a mail client shows only the messages you received.
+
+        This is load-bearing, not a nicety. Gating on the thread and returning every
+        row leaked private mail with no malice required: a fan-out message reaches
+        everyone, two recipients continue *that thread* one-to-one, and every original
+        recipient could read the private turns. See mission 0020.
         """
         me = format_address(project, agent, role)
         params = await self._party_params(project, agent, role)
         params["thread"] = thread_id
         cursor = await self._conn.execute(
-            "SELECT * FROM messages WHERE thread = :thread ORDER BY created ASC",
-            {"thread": thread_id},
+            f"SELECT * FROM messages WHERE thread = :thread AND {self._party_clause()} "
+            f"ORDER BY created ASC",
+            params,
         )
         rows = await cursor.fetchall()
         if not rows:
             return None
-        check = await self._conn.execute(
-            f"SELECT 1 FROM messages WHERE thread = :thread AND {self._party_clause()} "
-            f"LIMIT 1",
-            params,
-        )
-        if await check.fetchone() is None:
-            return None  # not your thread
         read_state = await self._read_state([r["id"] for r in rows])
         return [
             ThreadTurn(
