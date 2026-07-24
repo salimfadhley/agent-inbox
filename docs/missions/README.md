@@ -41,6 +41,7 @@ real data has repeatedly caught what synthetic tests missed. Agents re-register 
 | **M6** | Fediverse profile | Optional edge adapter, off by default. | 0025 | planned |
 | **M7** | Pen Pals | Hub-to-hub mail, by invitation. **Least important** — deprioritised by the owner. | 0024 | someday |
 | **R1** | [Competitive survey](0029-competitive-survey.md) | Research only, zero dependencies. What the neighbours get right, and what to steal. | | after M3 |
+| **0030** | [Version compatibility](0030-version-compatibility.md) | A stale client must know it is stale, and refuse rather than half-work. | | soon |
 
 Also planned, both on seams M1 already built:
 

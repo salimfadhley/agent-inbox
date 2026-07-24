@@ -28,6 +28,34 @@ CONFIG_NAME = "agent-mailbox.toml"
 IDENTITY_HEADER = "X-Agent-Name"
 DEFAULT_TIMEOUT = 10.0
 
+#: Which engine am I? Markers checked most-specific first.
+#:
+#: This matters because **identity is per engine, not per project**. Several agents work
+#: in one repository — Claude, Codex, Gemini — and they are not the same correspondent.
+#: Two of them sharing a name would silently share an inbox, which is the exact failure
+#: the hub's name reservation exists to prevent.
+ENGINE_MARKERS: tuple[tuple[str, str], ...] = (
+    ("CLAUDECODE", "claude"),
+    ("CLAUDE_CODE_ENTRYPOINT", "claude"),
+    ("CODEX_SANDBOX", "codex"),
+    ("CODEX_HOME", "codex"),
+    ("GEMINI_CLI", "gemini"),
+    ("CURSOR_TRACE_ID", "cursor"),
+)
+
+
+def detect_engine(env: dict[str, str] | None = None) -> str | None:
+    """Which agent engine is running, or ``None`` if we cannot tell.
+
+    Never guessed. A wrong answer would hand one engine another's identity, and an
+    honest "I do not know" is answerable by the agent naming itself.
+    """
+    environ = env if env is not None else dict(os.environ)
+    for marker, engine in ENGINE_MARKERS:
+        if environ.get(marker):
+            return engine
+    return None
+
 
 class ClientError(Exception):
     """Something went wrong reaching or using the hub, said in words."""
@@ -39,10 +67,15 @@ class NotConfigured(ClientError):
 
 @dataclass(frozen=True, slots=True)
 class Config:
-    """Where the hub is and who we are. That is the whole configuration."""
+    """Where the hub is, who we are, and what we do here."""
 
     hub: str
     name: str
+    #: What this engine does on this project — descriptive, and stored in the profile
+    #: rather than encoded into the name (ADR 0003).
+    role: str = "agent"
+    #: Which engine this identity belongs to, when known.
+    engine: str | None = None
 
     @property
     def base(self) -> str:
@@ -65,20 +98,63 @@ def find_config(start: Path | None = None) -> Path | None:
     return None
 
 
-def load_config(start: Path | None = None) -> Config:
-    """Read the configuration, or explain precisely what is missing.
+def load_hub(start: Path | None = None, env: dict[str, str] | None = None) -> str:
+    """The hub url alone, whether or not *this* engine has an entry yet.
+
+    The hub belongs to the project; the identity belongs to the engine. A second engine
+    joining a project already configured by the first should not have to be told the url
+    again — it is sitting in the file.
+    """
+    environ = env if env is not None else dict(os.environ)
+    if from_env := environ.get("AGENT_MAILBOX_HUB", "").strip():
+        return from_env
+    path = find_config(start)
+    if path is not None:
+        return str(tomllib.loads(path.read_text()).get("hub", "")).strip()
+    return ""
+
+
+def load_config(start: Path | None = None, env: dict[str, str] | None = None) -> Config:
+    """Read this engine's entry from the project's configuration.
+
+    The file maps **engine to identity**, because one repository is worked by several
+    agents and they are different correspondents::
+
+        hub = "http://hub:8081"
+
+        [agents.claude]
+        name = "jed_smith"
+        role = "agent"
+
+        [agents.codex]
+        name = "brian_hanson"
+        role = "host"
 
     Environment wins over the file, so a container or a one-off can override without
     editing anything.
     """
-    hub = os.environ.get("AGENT_MAILBOX_HUB", "").strip()
-    name = os.environ.get("AGENT_MAILBOX_NAME", "").strip()
+    environ = env if env is not None else dict(os.environ)
+    hub = environ.get("AGENT_MAILBOX_HUB", "").strip()
+    name = environ.get("AGENT_MAILBOX_NAME", "").strip()
+    role = environ.get("AGENT_MAILBOX_ROLE", "").strip()
+    engine = detect_engine(environ)
 
     path = find_config(start)
     if path is not None:
         data = tomllib.loads(path.read_text())
         hub = hub or str(data.get("hub", "")).strip()
-        name = name or str(data.get("name", "") or data.get("agent", "")).strip()
+        entries = data.get("agents") or {}
+        mine = entries.get(engine) if engine else None
+        if mine is None and len(entries) == 1 and not engine:
+            # One entry and no detectable engine: it can only be meant for us.
+            mine = next(iter(entries.values()))
+        if isinstance(mine, dict):
+            name = name or str(mine.get("name", "")).strip()
+            role = role or str(mine.get("role", "")).strip()
+        elif not entries:
+            # A single flat identity, from before this file grew a mapping.
+            name = name or str(data.get("name", "")).strip()
+            role = role or str(data.get("role", "")).strip()
 
     if not hub or not name:
         missing = " and ".join(
@@ -94,7 +170,7 @@ def load_config(start: Path | None = None) -> Config:
             "Or set AGENT_MAILBOX_HUB and AGENT_MAILBOX_NAME. If you have no name yet, "
             "any name you like will do — the hub will tell you if it is taken."
         )
-    return Config(hub=hub, name=name)
+    return Config(hub=hub, name=name, role=role or "agent", engine=engine)
 
 
 def project_root(start: Path | None = None) -> Path:
@@ -112,36 +188,60 @@ def project_root(start: Path | None = None) -> Path:
 
 
 def write_config(
-    hub: str, name: str, start: Path | None = None, force: bool = False
+    hub: str,
+    name: str,
+    engine: str,
+    role: str = "agent",
+    start: Path | None = None,
+    force: bool = False,
 ) -> Path:
-    """Write ``agent-mailbox.toml``, so nobody has to hand-write one.
+    """Add or update **this engine's** entry, leaving every other one alone.
 
-    Deliberately not clever. Two values, a comment saying what they are, and no
-    attempt to guess the hub — a wrong hub is worse than no hub, because it fails
-    later and less clearly.
+    Merging rather than replacing is the whole point. Several agents work in one
+    repository — Claude, Codex, Gemini — and each needs its own identity, because two
+    sharing a name would silently share an inbox. A writer that replaced the file would
+    evict whoever configured themselves first, and the eviction would be invisible until
+    their mail stopped arriving.
 
-    Refuses to overwrite unless asked: an existing file holds an identity that other
-    agents may already be writing to, and replacing it silently would strand mail.
+    An existing entry for this engine is left as it is unless ``force`` is given:
+    changing a name means mail addressed to the old one stops being delivered.
     """
     target = project_root(start) / CONFIG_NAME
-    if target.exists() and not force:
+    existing: dict[str, Any] = {}
+    if target.exists():
+        existing = tomllib.loads(target.read_text())
+
+    agents: dict[str, Any] = dict(existing.get("agents") or {})
+    if engine in agents and not force:
+        held = agents[engine].get("name")
         raise ClientError(
-            f"{target} already exists — edit it, or pass force to replace it. "
-            "Changing your name means mail addressed to the old one stops arriving."
+            f"{engine} is already {held!r} on this project (in {target}). "
+            "Keep it, or pass force to change it — mail addressed to the old name "
+            "stops arriving."
         )
-    target.write_text(
-        "# agent-mailbox — where the mailbox is, and who you are on it.\n"
-        "# Written by `join`. Safe to edit; safe to commit unless the hub url is\n"
-        "# private to your deployment.\n"
-        "\n"
-        f'hub  = "{hub}"\n'
-        "\n"
-        "# Permanent, and deliberately meaningless: do not encode your project or\n"
-        "# model here. Those are facts, facts change, and identity built from facts\n"
-        "# breaks when they do. Describe yourself with `update_profile` instead.\n"
-        f'name = "{name}"\n',
-        encoding="utf-8",
-    )
+    agents[engine] = {"name": name, "role": role}
+
+    lines = [
+        "# agent-mailbox — where the mailbox is, and who each agent here is on it.",
+        "# Written by `join`, one entry per engine. Safe to edit; safe to commit",
+        "# unless the hub url is private to your deployment.",
+        "",
+        f'hub = "{existing.get("hub") or hub}"',
+        "",
+        "# One identity per engine: several agents work in this repository and they",
+        "# are different correspondents. Names are permanent and deliberately",
+        "# meaningless — do not encode the project or the model into them. What an",
+        "# agent *does* here is its role; the rest belongs in `update_profile`.",
+    ]
+    for key in sorted(agents):
+        entry = agents[key]
+        lines += [
+            "",
+            f"[agents.{key}]",
+            f'name = "{entry.get("name", "")}"',
+            f'role = "{entry.get("role", "agent")}"',
+        ]
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
 
 
@@ -261,6 +361,34 @@ class HubClient:
 
     def read_thread(self, object_id: str) -> Any:
         return self._call("GET", f"/objects/{_leaf(object_id)}/thread")
+
+    def role_definition(self, role: str) -> Any:
+        """What a role means, according to the hub.
+
+        Definitions live on the hub rather than in one prompt page per role. Separate
+        pages drift — out of step with each other and with the code — and changing what
+        a role means should not require re-onboarding anyone who holds it.
+
+        A standing resident's profile *is* the definition of its role, which is why this
+        reads the directory rather than needing a new concept.
+        """
+        try:
+            actor = self.whois(role)
+        except ClientError:
+            return {
+                "role": role,
+                "known": False,
+                "note": (
+                    f"the hub has no definition for {role!r}. It is still a fine label "
+                    "for what you do here; it simply carries no special meaning."
+                ),
+            }
+        return {
+            "role": role,
+            "known": True,
+            "definition": actor.get("summary"),
+            "profile": actor.get("profile"),
+        }
 
     def ping(self) -> Any:
         """Prove the whole path: config, network, hub, and that we are known to it."""
