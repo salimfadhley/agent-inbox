@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Self
 
-from agent_mailbox.mailbox import Mailbox
+from agent_mailbox.mailbox import Mailbox, _reply_subject
 from agent_mailbox.policy import Attempt, Outcome, Policy, default_policies
 from agent_mailbox.records import ActorRecord, ObjectRecord
 
@@ -102,6 +102,7 @@ class House:
         subject: str | None = None,
         cc: Sequence[str] = (),
         in_reply_to: str | None = None,
+        document: dict[str, object] | None = None,
     ) -> ObjectRecord:
         recipients = (to,) if isinstance(to, str) else tuple(to)
         attempt = Attempt(
@@ -114,7 +115,13 @@ class House:
         await self._check(attempt)
         try:
             sent = await self._mailbox.send(
-                caller, to, body, subject=subject, cc=cc, in_reply_to=in_reply_to
+                caller,
+                to,
+                body,
+                subject=subject,
+                cc=cc,
+                in_reply_to=in_reply_to,
+                document=document,
             )
         except Exception as exc:
             await self._record(Outcome(attempt, ok=False, error=exc))
@@ -155,7 +162,9 @@ class House:
             caller,
             original.attributed_to,
             body,
-            subject=subject,
+            # Without this the `Re:` prefix was lost whenever a reply went through the
+            # house rather than the mailbox directly.
+            subject=subject or _reply_subject(original.summary),
             in_reply_to=original.id,
         )
 
@@ -164,6 +173,18 @@ class House:
     # Reading state changes nothing and refuses nothing, so there is no policy moment
     # to insert. Passing these through keeps the house from becoming a second, partial
     # copy of the mailbox's surface.
+
+    async def view(self, caller: str, object_id: str) -> ObjectRecord:
+        """One message, without consuming it. Goes through the house like everything
+        else — reading it changes nothing, but a deployment's observers should still
+        see that it happened."""
+        got = await self._mailbox.view(caller, object_id)
+        await self._record(
+            Outcome(
+                Attempt(action="view", actor=caller, detail={"id": object_id}), ok=True
+            )
+        )
+        return got
 
     async def peek(self, caller: str) -> tuple[ObjectRecord, ...]:
         return await self._mailbox.peek(caller)
