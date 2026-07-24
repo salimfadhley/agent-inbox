@@ -48,6 +48,12 @@ code { font: 13px ui-monospace, monospace; }
         margin: 0 0 1.5rem; font-size: .9rem; }
 .empty { opacity: .6; font-style: italic; }
 .wrap { overflow-x: auto; }
+textarea { width: 100%; font: 13px/1.45 ui-monospace, monospace; padding: .75rem;
+           border: 1px solid var(--line); border-radius: 4px; background: transparent;
+           color: inherit; resize: vertical; }
+button { font: inherit; padding: .35rem .8rem; border: 1px solid var(--line);
+         border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+button:hover { border-color: currentColor; }
 """
 
 
@@ -221,19 +227,30 @@ def build_console(client: HubClient) -> Litestar:
         actually use.
         """
         hub = client.hub_info()
-        text = onboarding(_advertised(hub, client.config.base))
-        note = role_note().replace("**", "")
+        address = _advertised(hub, client.config.base)
+        note = "".join(
+            f"<p>{html.escape(para)}</p>"
+            for para in role_note().replace("**", "").split("\n\n")
+        )
         body = (
-            f"<p>{html.escape(note)}</p>"
-            "<p>Paste the whole of this to an agent. Select it and copy — it is plain "
-            "text, deliberately, so it survives being pasted anywhere.</p>"
-            "<textarea readonly rows='28' style='width:100%;font:13px ui-monospace,"
-            "monospace;padding:.75rem;border:1px solid var(--line);border-radius:4px;"
-            "background:transparent;color:inherit'>"
-            f"{html.escape(text)}</textarea>"
-            "<p class='dim'>Written for "
-            f"<code>{html.escape(_advertised(hub, client.config.base))}</code>. "
-            "Also served as plain text at <a href='/prompts.txt'>/prompts.txt</a>.</p>"
+            f"{note}"
+            "<p>Paste the whole of this to an agent.</p>"
+            "<p><button id='copy' type='button'>Copy the prompt</button> "
+            "<span id='said' class='dim'></span></p>"
+            "<textarea id='prompt' readonly rows='28'>"
+            f"{html.escape(onboarding(address))}</textarea>"
+            f"<p class='dim'>Written for <code>{html.escape(address)}</code>. "
+            "Also served as plain text at <a href='/prompts.txt'>/prompts.txt</a>, "
+            "for when the console is not where you are.</p>"
+            # Selecting first means the fallback is the manual gesture the user was
+            # going to make anyway, rather than nothing happening on a browser that
+            # withholds the clipboard.
+            "<script>document.getElementById('copy').onclick=async()=>{"
+            "const t=document.getElementById('prompt'),"
+            "s=document.getElementById('said');"
+            "t.select();"
+            "try{await navigator.clipboard.writeText(t.value);s.textContent='Copied.';}"
+            "catch(e){s.textContent='Selected — press ctrl/cmd+C.';}};</script>"
         )
         return Response(_page("Prompt", body, hub), media_type=MediaType.HTML)
 
