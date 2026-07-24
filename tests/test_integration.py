@@ -664,3 +664,94 @@ async def test_rename_does_not_resurrect_your_own_broadcasts(
     # and the sent message is still discoverable as theirs
     threads = await mailbox.list_threads(project, "alice", role="lead")
     assert any(t.last_from == f"{project}/alice/lead" for t in threads)
+
+
+# -- mission 0016: expiry follows thread activity, not message age -------------
+
+
+async def _age(mailbox: Mailbox, message_id: str, days: int) -> None:
+    """Backdate a message so TTL behaviour can be exercised without waiting."""
+    when = (datetime.now(tz=UTC) - timedelta(days=days)).isoformat()
+    await mailbox._conn.execute(
+        "UPDATE messages SET created = ? WHERE id = ?", (when, message_id)
+    )
+    await mailbox._conn.commit()
+
+
+async def test_a_live_thread_is_never_decapitated(mailbox: Mailbox) -> None:
+    """A conversation commented on today keeps its root, however old that root is.
+
+    The reported failure: a 3-message thread rooted 20 days ago but commented on
+    today was reduced to one survivor — "Re: DNS — still waiting on a human" — with
+    no trace of the question it answered, and nothing signalling the loss.
+    """
+    project = _project()
+    root = Message(
+        from_=f"{project}/host", to="all", subject="Friction? Share it here", body="?"
+    )
+    await mailbox.send(root)
+    old_reply = Message(
+        from_=f"{project}/codex", to="all", thread=root.thread, subject="DNS", body="x"
+    )
+    await mailbox.send(old_reply)
+    await _age(mailbox, root.id, 20)
+    await _age(mailbox, old_reply.id, 20)
+
+    # ...and someone comments TODAY
+    fresh = Message(
+        from_=f"{project}/claude",
+        to="all",
+        thread=root.thread,
+        subject="Re: DNS",
+        body="y",
+    )
+    await mailbox.send(fresh)
+
+    await mailbox._purge_expired()
+
+    surviving = await mailbox.thread(root.thread or root.id)
+    assert {m.subject for m in surviving} == {
+        "Friction? Share it here",
+        "DNS",
+        "Re: DNS",
+    }, "a live conversation must keep its root and every turn"
+
+
+async def test_a_quiet_thread_expires_whole(mailbox: Mailbox) -> None:
+    """When nobody has spoken for ttl_days, the conversation goes entirely."""
+    project = _project()
+    root = Message(from_=f"{project}/a", to=f"{project}/b", subject="old", body="x")
+    await mailbox.send(root)
+    reply = Message(
+        from_=f"{project}/b",
+        to=f"{project}/a",
+        thread=root.thread,
+        subject="re",
+        body="y",
+    )
+    await mailbox.send(reply)
+    await mailbox.read(project, "b", root.id)  # leaves a broadcast_reads row
+    await _age(mailbox, root.id, 30)
+    await _age(mailbox, reply.id, 30)
+
+    await mailbox._purge_expired()
+
+    assert await mailbox.thread(root.thread or root.id) == []
+    # read-state for the removed messages goes with them
+    orphaned = await mailbox._scalar(
+        "SELECT COUNT(*) FROM broadcast_reads WHERE message_id NOT IN "
+        "(SELECT id FROM messages)"
+    )
+    assert orphaned == 0
+
+
+async def test_ttl_zero_still_disables_expiry(mailbox: Mailbox) -> None:
+    project = _project()
+    config = mailbox._config.model_copy(update={"ttl_days": 0})
+    msg = Message(from_=f"{project}/a", to=f"{project}/b", subject="ancient", body="x")
+    await mailbox.send(msg)
+    await _age(mailbox, msg.id, 3650)
+
+    async with Mailbox(config) as never_expires:
+        await never_expires._purge_expired()
+        assert await never_expires.message_by_id(msg.id) is not None
