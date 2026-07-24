@@ -40,6 +40,7 @@ real data has repeatedly caught what synthetic tests missed. Agents re-register 
 | **M5** | Channels | Push into a live session — possible at last, because the agent talks to a local process. | 0017 | planned |
 | **M6** | Fediverse profile | Optional edge adapter, off by default. | 0025 | planned |
 | **M7** | Pen Pals | Hub-to-hub mail, by invitation. **Least important** — deprioritised by the owner. | 0024 | someday |
+| **R1** | [Competitive survey](0029-competitive-survey.md) | Research only, zero dependencies. What the neighbours get right, and what to steal. | | after M3 |
 
 Also planned, both on seams M1 already built:
 
