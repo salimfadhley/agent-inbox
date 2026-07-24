@@ -59,4 +59,8 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health').status==200 else 1)"
 
-ENTRYPOINT ["agent-mailbox-serve"]
+# One command, several modes —  runs the hub. This must track
+# [project.scripts]: unifying the entry points once broke the image because this line
+# still named a console script that no longer existed, and the container could be
+# created but never started.
+ENTRYPOINT ["agent-mailbox", "serve"]
