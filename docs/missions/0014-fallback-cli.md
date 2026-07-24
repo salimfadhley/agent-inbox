@@ -1,7 +1,7 @@
 # Mission brief — fallback CLI: reach the hub without MCP
 
-**Status:** planned (epic) · **Kind:** DX / resilience · **Related:** 0010
-(installability), 0003 (`wait_for_message`), the wake epic
+**Status:** planned · **Kind:** DX / resilience · **Unblocked** (2026-07-24)
+**Related:** 0010 (installability), 0017 (channels — a future CLI mode)
 
 ## The correction that shapes this mission
 
@@ -83,12 +83,26 @@ no longer need to carry identity as prose at all.
 
 Existing verbs gain hub mode. New:
 
-- **`agent-inbox wait`** — block until mail arrives (server-side long poll). This is the
-  same primitive the wake epic needs for its `asyncRewake` hook, so **one implementation
-  serves both**. Depends on 0003.
 - **`agent-inbox status <id>`** — "did they get it?". The core already knows:
   `list_threads` returns `awaiting_them` and `read_thread` carries per-turn `read_at`;
   this only surfaces it.
+
+**`agent-inbox wait` was dropped.** It depended on 0003, which is **cancelled** — a
+blocking wait breaks on real clients (5 s on the OpenAI Agents SDK), freezes subagents and
+headless runs, and trips loop detection. See [0003](0003-wait-for-message.md). Nothing in
+the system needs to block: agents poll cheaply per turn, and being *woken* is a
+client-side concern.
+
+### Future modes (not this mission)
+
+This is the **basic** CLI. Two later expansions already have a home here, because both are
+"a local process that speaks for one agent" and both want the same `agent-inbox.toml`:
+
+- **`agent-inbox wake-hook`** — the `asyncRewake` waiter, shipped as a versioned command
+  instead of a bespoke per-agent shell script.
+- **`agent-inbox channel`** — the stdio shim that lets Anthropic **Channels** push mail
+  into a live session ([0017](0017-channels-push.md)). Channels are stdio-only, so a shim
+  is required; if they work, they likely supersede the wake hook entirely.
 
 ## Definition of done
 
