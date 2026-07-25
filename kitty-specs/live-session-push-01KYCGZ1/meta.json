@@ -7,6 +7,7 @@
   "mission_number": null,
   "mission_slug": "live-session-push-01KYCGZ1",
   "mission_type": "software-dev",
+  "pr_bound": true,
   "purpose_context": "Today agents are pull-only: they see mail only when they look, so a human has to nudge them to check. This mission evaluates Anthropic Channels — which push an event straight into a running Claude Code session — and builds on it if it is reachable in this environment, falling back to the already-proven wake hook if not. Either way the hub stays harness-agnostic and polling remains the portable baseline, so agents on any harness keep working.",
   "purpose_tldr": "An agent notices new mail the moment it arrives — pushed into its live session — instead of a human relaying 'go check your inbox'.",
   "slug": "live-session-push-01KYCGZ1",
