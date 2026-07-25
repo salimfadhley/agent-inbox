@@ -31,8 +31,9 @@ from litestar.exceptions import HTTPException
 from litestar.handlers.base import BaseRouteHandler
 
 from agent_mailbox import __version__
-from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated
+from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
 from agent_mailbox.auth.service import AuthService
+from agent_mailbox.auth.throttle import LoginThrottle
 from agent_mailbox.errors import auth_error_handler, mailbox_error_handler
 from agent_mailbox.exceptions import MailboxError
 from agent_mailbox.house import House
@@ -317,6 +318,8 @@ def build_api(
     debug: bool = False,
     auth: AuthService | None = None,
     auth_mode: str = "off",
+    throttle: LoginThrottle | None = None,
+    trust_proxy: bool = False,
 ) -> Litestar:
     """Assemble the app. Everything routes through the house.
 
@@ -510,14 +513,44 @@ def build_api(
             path="/",
         )
 
+    def _client_source(request: Request) -> str:
+        """The source key the throttle counts against — the client's IP.
+
+        Behind a trusted proxy the connection IP is the proxy, so honour the
+        first X-Forwarded-For hop (the original client) — but only when
+        trust_proxy is set: trusting the header from an untrusted caller would let
+        it spoof its source and dodge the limiter.
+        """
+        if trust_proxy:
+            fwd = request.headers.get("X-Forwarded-For", "")
+            if fwd:
+                return fwd.split(",")[0].strip()
+        client = request.client
+        return client.host if client else "unknown"
+
     @post("/auth/login", status_code=200)
-    async def auth_login(data: dict[str, Any]) -> Response:
+    async def auth_login(request: Request, data: dict[str, Any]) -> Response:
         assert auth is not None
-        result = await auth.login(
-            str(data.get("username", "")),
-            str(data.get("password", "")),
-            data.get("otp"),
-        )
+        source = _client_source(request)
+        if throttle is not None and not throttle.allowed(source):
+            raise TooManyAttempts(
+                "too many failed sign-ins from your address — wait and try again",
+                retry_after=throttle.retry_after(source),
+            )
+        try:
+            result = await auth.login(
+                str(data.get("username", "")),
+                str(data.get("password", "")),
+                data.get("otp"),
+            )
+        except AuthError:
+            # Any refused sign-in counts toward the lockout (kept generic — the throttle
+            # is keyed by source, so it reveals nothing about which account exists).
+            if throttle is not None:
+                throttle.record_failure(source)
+            raise
+        if throttle is not None:
+            throttle.record_success(source)
         nxt = "enrol" if result.enrolment_required else "ok"
         return Response({"next": nxt}, cookies=[_session_cookie(result.session.id)])
 

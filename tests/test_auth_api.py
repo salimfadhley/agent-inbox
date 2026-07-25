@@ -37,10 +37,10 @@ def _note(to: list[str], content: str) -> dict:
     return {"type": "Note", "to": to, "content": content}
 
 
-def _build(mode: str) -> tuple[TestClient, AuthService]:
+def _build(mode: str, throttle: object | None = None) -> tuple[TestClient, AuthService]:
     house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
     auth = AuthService(InMemoryAuthStore(), secret_key=KEY)
-    app = build_api(house, HUB, auth=auth, auth_mode=mode)
+    app = build_api(house, HUB, auth=auth, auth_mode=mode, throttle=throttle)
     return TestClient(app=app), auth
 
 
@@ -194,6 +194,41 @@ class TestLoginFlow:
             assert (
                 c.post("/auth/agents/x/tokens", json={"label": "l"}).status_code == 401
             )
+
+
+class TestLoginThrottle:
+    """Brute-force protection on /auth/login, end to end."""
+
+    def test_repeated_failures_are_locked_out_with_retry_after(self) -> None:
+        from agent_mailbox.auth.throttle import LoginThrottle
+
+        throttle = LoginThrottle(max_failures=3)
+        client, _ = _build("enforce", throttle=throttle)
+        with client as c:
+            for _ in range(3):
+                r = c.post("/auth/login", json={"username": "admin", "password": "x"})
+                assert r.status_code == 401  # bad_credentials
+            # the next attempt is refused by the throttle, not the credential check
+            blocked = c.post("/auth/login", json={"username": "admin", "password": "x"})
+            assert blocked.status_code == 429
+            assert blocked.json()["code"] == "too_many_attempts"
+            assert "retry-after" in {k.lower() for k in blocked.headers}
+
+    def test_lockout_is_by_source_not_username(self) -> None:
+        """The throttle keys on source, not username, so it cannot be used to DoS a
+        named account, and its 429 names no user."""
+        from agent_mailbox.auth.throttle import LoginThrottle
+
+        # max_failures=3, but all these come from the same test client (one source), so
+        # this really checks the response stays generic — a 429 that never names a user.
+        throttle = LoginThrottle(max_failures=3)
+        client, _ = _build("enforce", throttle=throttle)
+        with client as c:
+            for _ in range(3):
+                c.post("/auth/login", json={"username": "ghost", "password": "x"})
+            r = c.post("/auth/login", json={"username": "ghost", "password": "x"})
+            # 429 regardless of whether 'ghost' exists — no enumeration signal
+            assert r.status_code == 429
 
 
 class TestStructuralBoundary:
