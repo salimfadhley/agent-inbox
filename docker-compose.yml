@@ -33,6 +33,11 @@ services:
       # is the honest fallback; override it for a real deployment.
       AGENT_MAILBOX_PUBLIC_URL: ${AGENT_MAILBOX_PUBLIC_URL:-http://localhost:8080}
       AGENT_MAILBOX_HUB_NAME: ${AGENT_MAILBOX_HUB_NAME:-agent-mailbox}
+      # Authentication (ADR 0010). Default off = trust the header (LAN). Migrate a live
+      # hub off -> warn -> enforce. SECRET_KEY encrypts TOTP secrets at rest and must be
+      # stable across restarts; supply it from the environment, never the repo.
+      AGENT_MAILBOX_AUTH_MODE: ${AGENT_MAILBOX_AUTH_MODE:-off}
+      AGENT_MAILBOX_SECRET_KEY: ${AGENT_MAILBOX_SECRET_KEY:-}
     volumes:
       - agent-mailbox-data:/data
 
