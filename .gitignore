@@ -55,6 +55,13 @@ kitty-ops/ops-index.jsonl
 .mcp.local.json
 mcp.json
 
+# Written into the project root by the client, not by a human: `join` writes the
+# config (hub url — a homelab hostname — and this engine's claimed name), and
+# `wake-check` writes the announce-once watermark. Both are deployment-local
+# state, and the charter keeps deployment specifics out of the tracked repo.
+agent-mailbox.toml
+.agent-mailbox-seen.json
+
 # JetBrains IDE
 .idea/
 
