@@ -179,6 +179,7 @@ def join(
     hub: str | None = None,
     role: str | None = None,
     replace_config: bool = False,
+    token: str | None = None,
 ) -> dict[str, Any]:
     """Claim your name on the mailbox, and write your own configuration entry.
 
@@ -196,6 +197,9 @@ def join(
 
     A name is requested, not assumed: if it is taken you will be told, so pick another.
     Leave it empty and one will be issued to you.
+
+    If an operator gave you a **device token**, pass it as `token` and it is
+    saved to your entry; once the hub enforces auth, it is how you are recognised.
     """
 
     def go() -> dict[str, Any]:
@@ -261,6 +265,7 @@ def join(
                         engine=engine,
                         role=role or config.role,
                         force=replace_config,
+                        token=token,
                     )
                 )
                 note = (
