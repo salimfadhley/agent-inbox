@@ -24,11 +24,14 @@ and a handful of tables do that, and there is nothing to build or install.
 from __future__ import annotations
 
 import html
+import json
+from pathlib import Path
 from typing import Annotated, Any
 
 from litestar import Litestar, MediaType, Request, get, post
 from litestar.datastructures import Cookie
 from litestar.enums import RequestEncodingType
+from litestar.exceptions import NotFoundException
 from litestar.params import Body
 from litestar.response import Redirect, Response
 
@@ -38,6 +41,27 @@ from agent_mailbox.prompts import onboarding, role_note
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
 #: three POST handlers from each repeating the annotation.
 Form = Annotated[dict[str, Any], Body(media_type=RequestEncodingType.URL_ENCODED)]
+
+#: Vendored, same-origin assets — vis-network (the flow graph library) and our own
+#: console.js. Serving them from the package, never a CDN, is what lets the CSP below
+#: lock scripts to 'self': nothing is ever fetched off-box (charter), and an injected
+#: script from any other origin is refused by the browser.
+STATIC_DIR = Path(__file__).parent / "static"
+
+#: A genuine Content-Security-Policy — stricter than the nothing that shipped before.
+#: Scripts may load only from this origin (the vendored lib + console.js) and never
+#: inline, so a reflected-script injection cannot execute. Inline *styles* and inline
+#: SVG (the TOTP QR, the console's stylesheet) are permitted — style injection is not
+#: code execution — which avoids nonce-ing every page for no security gain.
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'self'"
+)
 
 STYLE = """
 :root { color-scheme: light dark; --line: #8884; --accent: #4a90d9; }
@@ -111,6 +135,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
     nav = (
         link("/", "Overview")
         + link("/agents", "Agents")
+        + link("/graph", "Graph")
         + link("/inbox", "Inbox")
         + link("/compose", "Compose")
         + link("/prompts", "Prompt")
@@ -126,7 +151,18 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
 <nav>{nav}</nav>
 {warning}
 {body}
+<script src="/static/console.js" defer></script>
 </body></html>"""
+
+
+def _add_csp(response: Response) -> Response:
+    """Attach the Content-Security-Policy to every response, from one place.
+
+    An `after_request` hook rather than a per-handler header, so the CSP cannot be
+    forgotten on a single route — which is exactly how a script-injection hole opens.
+    """
+    response.headers["Content-Security-Policy"] = CSP
+    return response
 
 
 def _table(headers: list[str], rows: list[list[str]], empty: str) -> str:
@@ -534,15 +570,9 @@ def build_console(client: HubClient) -> Litestar:
             f"<p class='dim'>Written for <code>{html.escape(address)}</code>. "
             "Also served as plain text at <a href='/prompts.txt'>/prompts.txt</a>, "
             "for when the console is not where you are.</p>"
-            # Selecting first means the fallback is the manual gesture the user was
-            # going to make anyway, rather than nothing happening on a browser that
-            # withholds the clipboard.
-            "<script>document.getElementById('copy').onclick=async()=>{"
-            "const t=document.getElementById('prompt'),"
-            "s=document.getElementById('said');"
-            "t.select();"
-            "try{await navigator.clipboard.writeText(t.value);s.textContent='Copied.';}"
-            "catch(e){s.textContent='Selected — press ctrl/cmd+C.';}};</script>"
+            # The copy behaviour lives in /static/console.js (same-origin), so the CSP
+            # can forbid inline scripts. It selects the textarea first, so a browser
+            # that withholds the clipboard still leaves the text selected to copy.
         )
         return Response(
             _page("Prompt", body, hub, "/prompts"), media_type=MediaType.HTML
@@ -552,6 +582,97 @@ def build_console(client: HubClient) -> Litestar:
     def prompt_text() -> str:
         """The same prompt as plain text, for `curl` and for pasting."""
         return onboarding(_advertised(hub_or_none() or {}, client.config.base))
+
+    # -- static assets and the flow graph ----------------------------------
+
+    @get("/static/{name:str}", sync_to_thread=True)
+    def static_asset(name: str) -> Response:
+        """Serve a vendored, same-origin asset (vis-network, console.js).
+
+        Same-origin is the whole point: it is what lets the CSP restrict scripts to
+        'self'. Only a small allow-list of files is served, so this cannot be walked
+        into the rest of the filesystem.
+        """
+        allowed = {
+            "vis-network.min.js": "application/javascript",
+            "console.js": "application/javascript",
+        }
+        media = allowed.get(name)
+        if media is None:
+            raise NotFoundException(f"no such asset: {name}")
+        return Response(
+            (STATIC_DIR / name).read_bytes(),
+            media_type=media,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @get("/graph", media_type=MediaType.HTML, sync_to_thread=True)
+    def graph() -> Response:
+        """The message-flow network graph — who talks to whom, as a live diagram.
+
+        The same data as the dashboard's flow table, drawn with the vendored vis-network
+        library: drag the nodes, click one to open its mailbox. Data is injected as a
+        non-executable JSON island the same-origin console.js reads — no inline code, no
+        external fetch, so it renders cleanly under the strict CSP.
+        """
+        hub = hub_or_none()
+        try:
+            stats = client.survey()
+            actors = client.list_agents().get("items", [])
+        except ClientError as exc:
+            return _err(exc, hub, "Graph")
+
+        edges = [
+            {"from": str(frm), "to": str(to), "count": int(count)}
+            for frm, to, count in stats.get("flow", [])
+        ]
+        # Node size by how much an agent sent (from `busiest`); recency lights it green.
+        sent = {str(name): int(n) for name, n in stats.get("busiest", [])}
+        recent = {
+            a.get("preferredUsername", ""): str(a.get("lastSeen") or "")[:10]
+            >= "2026-07-24"
+            for a in actors
+        }
+        names = (
+            {e["from"] for e in edges}
+            | {e["to"] for e in edges}
+            | {a.get("preferredUsername", "") for a in actors}
+        )
+        nodes = [
+            {
+                "id": n,
+                "label": n,
+                "value": sent.get(n, 1) + 1,
+                "recent": recent.get(n, False),
+            }
+            for n in sorted(names)
+            if n
+        ]
+        # Escape `<` so nothing in the data can close the <script> early. Names are
+        # already validated to ascii+underscore, so this is belt-and-braces.
+        payload = json.dumps({"nodes": nodes, "edges": edges}).replace("<", "\\u003c")
+
+        if not edges:
+            inner = (
+                '<p class="empty">No messages yet, so there is nothing to graph. '
+                "Once agents start writing to each other, the network appears here.</p>"
+            )
+        else:
+            # The JSON goes in a <script type="application/json"> — data, not code, so a
+            # strict script-src allows it; console.js parses it and draws the graph.
+            inner = (
+                f'<p class="dim">{len(nodes)} agents · {len(edges)} channels. '
+                "Drag a node; click one to open its mailbox.</p>"
+                '<div id="graph" style="height:70vh;border:1px solid var(--line);'
+                'border-radius:6px"></div>'
+                '<script type="application/json" id="graph-data">'
+                f"{payload}</script>"
+                '<script src="/static/vis-network.min.js"></script>'
+            )
+        return Response(
+            _page("Graph", "<h2>Message flow</h2>" + inner, hub, "/graph"),
+            media_type=MediaType.HTML,
+        )
 
     # -- authentication (the human side) -----------------------------------
     #
@@ -743,9 +864,12 @@ def build_console(client: HubClient) -> Litestar:
 
     return Litestar(
         on_startup=[ensure_own_mailbox],
+        after_request=_add_csp,
         route_handlers=[
             overview,
             agents,
+            graph,
+            static_asset,
             mailbox,
             message,
             inbox,
