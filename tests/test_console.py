@@ -358,3 +358,54 @@ def test_the_console_holds_no_password() -> None:
     src = con.__file__
     text = open(src).read()  # noqa: SIM115, PTH123 - a test reading its own source
     assert "password_hash" not in text  # no hashing here — that is the hub's job
+
+
+# -- the flow graph (client-side, vendored, same-origin) -------------------
+
+
+def test_graph_page_renders_a_container_and_loads_the_vendored_lib(
+    console: TestClient,
+) -> None:
+    body = console.get("/graph").text
+    assert 'id="graph"' in body
+    # the library is loaded same-origin, never from a CDN
+    assert '<script src="/static/vis-network.min.js">' in body
+    assert "cdn" not in body.lower()
+    # the data is a non-executable JSON island the same-origin console.js reads
+    assert 'type="application/json" id="graph-data"' in body
+
+
+def test_graph_data_carries_the_flow_edges(console: TestClient) -> None:
+    body = console.get("/graph").text
+    # the stub survey has a rosemary→trevor edge
+    assert "rosemary_nasrin" in body and "trevor_mahmood" in body
+
+
+def test_static_assets_are_served_same_origin(console: TestClient) -> None:
+    r = console.get("/static/vis-network.min.js")
+    assert r.status_code == 200
+    assert "javascript" in r.headers["content-type"]
+    assert console.get("/static/console.js").status_code == 200
+
+
+def test_static_route_will_not_serve_arbitrary_files(console: TestClient) -> None:
+    assert console.get("/static/secrets.py").status_code == 404
+    assert console.get("/static/../serve.py").status_code in (400, 404)
+
+
+def test_every_page_carries_a_strict_csp(console: TestClient) -> None:
+    csp = console.get("/graph").headers.get("content-security-policy", "")
+    assert "script-src 'self'" in csp
+    # scripts must NOT be allowed inline — that is the whole point of moving them out
+    assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+    assert "default-src 'self'" in csp
+
+
+def test_no_page_ships_an_inline_executable_script(console: TestClient) -> None:
+    """Under script-src 'self' an inline <script>code</script> would silently not run.
+    Every page's JS must come from /static, so no bare inline script may remain."""
+    for path in ("/", "/graph", "/prompts", "/login"):
+        body = console.get(path).text
+        # allowed: <script src=...> and <script type="application/json">
+        # forbidden: a bare <script> with code
+        assert "<script>" not in body, f"{path} has an inline executable script"
