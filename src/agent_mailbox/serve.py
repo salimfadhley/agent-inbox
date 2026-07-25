@@ -18,11 +18,18 @@ from dataclasses import dataclass
 from litestar import Litestar
 
 from agent_mailbox.api import build_api
+from agent_mailbox.auth import secrets as auth_secrets
+from agent_mailbox.auth.service import AuthService
+from agent_mailbox.auth.store import SqliteAuthStore
 from agent_mailbox.house import House
 from agent_mailbox.mailbox import Mailbox
 from agent_mailbox.sqlite_store import SqliteStore
 
 logger = logging.getLogger(__name__)
+
+#: The three ways the hub can treat identity. `off` trusts the header (the LAN default);
+#: `warn` checks credentials and logs a missing one but serves; `enforce` refuses.
+_AUTH_MODES = ("off", "warn", "enforce")
 
 ENV_PREFIX = "AGENT_MAILBOX_"
 
@@ -44,11 +51,22 @@ class Settings:
     hub_name: str = "local"
     retention_days: int = 14
     log_level: str = "INFO"
+    #: off | warn | enforce (see _AUTH_MODES). Default off keeps the LAN behaviour.
+    auth_mode: str = "off"
+    #: Fernet key for encrypting TOTP secrets at rest. Needed once 2FA is
+    #: enrolled; never a default (charter: no secrets in the repo).
+    secret_key: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
         port = int(_env("PORT", "8080"))
         host = _env("HOST", "0.0.0.0")  # noqa: S104
+        auth_mode = _env("AUTH_MODE", "off").lower()
+        if auth_mode not in _AUTH_MODES:
+            raise ValueError(
+                "AGENT_MAILBOX_AUTH_MODE must be one of "
+                f"{_AUTH_MODES}, not {auth_mode!r}"
+            )
         return cls(
             db=_env("DB", "/data/agent-mailbox.db"),
             host=host,
@@ -57,6 +75,8 @@ class Settings:
             hub_name=_env("HUB_NAME", "local"),
             retention_days=int(_env("RETENTION_DAYS", "14")),
             log_level=_env("LOG_LEVEL", "INFO").upper(),
+            auth_mode=auth_mode,
+            secret_key=_env("SECRET_KEY", ""),
         )
 
 
@@ -74,23 +94,50 @@ def build_app(settings: Settings | None = None) -> Litestar:
         store, hub_name=config.hub_name, retention_days=config.retention_days
     )
     house = House(mailbox)
-    app = build_api(house, config.public_url)
+
+    # The auth service exists whenever a mode other than `off` is asked for. It
+    # opens its own connection to the same SQLite file — WAL lets the two coexist,
+    # and it keeps the auth tables cleanly separate from the messaging store.
+    auth: AuthService | None = None
+    auth_store: SqliteAuthStore | None = None
+    if config.auth_mode != "off":
+        key = config.secret_key or auth_secrets.generate_key()
+        if not config.secret_key:
+            logger.warning(
+                "AGENT_MAILBOX_SECRET_KEY is unset — generated an ephemeral "
+                "key. Set a stable key or 2FA enrolments will not survive a "
+                "restart."
+            )
+        auth_store = SqliteAuthStore(config.db)
+        auth = AuthService(auth_store, secret_key=key)
+
+    app = build_api(house, config.public_url, auth=auth, auth_mode=config.auth_mode)
 
     async def open_store(_: Litestar) -> None:
         await store.__aenter__()
+        if auth_store is not None:
+            await auth_store.__aenter__()
         logger.info(
-            "agent-mailbox serving %s as %s, storing at %s",
+            "agent-mailbox serving %s as %s, storing at %s (auth: %s)",
             config.public_url,
             config.hub_name,
             config.db,
+            config.auth_mode,
         )
 
+    async def bootstrap_admin(_: Litestar) -> None:
+        if auth is not None:
+            await auth.bootstrap()  # logs the initial password once, if it seeds
+
     async def close_store(_: Litestar) -> None:
+        if auth_store is not None:
+            await auth_store.__aexit__(None, None, None)
         await store.__aexit__(None, None, None)
 
     # Opening the store must come before the house opens, or the standing residents
     # would be created against a store that is not there yet.
     app.on_startup.insert(0, open_store)
+    app.on_startup.append(bootstrap_admin)
     app.on_shutdown.append(close_store)
     return app
 

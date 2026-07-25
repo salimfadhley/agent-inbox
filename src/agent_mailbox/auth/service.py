@@ -184,6 +184,10 @@ class AuthService:
             return None
         return session
 
+    async def open_full_session(self, username: str) -> Session:
+        """A fresh full session — used right after first-run enrolment completes."""
+        return await self._new_session(username, limited=False)
+
     async def logout(self, session_id: str) -> None:
         await self._store.delete_session(session_id)
 

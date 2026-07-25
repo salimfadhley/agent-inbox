@@ -19,15 +19,21 @@ visibility rules hold however the caller was identified.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import msgspec
-from litestar import Litestar, MediaType, Request, Response, get, post, put
+from litestar import Litestar, MediaType, Request, Response, delete, get, post, put
+from litestar.connection import ASGIConnection
+from litestar.datastructures import Cookie
 from litestar.di import Provide
 from litestar.exceptions import HTTPException
+from litestar.handlers.base import BaseRouteHandler
 
 from agent_mailbox import __version__
-from agent_mailbox.errors import mailbox_error_handler
+from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated
+from agent_mailbox.auth.service import AuthService
+from agent_mailbox.errors import auth_error_handler, mailbox_error_handler
 from agent_mailbox.exceptions import MailboxError
 from agent_mailbox.house import House
 from agent_mailbox.wire import (
@@ -40,12 +46,17 @@ from agent_mailbox.wire import (
     unknown_properties,
 )
 
-#: Who is calling. A header rather than a path segment, so authentication can later
+#: Who is calling. A header rather than a path segment, so authentication can
 #: verify it instead of trusting it (ADR 0007).
 IDENTITY_HEADER = "X-Agent-Name"
 
+#: The human session cookie set by /auth/login and carried by the console.
+SESSION_COOKIE = "agent_mailbox_session"
+
 #: ActivityStreams asks for this; plain JSON clients are not refused for lacking it.
 ACTIVITY_JSON = "application/activity+json"
+
+api_logger = logging.getLogger("agent_mailbox.api")
 
 
 def caller_name(request: Request) -> str:
@@ -85,28 +96,37 @@ def owns(name: str, caller: str, wire: Renderer) -> str:
 class Api:
     """Routes over a house. Holds the house and the renderer; decides nothing."""
 
-    def __init__(self, house: House, public_url: str) -> None:
+    def __init__(
+        self, house: House, public_url: str, *, authenticated: bool = False
+    ) -> None:
         self.house = house
         self.wire = Renderer(public_url)
+        #: True only under enforce — the hub reports its own posture honestly.
+        self.authenticated = authenticated
 
     # -- hub ---------------------------------------------------------------
 
     async def hub(self) -> dict[str, Any]:
         mailbox = self.house.mailbox
+        note = (
+            "This hub requires authentication: agents present a device token as a "
+            "Bearer credential, humans log in at the console."
+            if self.authenticated
+            else (
+                "This hub does not authenticate. The caller's name is taken from the "
+                f"{IDENTITY_HEADER} header at face value. Suitable for a trusted "
+                "network only."
+            )
+        )
         return {
             "@context": "https://www.w3.org/ns/activitystreams",
             "type": "Service",
             "name": mailbox.hub_name,
             "version": __version__,
             "id": self.wire.base,
-            # Said out loud, because a hub that quietly does not authenticate is worse
-            # than one that says so.
-            "authenticated": False,
-            "note": (
-                "This hub does not authenticate. The caller's name is taken from the "
-                f"{IDENTITY_HEADER} header at face value. Suitable for a trusted "
-                "network only."
-            ),
+            # Said out loud, either way — a hub's posture should never be a surprise.
+            "authenticated": self.authenticated,
+            "note": note,
             "policies": [getattr(p, "name", "?") for p in self.house.policies],
             "federates": False,
         }
@@ -290,12 +310,103 @@ def decode_activity(raw: dict[str, Any]) -> Create:
     return Create(object=msgspec.convert(raw, Note, strict=False))
 
 
-def build_api(house: House, public_url: str, *, debug: bool = False) -> Litestar:
-    """Assemble the app. Everything routes through the house."""
-    api = Api(house, public_url)
+def build_api(
+    house: House,
+    public_url: str,
+    *,
+    debug: bool = False,
+    auth: AuthService | None = None,
+    auth_mode: str = "off",
+) -> Litestar:
+    """Assemble the app. Everything routes through the house.
+
+    ``auth`` and ``auth_mode`` govern how the caller is proven. With ``auth``
+    absent or ``auth_mode == "off"`` the behaviour is exactly as before — the
+    ``X-Agent-Name`` header is trusted — so the existing suite runs unchanged.
+    Under ``warn`` a missing or invalid credential is logged and the request
+    proceeds on the header; under ``enforce`` it is refused. None of this touches
+    the engine: a verified caller is resolved here and handed down exactly where
+    the header used to be (ADR 0007, ADR 0010).
+    """
+    enforcing = auth is not None and auth_mode == "enforce"
+    api = Api(house, public_url, authenticated=enforcing)
+
+    async def resolve_verified_caller(conn: ASGIConnection) -> str | None:
+        """A caller proven by a credential — a device token or a full session — or None.
+
+        Raises :class:`TokenRevoked` for a presented-but-revoked token, which the error
+        handler turns into a 401; an *absent* credential is ``None``, not an
+        error, so the mode can decide what to do about it.
+        """
+        if auth is None or auth_mode == "off":
+            return None
+        header = conn.headers.get("Authorization", "")
+        if header.lower().startswith("bearer "):
+            actor = await auth.resolve_token(header[7:].strip())
+            if actor:
+                return actor
+        sid = conn.cookies.get(SESSION_COOKIE)
+        if sid:
+            session = await auth.resolve_session(sid)
+            if session is not None and not session.limited:
+                return session.username
+        return None
 
     async def provide_caller(request: Request) -> str:
+        """The caller a request acts as — verified with auth on, header with it off.
+
+        This is what the messaging routes depend on, so it is where enforcement
+        for those routes lives: under ``enforce`` a request with no valid
+        credential is refused here, before any handler runs.
+        """
+        if auth is None or auth_mode == "off":
+            return caller_name(request)
+        caller = await resolve_verified_caller(request)
+        if caller:
+            return caller
+        if auth_mode == "enforce":
+            raise NotAuthenticated(
+                "this hub requires authentication — present a device token as "
+                "`Authorization: Bearer <token>`, or log in at the console"
+            )
+        # warn: resolve failed, but we still serve on the header identity and say so.
+        api_logger.warning(
+            "unauthenticated %s %s served in warn mode",
+            request.method,
+            request.url.path,
+        )
         return caller_name(request)
+
+    async def guard_enforce(
+        connection: ASGIConnection, _handler: BaseRouteHandler
+    ) -> None:
+        """A Litestar guard for routes without a caller (observe, join).
+
+        Under enforce, require *a* valid credential; otherwise a no-op. Runs before the
+        handler, so an unauthenticated observe/join is refused before the store.
+        """
+        if not enforcing:
+            return
+        if await resolve_verified_caller(connection) is None:
+            raise NotAuthenticated(
+                "this hub requires authentication for this route — present a device "
+                "token or log in at the console"
+            )
+
+    async def provide_operator(request: Request) -> str:
+        """A human operator's username, for the token-admin routes.
+
+        Under ``off`` there is no auth, so a placeholder operator is returned (dev/LAN).
+        Otherwise a full (non-limited) session is required — minting or revoking
+        a device token is an operator action.
+        """
+        if auth is None or auth_mode == "off":
+            return "operator"
+        sid = request.cookies.get(SESSION_COOKIE)
+        session = await auth.resolve_session(sid) if sid else None
+        if session is not None and not session.limited:
+            return session.username
+        raise NotAuthenticated("log in as an operator to manage device tokens")
 
     @get("/", media_type=MediaType.JSON)
     async def hub() -> dict[str, Any]:
@@ -305,7 +416,7 @@ def build_api(house: House, public_url: str, *, debug: bool = False) -> Litestar
     async def health() -> dict[str, str]:
         return await api.health()
 
-    @post("/actors", status_code=201)
+    @post("/actors", status_code=201, guards=[guard_enforce])
     async def join(data: dict[str, Any]) -> Actor:
         return await api.join(data)
 
@@ -357,21 +468,162 @@ def build_api(house: House, public_url: str, *, debug: bool = False) -> Litestar
     async def thread(object_id: str, caller: str) -> Collection:
         return await api.thread(object_id, caller)
 
-    @get("/observe/stats")
+    # The observation routes are the operator's view — under enforce they need a valid
+    # credential (this is what finally makes them safe to expose; M2 FR-010).
+    @get("/observe/stats", guards=[guard_enforce])
     async def observe_stats(since: str = "") -> dict[str, Any]:
         return await api.survey(since)
 
-    @get("/observe/mailbox/{name:str}")
+    @get("/observe/mailbox/{name:str}", guards=[guard_enforce])
     async def observe_mailbox(name: str) -> Collection:
         return await api.observe_mailbox(name)
 
-    @get("/observe/objects/{object_id:str}")
+    @get("/observe/objects/{object_id:str}", guards=[guard_enforce])
     async def observe_object(object_id: str) -> dict[str, Any]:
         return await api.observe_object(object_id)
 
-    @get("/observe/objects/{object_id:str}/thread")
+    @get("/observe/objects/{object_id:str}/thread", guards=[guard_enforce])
     async def observe_thread(object_id: str) -> Collection:
         return await api.observe_thread(object_id)
+
+    # -- authentication routes --------------------------------------------
+    #
+    # Present only when auth is configured. They call the AuthService directly; the
+    # messaging engine never sees them.
+
+    async def _session_user(request: Request, *, allow_limited: bool) -> str:
+        """The username behind the session cookie, or a 401. Optionally allow a limited
+        (first-run enrolment) session."""
+        assert auth is not None
+        sid = request.cookies.get(SESSION_COOKIE)
+        session = await auth.resolve_session(sid) if sid else None
+        if session is None or (session.limited and not allow_limited):
+            raise NotAuthenticated("log in first")
+        return session.username
+
+    def _session_cookie(session_id: str) -> Cookie:
+        return Cookie(
+            key=SESSION_COOKIE,
+            value=session_id,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
+    @post("/auth/login", status_code=200)
+    async def auth_login(data: dict[str, Any]) -> Response:
+        assert auth is not None
+        result = await auth.login(
+            str(data.get("username", "")),
+            str(data.get("password", "")),
+            data.get("otp"),
+        )
+        nxt = "enrol" if result.enrolment_required else "ok"
+        return Response({"next": nxt}, cookies=[_session_cookie(result.session.id)])
+
+    @post("/auth/logout", status_code=200)
+    async def auth_logout(request: Request) -> Response:
+        assert auth is not None
+        sid = request.cookies.get(SESSION_COOKIE)
+        if sid:
+            await auth.logout(sid)
+        return Response(
+            {"next": "ok"},
+            cookies=[Cookie(key=SESSION_COOKIE, value="", path="/", max_age=0)],
+        )
+
+    @get("/auth/enrol")
+    async def auth_enrol_begin(request: Request) -> dict[str, Any]:
+        assert auth is not None
+        username = await _session_user(request, allow_limited=True)
+        offer = await auth.begin_enrolment(username)
+        return {
+            "provisioningUri": offer.provisioning_uri,
+            "qrSvg": offer.qr_svg,
+            "recoveryCodes": list(offer.recovery_codes),
+        }
+
+    @post("/auth/enrol", status_code=200)
+    async def auth_enrol_complete(request: Request, data: dict[str, Any]) -> Response:
+        assert auth is not None
+        username = await _session_user(request, allow_limited=True)
+        await auth.complete_enrolment(
+            username, str(data.get("password", "")), str(data.get("otp", ""))
+        )
+        session = await auth.open_full_session(username)
+        return Response({"next": "ok"}, cookies=[_session_cookie(session.id)])
+
+    @post("/auth/change-password", status_code=200)
+    async def auth_change_password(
+        request: Request, data: dict[str, Any]
+    ) -> dict[str, str]:
+        assert auth is not None
+        username = await _session_user(request, allow_limited=False)
+        await auth.change_password(
+            username, str(data.get("current", "")), str(data.get("new", ""))
+        )
+        return {"next": "ok"}
+
+    @get("/auth/rotate-2fa")
+    async def auth_rotate_begin(request: Request) -> dict[str, Any]:
+        assert auth is not None
+        username = await _session_user(request, allow_limited=False)
+        offer = await auth.begin_enrolment(username)
+        return {
+            "provisioningUri": offer.provisioning_uri,
+            "qrSvg": offer.qr_svg,
+            "recoveryCodes": list(offer.recovery_codes),
+        }
+
+    @post("/auth/rotate-2fa", status_code=200)
+    async def auth_rotate_confirm(
+        request: Request, data: dict[str, Any]
+    ) -> dict[str, str]:
+        assert auth is not None
+        username = await _session_user(request, allow_limited=False)
+        await auth.confirm_2fa(username, str(data.get("otp", "")))
+        return {"next": "ok"}
+
+    @post(
+        "/auth/agents/{name:str}/tokens",
+        status_code=201,
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def mint_token(
+        name: str, data: dict[str, Any], operator: str
+    ) -> dict[str, str]:
+        assert auth is not None
+        minted = await auth.mint_token(name, label=str(data.get("label", "")))
+        return {"id": minted.id, "token": minted.secret, "actor": minted.actor}
+
+    @get(
+        "/auth/agents/{name:str}/tokens",
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def list_tokens(name: str, operator: str) -> dict[str, Any]:
+        assert auth is not None
+        tokens = await auth.list_tokens(name)
+        return {
+            "items": [
+                {
+                    "id": t.id,
+                    "label": t.label,
+                    "created": t.created,
+                    "lastUsed": t.last_used,
+                    "revoked": t.revoked,
+                }
+                for t in tokens
+            ]
+        }
+
+    @delete(
+        "/auth/agents/{name:str}/tokens/{token_id:str}",
+        status_code=204,
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def revoke_token(name: str, token_id: str, operator: str) -> None:
+        assert auth is not None
+        await auth.revoke_token(token_id)
 
     async def open_the_house(_: Litestar) -> None:
         """Establish standing invariants once, at startup.
@@ -381,27 +633,47 @@ def build_api(house: House, public_url: str, *, debug: bool = False) -> Litestar
         """
         await house.open()
 
+    handlers = [
+        hub,
+        health,
+        join,
+        directory,
+        actor,
+        update_profile,
+        inbox,
+        federation_inbox,
+        outbox,
+        view_object,
+        observe_stats,
+        observe_mailbox,
+        observe_object,
+        observe_thread,
+        read_object,
+        thread,
+    ]
+    # The /auth/* routes exist only when auth is configured. With auth off, there is
+    # nothing to log into, and their absence keeps the surface exactly as it was.
+    if auth is not None:
+        handlers += [
+            auth_login,
+            auth_logout,
+            auth_enrol_begin,
+            auth_enrol_complete,
+            auth_change_password,
+            auth_rotate_begin,
+            auth_rotate_confirm,
+            mint_token,
+            list_tokens,
+            revoke_token,
+        ]
+
     app = Litestar(
         on_startup=[open_the_house],
-        route_handlers=[
-            hub,
-            health,
-            join,
-            directory,
-            actor,
-            update_profile,
-            inbox,
-            federation_inbox,
-            outbox,
-            view_object,
-            observe_stats,
-            observe_mailbox,
-            observe_object,
-            observe_thread,
-            read_object,
-            thread,
-        ],
-        exception_handlers={MailboxError: mailbox_error_handler},
+        route_handlers=handlers,
+        exception_handlers={
+            MailboxError: mailbox_error_handler,
+            AuthError: auth_error_handler,
+        },
         debug=debug,
     )
     app.state.api = api
