@@ -394,9 +394,16 @@ class HubClient:
         return self._call("GET", "/")
 
     def join(self, name: str | None = None) -> Any:
-        return self._call(
-            "POST", "/actors", {"preferredUsername": name or self.config.name}
-        )
+        """Claim *name*, or ask the hub to issue one when it is ``None``.
+
+        ``None`` has to reach the hub as ``None``. Falling back to
+        ``self.config.name`` here would send the CLI's ``"unnamed"`` placeholder
+        as a literal request, so the first engine to join without a name would
+        claim ``unnamed`` and every engine after it would be refused because the
+        name was taken — which is exactly the opposite of "omit it and one will
+        be issued to you".
+        """
+        return self._call("POST", "/actors", {"preferredUsername": name})
 
     def list_agents(self) -> Any:
         return self._call("GET", "/actors")

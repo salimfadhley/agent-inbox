@@ -41,6 +41,39 @@ class TestBearer:
         assert client.config.token is None
 
 
+class TestJoinRequest:
+    """Joining without a name must ask the hub for one, not claim a placeholder.
+
+    The CLI has no name to offer before it joins, so it fills the config with the
+    placeholder ``"unnamed"``. If that placeholder leaks into the request it becomes
+    a real, permanent claim: the first engine to join without a name takes
+    ``unnamed``, and every engine after it is refused because the name is taken.
+    """
+
+    @staticmethod
+    def _captured_body(client: HubClient, name: str | None) -> dict[str, object]:
+        sent: dict[str, object] = {}
+
+        def fake_call(method: str, path: str, body: dict[str, object] | None = None):
+            sent.update({"method": method, "path": path, "body": body})
+            return {"preferredUsername": "issued_name"}
+
+        object.__setattr__(client, "_call", fake_call)
+        client.join(name)
+        return sent
+
+    def test_no_name_asks_the_hub_to_issue_one(self) -> None:
+        client = HubClient(Config(hub="http://h", name="unnamed"))
+        sent = self._captured_body(client, None)
+        assert sent["path"] == "/actors"
+        assert sent["body"] == {"preferredUsername": None}
+
+    def test_a_requested_name_is_sent_as_asked(self) -> None:
+        client = HubClient(Config(hub="http://h", name="unnamed"))
+        sent = self._captured_body(client, "jed_smith")
+        assert sent["body"] == {"preferredUsername": "jed_smith"}
+
+
 class TestTomlEscaping:
     def test_quotes_and_backslashes_survive(self) -> None:
         nasty = 'a"b\\c'
