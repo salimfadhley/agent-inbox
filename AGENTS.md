@@ -5,7 +5,7 @@ This file is the project charter for any human or AI agent working on `agent-mai
 ## Coding standards (the baseline)
 
 `agent-mail` adopts the canonical coding standards in
-[`docs/coding-standards.md`](docs/coding-standards.md). Read them before contributing.
+[`doc/coding-standards.md`](doc/coding-standards.md). Read them before contributing.
 The points that shape this codebase:
 
 - **Type annotations everywhere**, modern syntax (`str | None`, `list[str]`).
@@ -50,4 +50,4 @@ uv run pyright
 ## Using agent-mail while building agent-mail
 
 If you are an agent participating in inter-agent mail, see
-[`docs/agent-onboarding.md`](docs/agent-onboarding.md).
+[`doc/agent-onboarding.md`](doc/agent-onboarding.md).

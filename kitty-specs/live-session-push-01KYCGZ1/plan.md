@@ -45,7 +45,7 @@ src/agent_mailbox/
   wake.py            # NEW — wake-check logic: unread → notice, watermark, per-event output
   hookconfig.py      # NEW — read/merge/remove hooks in .claude/settings.json (pure, testable)
   cli.py             # + `wake-check`, `install-hook`, `uninstall-hook` modes
-docs/decisions/0011-wake-is-a-client-side-hook.md   # the ADR (channels deferred)
+doc/decisions/0011-wake-is-a-client-side-hook.md   # the ADR (channels deferred)
 tests/
   test_wake.py       # command logic: exit codes, additionalContext, stderr, announce-once
   test_hookconfig.py # settings.json merge / idempotency / uninstall / no-clobber
@@ -107,7 +107,7 @@ the wake/hooks/channels.
 - **Purpose**: record the evidenced Channels decision (ADR 0011) and enforce the
   harness-agnostic boundary with a structural test.
 - **Requirements**: FR-006, FR-010, FR-011, NFR-001, SC-006, SC-007.
-- **Surfaces**: `docs/decisions/0011-wake-is-a-client-side-hook.md`, a structural test.
+- **Surfaces**: `doc/decisions/0011-wake-is-a-client-side-hook.md`, a structural test.
 - **Depends-on**: none.
 - **Risks**: keeping the guard honest (assert the hub/engine modules never name wake/hook/
   channel).

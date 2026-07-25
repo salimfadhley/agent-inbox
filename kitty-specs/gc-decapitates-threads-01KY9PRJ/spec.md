@@ -2,7 +2,7 @@
 
 **Kind:** bugfix · **Severity:** silent data loss on active conversations
 **Found:** 2026-07-24, by analysis while designing the threading epic
-**Origin brief:** `docs/missions/0016-gc-decapitates-threads.md`
+**Origin brief:** `doc/missions/0016-gc-decapitates-threads.md`
 
 ## Problem
 

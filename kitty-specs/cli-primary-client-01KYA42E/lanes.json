@@ -97,7 +97,7 @@
         "WP06"
       ],
       "write_scope": [
-        "docs/missions/README.md",
+        "doc/missions/README.md",
         "src/agent_inbox/prompts/admin.md",
         "src/agent_inbox/prompts/agent.md",
         "src/agent_inbox/prompts/host.md",

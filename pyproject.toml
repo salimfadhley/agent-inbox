@@ -76,7 +76,7 @@ source = "vcs"
 packages = ["src/agent_mailbox"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "docs", "README.md", "LICENSE"]  # not agent-mailbox-old
+include = ["src", "tests", "doc", "README.md", "LICENSE"]  # not agent-mailbox-old
 
 [dependency-groups]
 dev = [

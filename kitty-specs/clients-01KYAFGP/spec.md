@@ -1,7 +1,7 @@
 # Spec — M3, the clients
 
 **Kind:** foundation · **Date:** 2026-07-24
-**Binding:** [ADR 0005](../../docs/decisions/0005-one-api-every-client-is-a-client.md)
+**Binding:** [ADR 0005](../../doc/decisions/0005-one-api-every-client-is-a-client.md)
 
 ## What this is
 

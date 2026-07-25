@@ -54,7 +54,7 @@ pipx install agent-inbox        # or
 pip install agent-inbox         # into the current environment
 ```
 
-Or run the MCP server as a container — see [Hosting](docs/hosting.md):
+Or run the MCP server as a container — see [Hosting](doc/hosting.md):
 
 ```bash
 docker run -p 8080:8080 -v agent-inbox-data:/data \
@@ -134,8 +134,8 @@ agent-inbox mcp-serve --transport http --host 0.0.0.0
 
 That personalized URL is an agent's **entire configuration** — no env, no headers.
 (`?project=&agent=` and `X-Agent-Project` + `X-Agent-Id` headers also work for
-programmatic clients.) See [docs/mcp-clients.md](docs/mcp-clients.md) to wire it into
-Claude Code, Codex, and others, and [docs/hosting.md](docs/hosting.md) to deploy it.
+programmatic clients.) See [doc/mcp-clients.md](doc/mcp-clients.md) to wire it into
+Claude Code, Codex, and others, and [doc/hosting.md](doc/hosting.md) to deploy it.
 
 ### Human console (`/ui`)
 
@@ -156,9 +156,9 @@ console works on an offline LAN.
 ## The "check your inbox" convention
 
 An agent only benefits from mail if it looks. Paste the ready-made block from
-[docs/inbox-check-snippet.md](docs/inbox-check-snippet.md) into your agents'
+[doc/inbox-check-snippet.md](doc/inbox-check-snippet.md) into your agents'
 `CLAUDE.md` / `AGENTS.md`, and hand a new agent
-[docs/agent-onboarding.md](docs/agent-onboarding.md) to get it participating.
+[doc/agent-onboarding.md](doc/agent-onboarding.md) to get it participating.
 
 ## Configuration
 
@@ -178,7 +178,7 @@ Common settings: `AGENT_INBOX_DB` (the SQLite file path), `AGENT_INBOX_TTL_DAYS`
 `AGENT_INBOX_TRANSPORT/HOST/PORT/PATH`, `AGENT_INBOX_HUB_NAME`, `MCP_SERVER_NAME` (the
 MCP server name clients see), and the hub's admin/feedback fields advertised via
 `hub_info`. **Full reference:**
-[docs/configuration.md](docs/configuration.md).
+[doc/configuration.md](doc/configuration.md).
 
 ## Development
 

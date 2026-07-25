@@ -1,11 +1,11 @@
 # Spec — M2, the API
 
 **Kind:** foundation · **Date:** 2026-07-24
-**Binding:** [ADR 0004](../../docs/decisions/0004-activitystreams-messaging-model.md) ·
-[ADR 0005](../../docs/decisions/0005-one-api-every-client-is-a-client.md) ·
-[ADR 0007](../../docs/decisions/0007-authentication-at-the-edge.md) ·
-[ADR 0008](../../docs/decisions/0008-no-actor-has-authority.md) ·
-[ADR 0009](../../docs/decisions/0009-litestar-and-msgspec.md)
+**Binding:** [ADR 0004](../../doc/decisions/0004-activitystreams-messaging-model.md) ·
+[ADR 0005](../../doc/decisions/0005-one-api-every-client-is-a-client.md) ·
+[ADR 0007](../../doc/decisions/0007-authentication-at-the-edge.md) ·
+[ADR 0008](../../doc/decisions/0008-no-actor-has-authority.md) ·
+[ADR 0009](../../doc/decisions/0009-litestar-and-msgspec.md)
 
 ## What this is
 

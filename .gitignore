@@ -58,8 +58,10 @@ mcp.json
 # JetBrains IDE
 .idea/
 
-# Internal working prompts (not for the public repo)
-doc/
+# Internal working prompts (not for the public repo). Narrowed from a blanket
+# `doc/` when the public documentation moved from docs/ to doc/ — a blanket rule
+# would silently swallow every new ADR and mission brief.
+doc/prompt/
 
 # spec-kitty execution worktrees
 .worktrees/

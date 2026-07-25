@@ -13,7 +13,6 @@ __pycache__
 .pytest_cache
 .ruff_cache
 doc
-docs
 tests
 *.md
 !README.md

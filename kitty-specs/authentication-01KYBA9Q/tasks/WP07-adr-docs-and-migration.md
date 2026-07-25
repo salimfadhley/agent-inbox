@@ -16,12 +16,12 @@ subtasks:
 agent: curator-carla
 history: []
 agent_profile: curator-carla
-authoritative_surface: docs/decisions/0010-authentication-model.md
+authoritative_surface: doc/decisions/0010-authentication-model.md
 create_intent:
-- docs/decisions/0010-authentication-model.md
+- doc/decisions/0010-authentication-model.md
 execution_mode: code_change
 owned_files:
-- docs/decisions/0010-authentication-model.md
+- doc/decisions/0010-authentication-model.md
 - src/agent_mailbox/prompts.py
 - tests/live/test_live_smoke.py
 role: implementer
@@ -42,7 +42,7 @@ real image.
 
 ## Subtasks
 
-- **T029 — ADR 0010** (`docs/decisions/0010-authentication-model.md`). Record: the two-principal
+- **T029 — ADR 0010** (`doc/decisions/0010-authentication-model.md`). Record: the two-principal
   model (humans: password+TOTP+recovery→session; agents: bearer device tokens); auth resolves a
   verified caller at the edge, engine untouched (builds on ADR 0007); single-owner/all-admins,
   no scopes; the three-mode grace migration; secrets hashed, TOTP encrypted at rest with an env
@@ -60,7 +60,7 @@ real image.
 
 ## Definition of Done
 
-- ADR 0010 committed under `docs/decisions/`; the prompt mentions device tokens; the live smoke
+- ADR 0010 committed under `doc/decisions/`; the prompt mentions device tokens; the live smoke
   gains an auth path that is cleanly skipped when auth is off.
 - Charter: no deployment hostnames/IPs/secrets anywhere in these files.
 - Four gates green.

@@ -1,6 +1,6 @@
 """The messaging rules, tested as pure functions.
 
-One class per scenario in ``docs/messaging-rules.md``. No store, no clock, no I/O —
+One class per scenario in ``doc/messaging-rules.md``. No store, no clock, no I/O —
 literals in, decisions out. That is the point of the split: the rules that have cost us
 most in production are the ones that can now be checked by reading.
 """

@@ -24,7 +24,7 @@ dimension. Authentication is a gate at the front door; what is behind it is unch
 
 ## The engine does not change
 
-[ADR 0007](../../docs/decisions/0007-authentication-at-the-edge.md) already made
+[ADR 0007](../../doc/decisions/0007-authentication-at-the-edge.md) already made
 identity an explicit argument that the **edge** is responsible for proving — the engine
 takes a `caller` and never trusts ambient state. Today the edge trusts the
 `X-Agent-Name` header. This mission replaces "trust the header" with "resolve a **verified**

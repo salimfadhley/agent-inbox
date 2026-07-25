@@ -1,6 +1,6 @@
 """The messaging rules, as pure functions.
 
-Every rule in ``docs/messaging-rules.md`` lives here, and every one of them is a
+Every rule in ``doc/messaging-rules.md`` lives here, and every one of them is a
 function from records to a decision. Nothing in this module touches storage, the clock,
 the network or any global state — give it lists and it gives you answers.
 
@@ -9,7 +9,7 @@ been: a thread-visibility bug leaked private mail in production, and expiry once
 live conversations. Rules that are pure can be tested exhaustively with literals, and
 reviewed by reading, without a database in sight.
 
-The scenario numbers refer to ``docs/messaging-rules.md``.
+The scenario numbers refer to ``doc/messaging-rules.md``.
 """
 
 from __future__ import annotations

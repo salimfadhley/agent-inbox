@@ -2,10 +2,10 @@
 
 **Status:** ✅ **complete** (2026-07-24)
 **Kind:** foundation · **Date:** 2026-07-24
-**Binding:** [ADR 0003](../../docs/decisions/0003-identity-is-a-surrogate-key.md) ·
-[ADR 0004](../../docs/decisions/0004-activitystreams-messaging-model.md) ·
-[ADR 0005](../../docs/decisions/0005-one-api-every-client-is-a-client.md) ·
-[ADR 0006](../../docs/decisions/0006-sqlite-hybrid-storage.md)
+**Binding:** [ADR 0003](../../doc/decisions/0003-identity-is-a-surrogate-key.md) ·
+[ADR 0004](../../doc/decisions/0004-activitystreams-messaging-model.md) ·
+[ADR 0005](../../doc/decisions/0005-one-api-every-client-is-a-client.md) ·
+[ADR 0006](../../doc/decisions/0006-sqlite-hybrid-storage.md)
 
 ## Why this is first
 

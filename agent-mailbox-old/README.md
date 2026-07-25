@@ -25,7 +25,7 @@ It is deleted once the new system is green.
 ## Why it was replaced
 
 Not because it was broken — it worked, and ran a live hub. The model underneath it was
-the wrong shape. See `docs/decisions/`:
+the wrong shape. See `doc/decisions/`:
 
 - ADR 0003 — identity was a natural key; six missions were the cost of that
 - ADR 0004 — the messaging model now follows ActivityStreams

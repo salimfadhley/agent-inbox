@@ -41,9 +41,9 @@ answers:
     hosted MCP server exposes GET /health. No secrets in the repo; a .env.example
     documents required keys.
   documentation_policy: >
-    README is the front door; docs/ holds the hosting guide, MCP-client setup, the
+    README is the front door; doc/ holds the hosting guide, MCP-client setup, the
     agent-onboarding page, the "check your inbox" snippet, and architecture decisions
-    under docs/decisions (ADRs). docs/coding-standards.md is the canonical coding
+    under doc/decisions (ADRs). doc/coding-standards.md is the canonical coding
     baseline and AGENTS.md is the project charter summary. Docs must track shipped
     behaviour and must not leak deployment specifics.
   risk_boundaries: >
@@ -52,7 +52,7 @@ answers:
     and idempotency are JetStream's job (durable per-agent consumers, explicit
     ack/nak) — a redelivered message must never be double-processed. The CLI and MCP
     server must both delegate to the single core (agent_mail.mailbox.Mailbox); no
-    logic duplication. Follow the EUNRG coding standards (docs/coding-standards.md):
+    logic duplication. Follow the EUNRG coding standards (doc/coding-standards.md):
     full type annotations, absolute imports, specific exceptions from a project-level
     exceptions module (AgentMailError base), logging over print (click.echo allowed
     for CLI output but also log), config through one pydantic-settings object, frozen

@@ -29,7 +29,7 @@ services to stand up and nothing gated behind an environment flag.
 
 ## Coding standards
 
-Follow [`docs/coding-standards.md`](docs/coding-standards.md) and the project rules in
+Follow [`doc/coding-standards.md`](doc/coding-standards.md) and the project rules in
 [`AGENTS.md`](AGENTS.md). In short: full type annotations, absolute imports, specific
 exceptions from `agent_inbox.exceptions`, logging over `print`, config through
 `agent_inbox.config.Config`, and ruff-clean + pyright-clean.

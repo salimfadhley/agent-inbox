@@ -1,4 +1,4 @@
-"""The mailbox end to end — the scenarios in ``docs/messaging-rules.md``, for real.
+"""The mailbox end to end — the scenarios in ``doc/messaging-rules.md``, for real.
 
 Every test runs against **both** backends. The rules already have exhaustive unit
 tests as pure functions; what is checked here is that orchestration wires them up

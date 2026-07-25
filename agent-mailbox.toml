@@ -1,0 +1,14 @@
+# agent-mailbox — where the mailbox is, and who each agent here is on it.
+# Written by `join`, one entry per engine. Safe to edit; safe to commit
+# unless the hub url or a token is private to your deployment.
+
+hub = "http://halob.local:8080"
+
+# One identity per engine: several agents work in this repository and they
+# are different correspondents. Names are permanent and deliberately
+# meaningless — do not encode the project or the model into them. What an
+# agent *does* here is its role; the rest belongs in `update_profile`.
+
+[agents.claude]
+name = "nicole_ruzickova"
+role = "agent"

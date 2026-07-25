@@ -11,7 +11,7 @@ reachable from outside. Deployed to the homelab beside the untouched old hub.
 ## Technical Context
 
 **Language/Version**: Python 3.12+
-**Primary Dependencies**: litestar + msgspec (new, [ADR 0009](../../docs/decisions/0009-litestar-and-msgspec.md)),
+**Primary Dependencies**: litestar + msgspec (new, [ADR 0009](../../doc/decisions/0009-litestar-and-msgspec.md)),
 uvicorn, aiosqlite. FastAPI, pydantic, httpx and click are **removed** — leftovers from
 the cancelled mission that the engine never used.
 **Storage**: SQLite, server-side only, one process
@@ -38,13 +38,13 @@ else deals in one or the other.
 
 The engine makes opaque ids and must never know the hub's address (charter). This layer
 knows how it was reached, so it renders `abc123` as `https://<hub>/objects/abc123` on the
-way out and strips it on the way in. That is the seam [ADR 0007](../../docs/decisions/0007-authentication-at-the-edge.md)
+way out and strips it on the way in. That is the seam [ADR 0007](../../doc/decisions/0007-authentication-at-the-edge.md)
 already anticipated.
 
 ### D3 — Unknown properties survive by keeping the raw dict
 
-msgspec structs drop what they do not model ([ADR 0009](../../docs/decisions/0009-litestar-and-msgspec.md)),
-and [ADR 0006](../../docs/decisions/0006-sqlite-hybrid-storage.md) requires the opposite.
+msgspec structs drop what they do not model ([ADR 0009](../../doc/decisions/0009-litestar-and-msgspec.md)),
+and [ADR 0006](../../doc/decisions/0006-sqlite-hybrid-storage.md) requires the opposite.
 So each request body is decoded **twice**: once into a struct for routing, once as a
 plain dict for storage. One extra line at the boundary, and the thing most likely to
 break — hence its own test with a deliberately foreign document.

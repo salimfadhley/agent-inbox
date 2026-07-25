@@ -117,7 +117,7 @@
         "WP07"
       ],
       "write_scope": [
-        "docs/decisions/0010-authentication-model.md",
+        "doc/decisions/0010-authentication-model.md",
         "src/agent_mailbox/prompts.py",
         "tests/live/test_live_smoke.py"
       ],

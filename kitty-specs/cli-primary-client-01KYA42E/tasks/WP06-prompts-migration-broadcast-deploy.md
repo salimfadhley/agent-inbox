@@ -31,7 +31,7 @@ owned_files:
 - src/agent_inbox/prompts/host.md
 - src/agent_inbox/prompts/admin.md
 - src/agent_inbox/templates/prompts.html
-- docs/missions/README.md
+- doc/missions/README.md
 role: implementer
 tags: []
 ---

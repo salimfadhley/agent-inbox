@@ -4,7 +4,7 @@ One HTTP API is the hub's only machine interface; the CLI, a local stdio MCP ser
 and the human console are all clients of it. The messaging model follows
 ActivityStreams, and identity is issued by the hub rather than derived from facts.
 
-The binding decisions live in ``docs/decisions/``:
+The binding decisions live in ``doc/decisions/``:
 
 * ADR 0003 — identity is a surrogate key, not a natural key
 * ADR 0004 — the messaging model follows ActivityStreams

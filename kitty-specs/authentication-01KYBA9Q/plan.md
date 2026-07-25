@@ -55,7 +55,7 @@ kitty-specs/authentication-01KYBA9Q/
   data-model.md    # tables, entities, transitions
   contracts/       # auth API endpoints (request/response shapes)
   quickstart.md    # bootstrap + grace-mode migration walkthrough
-docs/decisions/0010-authentication-model.md   # the ADR
+doc/decisions/0010-authentication-model.md   # the ADR
 ```
 
 ### Source Code (repository root)
@@ -197,7 +197,7 @@ specific exceptions, secrets from env. No violations to track.
 - **Purpose**: Record the model (ADR 0010), write the bootstrap + grace-mode walkthrough,
   update the onboarding prompt to mention device tokens.
 - **Relevant requirements**: C-008, and the migration path (FR-001, FR-015).
-- **Affected surfaces**: `docs/decisions/0010-authentication-model.md`,
+- **Affected surfaces**: `doc/decisions/0010-authentication-model.md`,
   `kitty-specs/authentication-01KYBA9Q/quickstart.md`, `src/agent_mailbox/prompts.py`.
 - **Sequencing/depends-on**: none (can proceed in parallel), finalised after IC-04.
 - **Risks**: keeping deployment specifics out of the tracked docs (charter).
