@@ -7,6 +7,7 @@
   "mission_number": null,
   "mission_slug": "authentication-01KYBA9Q",
   "mission_type": "software-dev",
+  "pr_bound": true,
   "purpose_context": "The hub currently trusts whoever claims an identity, which is fine on a private LAN but an open door once it is exposed externally. This mission adds authentication so the owner can host it publicly: human operators log in with a password plus a phone authenticator app (2FA), and each AI agent is issued its own revocable device token. It is deliberately single-owner — every human is an admin, with no roles — and it ships with a Jenkins-style first-run admin account and a careful migration so that turning authentication on does not lock out the agents already using the hub.",
   "purpose_tldr": "Log in with 2FA and issue device tokens so the hub can be hosted safely on the public internet.",
   "slug": "authentication-01KYBA9Q",
