@@ -42,12 +42,18 @@ class TestBearer:
 
 
 class TestJoinRequest:
-    """Joining without a name must ask the hub for one, not claim a placeholder.
+    """What an empty join argument means depends on what the config already holds.
 
-    The CLI has no name to offer before it joins, so it fills the config with the
-    placeholder ``"unnamed"``. If that placeholder leaks into the request it becomes
-    a real, permanent claim: the first engine to join without a name takes
-    ``unnamed``, and every engine after it is refused because the name is taken.
+    Two callers pass nothing and want opposite things. The console calls ``join()``
+    bare at startup to re-claim the name it already has — it must send that name.
+    The CLI calls it before it has any name, and its config holds the ``UNNAMED``
+    placeholder — that must reach the hub as "issue me one", or the first engine to
+    join without a name claims ``unnamed`` permanently and every engine after it is
+    refused because the name is taken.
+
+    Sending the placeholder was a real bug; so was fixing it by dropping the
+    fallback, which broke the console's self-registration (caught by the live smoke
+    tests, not here — hence the console case below).
     """
 
     @staticmethod
@@ -72,6 +78,12 @@ class TestJoinRequest:
         client = HubClient(Config(hub="http://h", name="unnamed"))
         sent = self._captured_body(client, "jed_smith")
         assert sent["body"] == {"preferredUsername": "jed_smith"}
+
+    def test_a_configured_name_is_reclaimed_when_none_is_passed(self) -> None:
+        """The console's startup path: join() bare, to re-claim its own name."""
+        client = HubClient(Config(hub="http://h", name="console"))
+        sent = self._captured_body(client, None)
+        assert sent["body"] == {"preferredUsername": "console"}
 
 
 class TestTomlEscaping:

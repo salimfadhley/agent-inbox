@@ -22,6 +22,7 @@ from typing import Any
 
 from agent_mailbox.client import (
     CONFIG_NAME,
+    UNNAMED,
     ClientError,
     Config,
     HubClient,
@@ -104,7 +105,7 @@ def cmd_join(args: argparse.Namespace) -> int:
         )
         return 1
 
-    client = HubClient(Config(hub=hub, name=args.name or "unnamed", role=args.role))
+    client = HubClient(Config(hub=hub, name=args.name or UNNAMED, role=args.role))
     # Claim first, record second: a config asserting a refused name would be a file
     # claiming an identity that is not ours.
     claimed = client.join(args.name)

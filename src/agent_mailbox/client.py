@@ -28,6 +28,12 @@ from typing import Any
 CONFIG_NAME = "agent-mailbox.toml"
 IDENTITY_HEADER = "X-Agent-Name"
 
+#: What a config holds before this engine has a name — the CLI and the MCP client both
+#: need *something* in the identity header to make their very first call. It is a
+#: placeholder, never a claim: `join` translates it back to "issue me one" so the first
+#: engine to join without a name cannot squat it and lock everyone else out.
+UNNAMED = "unnamed"
+
 #: Must match the hub's cookie name (agent_mailbox.api.SESSION_COOKIE). Defined here too
 #: so the stdlib client stays free of any dependency on the Litestar app module.
 SESSION_COOKIE = "agent_mailbox_session"
@@ -394,16 +400,25 @@ class HubClient:
         return self._call("GET", "/")
 
     def join(self, name: str | None = None) -> Any:
-        """Claim *name*, or ask the hub to issue one when it is ``None``.
+        """Claim *name*, or this engine's configured name, or one the hub issues.
 
-        ``None`` has to reach the hub as ``None``. Falling back to
-        ``self.config.name`` here would send the CLI's ``"unnamed"`` placeholder
-        as a literal request, so the first engine to join without a name would
-        claim ``unnamed`` and every engine after it would be refused because the
-        name was taken — which is exactly the opposite of "omit it and one will
-        be issued to you".
+        Two callers want different things from an empty argument, and the
+        difference is the whole of this method. The console calls ``join()`` bare
+        at startup to re-claim the name it already has, so the fallback to
+        ``self.config.name`` has to stay. The CLI calls it before it has any name
+        at all, and its config holds :data:`UNNAMED` — which must *not* go over
+        the wire as a claim, or the first engine to join without a name takes
+        ``unnamed`` permanently and every engine after it is refused.
+
+        So the placeholder, and only the placeholder, becomes ``None``: the hub
+        reads that as "issue one" and draws from the name pool.
         """
-        return self._call("POST", "/actors", {"preferredUsername": name})
+        requested = name or self.config.name
+        return self._call(
+            "POST",
+            "/actors",
+            {"preferredUsername": None if requested == UNNAMED else requested},
+        )
 
     def list_agents(self) -> Any:
         return self._call("GET", "/actors")

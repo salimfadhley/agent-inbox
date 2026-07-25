@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 
 from agent_mailbox.client import (
     CONFIG_NAME,
+    UNNAMED,
     ClientError,
     Config,
     HubClient,
@@ -226,7 +227,7 @@ def join(
                 }
             config = Config(
                 hub=hub_url,
-                name=name or "unnamed",
+                name=name or UNNAMED,
                 role=role or "agent",
                 engine=engine,
             )
@@ -244,9 +245,9 @@ def join(
         client = HubClient(config)
         # Claim first, record second. A config asserting a name the hub refused would be
         # a file claiming an identity that is not ours.
-        claimed = client.join(
-            name or (None if config.name == "unnamed" else config.name)
-        )
+        # join() turns the UNNAMED placeholder into "issue me one" itself, so the
+        # caller no longer has to know that the config might not hold a real name.
+        claimed = client.join(name)
         granted = claimed.get("preferredUsername", config.name)
 
         written: str | None = None
