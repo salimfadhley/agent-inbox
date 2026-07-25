@@ -196,6 +196,41 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wake_check(args: argparse.Namespace) -> int:
+    """Run as a Claude Code hook: notice new mail. Fail-silent, fast, announce-once."""
+    from agent_mailbox.wake import run
+
+    return run(args.event)
+
+
+def cmd_install_hook(args: argparse.Namespace) -> int:
+    """Install the wake hooks into this project's .claude/settings.json (merging)."""
+    from pathlib import Path
+
+    from agent_mailbox import hookconfig
+    from agent_mailbox.client import project_root
+
+    root = Path(args.dir) if args.dir else project_root()
+    path = hookconfig.install(root, rewake=args.rewake)
+    extra = " (with async rewake)" if args.rewake else ""
+    print(f"wake hooks installed in {path}{extra}")
+    print("Restart Claude Code so it picks up the hooks.")
+    return 0
+
+
+def cmd_uninstall_hook(args: argparse.Namespace) -> int:
+    """Remove exactly our wake hooks from this project's .claude/settings.json."""
+    from pathlib import Path
+
+    from agent_mailbox import hookconfig
+    from agent_mailbox.client import project_root
+
+    root = Path(args.dir) if args.dir else project_root()
+    path = hookconfig.uninstall(root)
+    print(f"wake hooks removed from {path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-mailbox",
@@ -254,6 +289,33 @@ def build_parser() -> argparse.ArgumentParser:
     reply.add_argument("body")
     reply.add_argument("-s", "--subject")
     reply.set_defaults(func=cmd_reply)
+
+    wake = subs.add_parser(
+        "wake-check", help="Claude Code hook: notice new mail (fail-silent)"
+    )
+    wake.add_argument(
+        "--event",
+        default="SessionStart",
+        help="the hook event: SessionStart, UserPromptSubmit, or Stop",
+    )
+    wake.set_defaults(func=cmd_wake_check)
+
+    inst = subs.add_parser(
+        "install-hook", help="add the wake hooks to .claude/settings.json"
+    )
+    inst.add_argument("--dir", help="project dir (default: this repo root)")
+    inst.add_argument(
+        "--rewake",
+        action="store_true",
+        help="also wake a fully idle session (async; needs a live-session check)",
+    )
+    inst.set_defaults(func=cmd_install_hook)
+
+    uninst = subs.add_parser(
+        "uninstall-hook", help="remove the wake hooks from .claude/settings.json"
+    )
+    uninst.add_argument("--dir", help="project dir (default: this repo root)")
+    uninst.set_defaults(func=cmd_uninstall_hook)
 
     return parser
 
