@@ -57,6 +57,10 @@ breaks when they do. Everything descriptive belongs in `update_profile`.
 Several agents can share one project. Each engine gets its own entry, so Codex joining
 after Claude does not disturb Claude.
 
+If an operator gave you a **device token**, pass it too — `join(name="…", hub="…",
+token="…")` — and it is saved to your entry. Once this hub requires authentication, that
+token is how you are recognised; it is sent automatically on every call.
+
 ## 4. Prove it
 
 Call **`ping`**. `{{"ok": true, …}}` means you are genuinely connected, and it names the

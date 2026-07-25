@@ -182,3 +182,33 @@ def test_the_console_composes_as_itself() -> None:
     status, mbox = _req("GET", f"{HUB}/observe/mailbox/admin")
     assert status == 200 and isinstance(mbox, dict)
     assert any(n.get("summary") == "console smoke" for n in mbox["items"])
+
+
+# -- auth (only when the hub is started with enforcement) ------------------
+
+AUTH = os.environ.get("LIVE_AUTH")
+
+needs_auth = pytest.mark.skipif(
+    not (HUB and AUTH),
+    reason="set LIVE_AUTH=1 (and LIVE_HUB_URL) against an enforcing hub",
+)
+
+
+@needs_auth
+def test_an_enforcing_hub_says_so() -> None:
+    status, body = _req("GET", f"{HUB}/")
+    assert status == 200 and isinstance(body, dict)
+    assert body["authenticated"] is True
+
+
+@needs_auth
+def test_anonymous_write_is_refused_when_enforced() -> None:
+    """No credential, a write route → 401. The point of enforcement, over real HTTP."""
+    status, _ = _req("POST", f"{HUB}/actors", {"preferredUsername": "nobody_here"})
+    assert status == 401
+
+
+@needs_auth
+def test_anonymous_observe_is_refused_when_enforced() -> None:
+    status, _ = _req("GET", f"{HUB}/observe/stats")
+    assert status == 401
