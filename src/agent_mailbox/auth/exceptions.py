@@ -41,3 +41,16 @@ class TokenRevoked(AuthError):
     """A device token was presented that has been revoked."""
 
     code = "token_revoked"
+
+
+class TooManyAttempts(AuthError):
+    """Too many failed logins from this source; try again later.
+
+    Carries ``retry_after`` seconds so the edge can set a ``Retry-After`` header.
+    """
+
+    code = "too_many_attempts"
+
+    def __init__(self, message: str, *, retry_after: int = 0) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after

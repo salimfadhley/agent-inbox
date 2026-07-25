@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 
 from litestar import Litestar
 
@@ -21,6 +22,7 @@ from agent_mailbox.api import build_api
 from agent_mailbox.auth import secrets as auth_secrets
 from agent_mailbox.auth.service import AuthService
 from agent_mailbox.auth.store import SqliteAuthStore
+from agent_mailbox.auth.throttle import LoginThrottle
 from agent_mailbox.house import House
 from agent_mailbox.mailbox import Mailbox
 from agent_mailbox.sqlite_store import SqliteStore
@@ -56,6 +58,14 @@ class Settings:
     #: Fernet key for encrypting TOTP secrets at rest. Needed once 2FA is
     #: enrolled; never a default (charter: no secrets in the repo).
     secret_key: str = ""
+    #: Failed logins from one source before it is locked out for a while.
+    login_max_failures: int = 5
+    #: The lockout / sliding-window length, in minutes.
+    login_lockout_minutes: int = 15
+    #: Trust an upstream proxy's X-Forwarded-For for the client IP. Turn this on ONLY
+    #: when the hub sits behind a proxy you control that sets the header — otherwise a
+    #: client could spoof its source and dodge the throttle.
+    trust_proxy: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -77,6 +87,9 @@ class Settings:
             log_level=_env("LOG_LEVEL", "INFO").upper(),
             auth_mode=auth_mode,
             secret_key=_env("SECRET_KEY", ""),
+            login_max_failures=int(_env("LOGIN_MAX_FAILURES", "5")),
+            login_lockout_minutes=int(_env("LOGIN_LOCKOUT_MINUTES", "15")),
+            trust_proxy=_env("TRUST_PROXY", "").lower() in ("1", "true", "yes"),
         )
 
 
@@ -111,7 +124,19 @@ def build_app(settings: Settings | None = None) -> Litestar:
         auth_store = SqliteAuthStore(config.db)
         auth = AuthService(auth_store, secret_key=key)
 
-    app = build_api(house, config.public_url, auth=auth, auth_mode=config.auth_mode)
+    throttle = LoginThrottle(
+        max_failures=config.login_max_failures,
+        window=timedelta(minutes=config.login_lockout_minutes),
+        lockout=timedelta(minutes=config.login_lockout_minutes),
+    )
+    app = build_api(
+        house,
+        config.public_url,
+        auth=auth,
+        auth_mode=config.auth_mode,
+        throttle=throttle,
+        trust_proxy=config.trust_proxy,
+    )
 
     async def open_store(_: Litestar) -> None:
         await store.__aenter__()
