@@ -6,6 +6,9 @@ dependencies:
 requirement_refs:
 - C-008
 tracker_refs: []
+planning_base_branch: feat/authentication
+merge_target_branch: feat/authentication
+branch_strategy: Planning artifacts for this mission were generated on feat/authentication. During /spec-kitty.implement this WP may branch from a dependency-specific base, but completed changes must merge back into feat/authentication unless the human explicitly redirects the landing branch.
 subtasks:
 - T029
 - T030
@@ -14,7 +17,8 @@ agent: curator-carla
 history: []
 agent_profile: curator-carla
 authoritative_surface: docs/decisions/0010-authentication-model.md
-create_intent: []
+create_intent:
+- docs/decisions/0010-authentication-model.md
 execution_mode: code_change
 owned_files:
 - docs/decisions/0010-authentication-model.md

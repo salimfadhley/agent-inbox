@@ -12,6 +12,9 @@ requirement_refs:
 - FR-016
 - FR-017
 tracker_refs: []
+planning_base_branch: feat/authentication
+merge_target_branch: feat/authentication
+branch_strategy: Planning artifacts for this mission were generated on feat/authentication. During /spec-kitty.implement this WP may branch from a dependency-specific base, but completed changes must merge back into feat/authentication unless the human explicitly redirects the landing branch.
 subtasks:
 - T010
 - T011
@@ -22,7 +25,9 @@ agent: python-pedro
 history: []
 agent_profile: python-pedro
 authoritative_surface: src/agent_mailbox/auth/service.py
-create_intent: []
+create_intent:
+- src/agent_mailbox/auth/service.py
+- tests/test_auth_service.py
 execution_mode: code_change
 owned_files:
 - src/agent_mailbox/auth/service.py
