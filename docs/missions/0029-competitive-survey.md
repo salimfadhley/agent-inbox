@@ -1,8 +1,9 @@
 # Mission brief — comparative survey of inter-agent messaging systems
 
-**Status:** planned · **Kind:** research, no code · **Raised:** 2026-07-24 by the owner
+**Status:** done (2026-07-25) · **Kind:** research, no code · **Raised:** 2026-07-24 by the owner
 **Dependencies:** none. **Sequencing:** after the client work (M3).
 **Source prompt:** kept verbatim at [`research/competitive-survey-prompt.md`](../research/competitive-survey-prompt.md)
+**Findings:** [`research/competitive-survey-findings.md`](../research/competitive-survey-findings.md)
 
 ## What this is
 
