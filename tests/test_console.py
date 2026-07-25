@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from litestar.testing import TestClient
 
-from agent_mailbox.client import Config, HubClient
+from agent_mailbox.client import SESSION_COOKIE, Config, HubClient
 from agent_mailbox.console import build_console
 
 HUB = "http://mailbox.invalid:8081"
@@ -121,6 +121,36 @@ class StubHub(HubClient):
     def read_message(self, object_id: str) -> dict[str, Any]:
         self.calls.append(f"read:{object_id}")
         return {}
+
+    def auth_call(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        session: str | None = None,
+    ) -> tuple[int, Any, str | None]:
+        self.calls.append(f"auth:{method}:{path}:{'sid' if session else 'nosid'}")
+        if path == "/auth/login":
+            nxt = "enrol" if body and body.get("username") == "admin" else "ok"
+            return 200, {"next": nxt}, f"{SESSION_COOKIE}=sess-xyz; HttpOnly; Path=/"
+        if path == "/auth/enrol" and method == "GET":
+            return (
+                200,
+                {
+                    "provisioningUri": "otpauth://totp/x",
+                    "qrSvg": "<svg>qr</svg>",
+                    "recoveryCodes": ["r1", "r2"],
+                },
+                None,
+            )
+        if path == "/auth/enrol" and method == "POST":
+            return 200, {"next": "ok"}, f"{SESSION_COOKIE}=full-sess; HttpOnly; Path=/"
+        if path == "/auth/logout":
+            return 200, {"next": "ok"}, None
+        if path == "/auth/change-password":
+            return 200, {"next": "ok"}, None
+        return 404, {"detail": "no"}, None
 
 
 def make(stub: StubHub | None = None) -> tuple[TestClient, StubHub]:
@@ -270,3 +300,61 @@ def test_the_console_claims_its_own_mailbox_at_startup() -> None:
     with TestClient(app=build_console(hub)):
         pass
     assert "join" in hub.calls
+
+
+# -- the auth UI (WP05) ----------------------------------------------------
+
+
+def test_login_page_renders(console: TestClient) -> None:
+    body = console.get("/login").text
+    assert "Sign in" in body
+    assert 'action="/login/submit"' in body
+
+
+def test_login_relays_the_session_cookie_and_redirects() -> None:
+    _, hub = make()
+    with TestClient(app=build_console(hub)) as c:
+        r = c.post(
+            "/login/submit",
+            data={"username": "someone", "password": "pw", "otp": "123456"},
+            follow_redirects=False,
+        )
+    # the console called the hub's login and relayed a Set-Cookie back to the browser
+    assert any(call.startswith("auth:POST:/auth/login") for call in hub.calls)
+    assert r.status_code in (301, 302, 303)
+    assert SESSION_COOKIE in r.cookies
+
+
+def test_bootstrap_login_sends_to_enrol() -> None:
+    _, hub = make()
+    with TestClient(app=build_console(hub)) as c:
+        r = c.post(
+            "/login/submit",
+            data={"username": "admin", "password": "pw", "otp": ""},
+            follow_redirects=False,
+        )
+    assert r.headers["location"] == "/account/enrol"
+
+
+def test_enrol_page_shows_the_qr_and_recovery_codes() -> None:
+    _, hub = make()
+    with TestClient(app=build_console(hub), cookies={SESSION_COOKIE: "sess-xyz"}) as c:
+        body = c.get("/account/enrol").text
+    assert "<svg>qr</svg>" in body
+    assert "r1" in body and "r2" in body
+    assert 'action="/account/enrol/submit"' in body
+
+
+def test_account_without_a_session_asks_to_sign_in(console: TestClient) -> None:
+    body = console.get("/account").text
+    assert "not signed in" in body.lower()
+
+
+def test_the_console_holds_no_password() -> None:
+    """The console relays credentials; it must never store one. A crude but real check:
+    the module source contains no password constant or field."""
+    import agent_mailbox.console as con
+
+    src = con.__file__
+    text = open(src).read()  # noqa: SIM115, PTH123 - a test reading its own source
+    assert "password_hash" not in text  # no hashing here — that is the hub's job

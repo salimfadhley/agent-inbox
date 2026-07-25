@@ -27,6 +27,10 @@ from typing import Any
 
 CONFIG_NAME = "agent-mailbox.toml"
 IDENTITY_HEADER = "X-Agent-Name"
+
+#: Must match the hub's cookie name (agent_mailbox.api.SESSION_COOKIE). Defined here too
+#: so the stdlib client stays free of any dependency on the Litestar app module.
+SESSION_COOKIE = "agent_mailbox_session"
 DEFAULT_TIMEOUT = 10.0
 
 #: Which engine am I? Markers checked most-specific first.
@@ -77,6 +81,9 @@ class Config:
     role: str = "agent"
     #: Which engine this identity belongs to, when known.
     engine: str | None = None
+    #: A device token minted by an operator. When set, it is sent as a bearer credential
+    #: and is how the hub authenticates this agent once auth is enforced.
+    token: str | None = None
 
     @property
     def base(self) -> str:
@@ -138,6 +145,7 @@ def load_config(start: Path | None = None, env: dict[str, str] | None = None) ->
     hub = environ.get("AGENT_MAILBOX_HUB", "").strip()
     name = environ.get("AGENT_MAILBOX_NAME", "").strip()
     role = environ.get("AGENT_MAILBOX_ROLE", "").strip()
+    token = environ.get("AGENT_MAILBOX_TOKEN", "").strip()
     engine = detect_engine(environ)
 
     path = find_config(start)
@@ -152,10 +160,12 @@ def load_config(start: Path | None = None, env: dict[str, str] | None = None) ->
         if isinstance(mine, dict):
             name = name or str(mine.get("name", "")).strip()
             role = role or str(mine.get("role", "")).strip()
+            token = token or str(mine.get("token", "")).strip()
         elif not entries:
             # A single flat identity, from before this file grew a mapping.
             name = name or str(data.get("name", "")).strip()
             role = role or str(data.get("role", "")).strip()
+            token = token or str(data.get("token", "")).strip()
 
     if not hub or not name:
         missing = " and ".join(
@@ -171,7 +181,13 @@ def load_config(start: Path | None = None, env: dict[str, str] | None = None) ->
             "Or set AGENT_MAILBOX_HUB and AGENT_MAILBOX_NAME. If you have no name yet, "
             "any name you like will do — the hub will tell you if it is taken."
         )
-    return Config(hub=hub, name=name, role=role or "agent", engine=engine)
+    return Config(
+        hub=hub,
+        name=name,
+        role=role or "agent",
+        engine=engine,
+        token=token or None,
+    )
 
 
 def project_root(start: Path | None = None) -> Path:
@@ -188,6 +204,19 @@ def project_root(start: Path | None = None) -> Path:
     return here
 
 
+def _toml_str(value: str) -> str:
+    """A TOML basic string, correctly escaped.
+
+    There is no TOML *writer* in the standard library, only a reader, so this is the one
+    place we must serialise by hand — and doing it naively is a real bug: a value with a
+    quote or a backslash produced a file that no longer parsed, silently losing every
+    identity below it. Escape the characters the spec requires.
+    """
+    out = value.replace("\\", "\\\\").replace('"', '\\"')
+    out = out.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return f'"{out}"'
+
+
 def write_config(
     hub: str,
     name: str,
@@ -195,6 +224,7 @@ def write_config(
     role: str = "agent",
     start: Path | None = None,
     force: bool = False,
+    token: str | None = None,
 ) -> Path:
     """Add or update **this engine's** entry, leaving every other one alone.
 
@@ -206,6 +236,10 @@ def write_config(
 
     An existing entry for this engine is left as it is unless ``force`` is given:
     changing a name means mail addressed to the old one stops being delivered.
+
+    The write is atomic (temp file + rename) and every value is escaped, so a
+    name or token with an awkward character cannot corrupt the file or lose the
+    entries below it.
     """
     target = project_root(start) / CONFIG_NAME
     existing: dict[str, Any] = {}
@@ -213,21 +247,29 @@ def write_config(
         existing = tomllib.loads(target.read_text())
 
     agents: dict[str, Any] = dict(existing.get("agents") or {})
+    _prior = agents.get(engine)
+    prior: dict[str, Any] = _prior if isinstance(_prior, dict) else {}
     if engine in agents and not force:
-        held = agents[engine].get("name")
+        held = prior.get("name")
         raise ClientError(
             f"{engine} is already {held!r} on this project (in {target}). "
             "Keep it, or pass force to change it — mail addressed to the old name "
             "stops arriving."
         )
-    agents[engine] = {"name": name, "role": role}
+    entry = {"name": name, "role": role}
+    # Keep a token we already had unless a new one is given — reconfiguring
+    # identity should not silently drop the credential.
+    kept_token = token or prior.get("token")
+    if kept_token:
+        entry["token"] = kept_token
+    agents[engine] = entry
 
     lines = [
         "# agent-mailbox — where the mailbox is, and who each agent here is on it.",
         "# Written by `join`, one entry per engine. Safe to edit; safe to commit",
-        "# unless the hub url is private to your deployment.",
+        "# unless the hub url or a token is private to your deployment.",
         "",
-        f'hub = "{existing.get("hub") or hub}"',
+        f"hub = {_toml_str(str(existing.get('hub') or hub))}",
         "",
         "# One identity per engine: several agents work in this repository and they",
         "# are different correspondents. Names are permanent and deliberately",
@@ -235,14 +277,20 @@ def write_config(
         "# agent *does* here is its role; the rest belongs in `update_profile`.",
     ]
     for key in sorted(agents):
-        entry = agents[key]
+        item = agents[key]
         lines += [
             "",
             f"[agents.{key}]",
-            f'name = "{entry.get("name", "")}"',
-            f'role = "{entry.get("role", "agent")}"',
+            f"name = {_toml_str(str(item.get('name', '')))}",
+            f"role = {_toml_str(str(item.get('role', 'agent')))}",
         ]
-    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if item.get("token"):
+            lines.append(f"token = {_toml_str(str(item['token']))}")
+    # Atomic: write a sibling temp file and rename over the target, so a crash mid-write
+    # never leaves a half-written config that loses everyone's identity.
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(target)
     return target
 
 
@@ -266,6 +314,10 @@ class HubClient:
         request.add_header("Content-Type", "application/json")
         request.add_header("Accept", "application/json")
         request.add_header(IDENTITY_HEADER, self.config.name)
+        # A device token, when we have one, is how the hub authenticates us once auth is
+        # enforced. The identity header stays too, and is simply ignored under enforce.
+        if self.config.token:
+            request.add_header("Authorization", f"Bearer {self.config.token}")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read()
@@ -281,6 +333,45 @@ class HubClient:
             raise ClientError(
                 f"the mailbox at {self.config.base} did not answer within "
                 f"{self.timeout:g}s. It may be starting up or unreachable."
+            ) from exc
+
+    def auth_call(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        session: str | None = None,
+    ) -> tuple[int, Any, str | None]:
+        """A hub call for the console's auth relay: carries a session cookie and returns
+        the response together with any ``Set-Cookie`` the hub issued.
+
+        The console holds no security state of its own — it forwards the human's session
+        cookie inward and relays the hub's new cookie back out, and this is the one call
+        shape that needs both directions.
+        """
+        url = f"{self.config.base}{path}"
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(url, data=data, method=method)
+        request.add_header("Content-Type", "application/json")
+        request.add_header("Accept", "application/json")
+        if session:
+            request.add_header("Cookie", f"{SESSION_COOKIE}={session}")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read()
+                parsed = json.loads(raw) if raw else None
+                return response.status, parsed, response.headers.get("Set-Cookie")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            try:
+                parsed = json.loads(raw) if raw else None
+            except json.JSONDecodeError:
+                parsed = None
+            return exc.code, parsed, None
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise ClientError(
+                f"cannot reach the mailbox at {self.config.base}: {exc}"
             ) from exc
 
     def _from_response(self, exc: urllib.error.HTTPError) -> ClientError:

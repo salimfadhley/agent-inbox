@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "mission_slug": "authentication-01KYBA9Q",
+  "mission_id": "01KYBA9Q8S55Q8HMCGQ1SBECZK",
+  "mission_branch": "kitty/mission-authentication-01KYBA9Q",
+  "target_branch": "feat/authentication",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01"
+      ],
+      "write_scope": [
+        "src/agent_mailbox/auth/secrets.py",
+        "src/agent_mailbox/auth/totp.py",
+        "tests/test_auth_primitives.py"
+      ],
+      "predicted_surfaces": [
+        "artifact-rendering"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_mailbox/auth/__init__.py",
+        "src/agent_mailbox/auth/exceptions.py",
+        "src/agent_mailbox/auth/records.py",
+        "src/agent_mailbox/auth/store.py",
+        "tests/test_auth_store.py"
+      ],
+      "predicted_surfaces": [],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "lane_id": "lane-c",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        "src/agent_mailbox/auth/service.py",
+        "tests/test_auth_service.py"
+      ],
+      "predicted_surfaces": [],
+      "depends_on_lanes": [
+        "lane-b"
+      ],
+      "parallel_group": 2
+    },
+    {
+      "lane_id": "lane-d",
+      "wp_ids": [
+        "WP04"
+      ],
+      "write_scope": [
+        "pyproject.toml",
+        "src/agent_mailbox/api.py",
+        "src/agent_mailbox/serve.py",
+        "tests/test_auth_api.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "tests"
+      ],
+      "depends_on_lanes": [
+        "lane-c"
+      ],
+      "parallel_group": 3
+    },
+    {
+      "lane_id": "lane-e",
+      "wp_ids": [
+        "WP05"
+      ],
+      "write_scope": [
+        "src/agent_mailbox/console.py",
+        "tests/test_console.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "artifact-rendering",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [
+        "lane-d"
+      ],
+      "parallel_group": 4
+    },
+    {
+      "lane_id": "lane-f",
+      "wp_ids": [
+        "WP06"
+      ],
+      "write_scope": [
+        "src/agent_mailbox/client.py",
+        "src/agent_mailbox/mcp_client.py",
+        "tests/test_client.py"
+      ],
+      "predicted_surfaces": [
+        "api"
+      ],
+      "depends_on_lanes": [
+        "lane-d"
+      ],
+      "parallel_group": 4
+    },
+    {
+      "lane_id": "lane-g",
+      "wp_ids": [
+        "WP07"
+      ],
+      "write_scope": [
+        "docs/decisions/0010-authentication-model.md",
+        "src/agent_mailbox/prompts.py",
+        "tests/live/test_live_smoke.py"
+      ],
+      "predicted_surfaces": [
+        "artifact-rendering"
+      ],
+      "depends_on_lanes": [
+        "lane-d"
+      ],
+      "parallel_group": 4
+    }
+  ],
+  "computed_at": "2026-07-25T00:39:41.607417+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": []
+}

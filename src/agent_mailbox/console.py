@@ -26,12 +26,13 @@ from __future__ import annotations
 import html
 from typing import Annotated, Any
 
-from litestar import Litestar, MediaType, get, post
+from litestar import Litestar, MediaType, Request, get, post
+from litestar.datastructures import Cookie
 from litestar.enums import RequestEncodingType
 from litestar.params import Body
 from litestar.response import Redirect, Response
 
-from agent_mailbox.client import ClientError, HubClient
+from agent_mailbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_mailbox.prompts import onboarding, role_note
 
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
@@ -113,6 +114,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
         + link("/inbox", "Inbox")
         + link("/compose", "Compose")
         + link("/prompts", "Prompt")
+        + link("/account", "Account")
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -551,6 +553,194 @@ def build_console(client: HubClient) -> Litestar:
         """The same prompt as plain text, for `curl` and for pasting."""
         return onboarding(_advertised(hub_or_none() or {}, client.config.base))
 
+    # -- authentication (the human side) -----------------------------------
+    #
+    # The console holds no security state: it relays the human's session cookie
+    # inward to the hub and the hub's Set-Cookie back out. Every hub call here goes
+    # through client.auth_call, which carries the cookie both ways.
+
+    def _relay_cookie(set_cookie: str | None) -> list[Cookie]:
+        """Turn the hub's raw Set-Cookie into one the console re-sends onward."""
+        if not set_cookie:
+            return []
+        value = set_cookie.split(";", 1)[0].split("=", 1)[-1]
+        return [Cookie(key=SESSION_COOKIE, value=value, httponly=True, path="/")]
+
+    @get("/login", media_type=MediaType.HTML, sync_to_thread=True)
+    def login_form() -> Response:
+        hub = hub_or_none()
+        body = (
+            "<h2>Sign in</h2>"
+            '<form method="post" action="/login/submit">'
+            '<label for="u">Username</label>'
+            '<input type="text" id="u" name="username" autocomplete="username">'
+            '<label for="p">Password</label>'
+            '<input type="text" id="p" name="password" '
+            'style="-webkit-text-security:disc" autocomplete="current-password">'
+            '<label for="o">6-digit code (blank on first login)</label>'
+            '<input type="text" id="o" name="otp" inputmode="numeric">'
+            '<p style="margin-top:.8rem"><button type="submit">Sign in</button></p>'
+            "</form>"
+            "<p class='dim'>First run? The initial <code>admin</code> password is "
+            "printed once in the hub's boot log.</p>"
+        )
+        return Response(
+            _page("Sign in", body, hub, "/login"), media_type=MediaType.HTML
+        )
+
+    @post("/login/submit", status_code=200, sync_to_thread=True)
+    def login_submit(request: Request, data: Form) -> Response:
+        hub = hub_or_none()
+        payload = {
+            "username": str(data.get("username", "")).strip(),
+            "password": str(data.get("password", "")),
+            "otp": str(data.get("otp", "")).strip() or None,
+        }
+        try:
+            status, body, set_cookie = client.auth_call("POST", "/auth/login", payload)
+        except ClientError as exc:
+            return _err(exc, hub, "Sign in")
+        if status != 200:
+            msg = (body or {}).get("detail", "sign in failed") if body else "failed"
+            page = (
+                f'<p class="warn">{html.escape(str(msg))}</p>'
+                '<p><a href="/login">Try again</a></p>'
+            )
+            return Response(
+                _page("Sign in", page, hub, "/login"),
+                media_type=MediaType.HTML,
+                status_code=200,
+            )
+        target = "/account/enrol" if (body or {}).get("next") == "enrol" else "/"
+        return Redirect(target, cookies=_relay_cookie(set_cookie))
+
+    @post("/logout/submit", status_code=200, sync_to_thread=True)
+    def logout_submit(request: Request) -> Redirect:
+        sid = request.cookies.get(SESSION_COOKIE)
+        if sid:
+            try:
+                client.auth_call("POST", "/auth/logout", {}, session=sid)
+            except ClientError:
+                pass
+        return Redirect(
+            "/login",
+            cookies=[Cookie(key=SESSION_COOKIE, value="", path="/", max_age=0)],
+        )
+
+    @get("/account", media_type=MediaType.HTML, sync_to_thread=True)
+    def account(request: Request) -> Response:
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        if not sid:
+            return Response(
+                _page(
+                    "Account",
+                    '<p>You are not signed in. <a href="/login">Sign in</a>.</p>',
+                    hub,
+                    "/account",
+                ),
+                media_type=MediaType.HTML,
+            )
+        body = (
+            "<h2>Your account</h2>"
+            "<h2>Change password</h2>"
+            '<form method="post" action="/account/password/submit">'
+            "<label>Current password</label>"
+            '<input type="text" name="current" style="-webkit-text-security:disc">'
+            "<label>New password</label>"
+            '<input type="text" name="new" style="-webkit-text-security:disc">'
+            '<p style="margin-top:.6rem"><button type="submit">Change</button></p>'
+            "</form>"
+            '<p><a href="/account/enrol">Re-scan / rotate 2FA</a></p>'
+            '<form method="post" action="/logout/submit" style="margin-top:1rem">'
+            '<button type="submit">Sign out</button></form>'
+        )
+        return Response(
+            _page("Account", body, hub, "/account"), media_type=MediaType.HTML
+        )
+
+    @post("/account/password/submit", status_code=200, sync_to_thread=True)
+    def change_password(request: Request, data: Form) -> Response:
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call(
+            "POST",
+            "/auth/change-password",
+            {"current": str(data.get("current", "")), "new": str(data.get("new", ""))},
+            session=sid,
+        )
+        ok = status == 200
+        msg = "Password changed." if ok else (body or {}).get("detail", "failed")
+        page = f"<p>{html.escape(str(msg))}</p><p><a href='/account'>Back</a></p>"
+        return Response(
+            _page("Account", page, hub, "/account"), media_type=MediaType.HTML
+        )
+
+    @get("/account/enrol", media_type=MediaType.HTML, sync_to_thread=True)
+    def enrol_form(request: Request) -> Response:
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        if not sid:
+            return Redirect("/login")  # type: ignore[return-value]
+        status, offer, _ = client.auth_call("GET", "/auth/enrol", session=sid)
+        if status != 200 or not offer:
+            return Response(
+                _page(
+                    "Enrol",
+                    '<p class="warn">Could not start enrolment. '
+                    '<a href="/login">Sign in</a> again.</p>',
+                    hub,
+                    "/account",
+                ),
+                media_type=MediaType.HTML,
+            )
+        codes = "".join(
+            f"<li><code>{html.escape(c)}</code></li>" for c in offer["recoveryCodes"]
+        )
+        body = (
+            "<h2>Set up two-factor authentication</h2>"
+            "<p>Scan this with Authy or Google Authenticator, then enter the 6-digit "
+            "code it shows to confirm.</p>"
+            f'<div style="max-width:220px">{offer["qrSvg"]}</div>'
+            "<p class='dim'>Save these one-time recovery codes somewhere safe — each "
+            "works once if you lose your phone:</p>"
+            f"<ul>{codes}</ul>"
+            '<form method="post" action="/account/enrol/submit">'
+            "<label>Choose a password</label>"
+            '<input type="text" name="password" style="-webkit-text-security:disc">'
+            "<label>6-digit code from the app</label>"
+            '<input type="text" name="otp" inputmode="numeric">'
+            '<p style="margin-top:.6rem"><button type="submit">Confirm</button></p>'
+            "</form>"
+        )
+        return Response(
+            _page("Enrol", body, hub, "/account"), media_type=MediaType.HTML
+        )
+
+    @post("/account/enrol/submit", status_code=200, sync_to_thread=True)
+    def enrol_submit(request: Request, data: Form) -> Response:
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, set_cookie = client.auth_call(
+            "POST",
+            "/auth/enrol",
+            {
+                "password": str(data.get("password", "")),
+                "otp": str(data.get("otp", "")),
+            },
+            session=sid,
+        )
+        if status != 200:
+            msg = (body or {}).get("detail", "enrolment failed") if body else "failed"
+            page = (
+                f'<p class="warn">{html.escape(str(msg))}</p>'
+                '<p><a href="/account/enrol">Try again</a></p>'
+            )
+            return Response(
+                _page("Enrol", page, hub, "/account"), media_type=MediaType.HTML
+            )
+        return Redirect("/", cookies=_relay_cookie(set_cookie))
+
     return Litestar(
         on_startup=[ensure_own_mailbox],
         route_handlers=[
@@ -564,5 +754,12 @@ def build_console(client: HubClient) -> Litestar:
             do_compose,
             prompts,
             prompt_text,
+            login_form,
+            login_submit,
+            logout_submit,
+            account,
+            change_password,
+            enrol_form,
+            enrol_submit,
         ],
     )
