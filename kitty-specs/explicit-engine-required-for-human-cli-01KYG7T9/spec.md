@@ -266,3 +266,20 @@ Three points where the spec left a choice and this is what was chosen:
 
 Verified against the six user scenarios, including that a plain shell in a two-engine
 project leaves `agent-mailbox.toml` byte-identical after a refused write (NFR-001).
+
+### Edge cases (completed after the first release)
+
+Two of the listed edge cases were shipped unfinished in 0.16.0 and are now done:
+
+- **Explicit engine not present in the project file.** It fell through to the generic
+  "no mailbox configuration — write agent-mailbox.toml in your project root", which
+  tells someone to create a file that is open in front of them, for an engine they had
+  just named. It is now its own error naming the configured engines and offering
+  `join --engine <engine>`. Distinct from the unresolved case on purpose: there the
+  caller said nothing and must choose; here they chose and the choice does not exist.
+  Acting as a missing engine is refused, but *creating* one through `join` or
+  `config set` stays allowed — otherwise a project could never gain a second agent.
+- **A hub with no agent entries.** `doctor` suggested a bare `agent-inbox join`, which
+  from an unresolved shell refuses for the same reason everything else does, sending
+  the reader in a circle. It now suggests `join --engine <engine> --hub …` whenever no
+  engine is resolved.

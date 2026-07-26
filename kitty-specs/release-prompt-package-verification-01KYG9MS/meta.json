@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-26T22:45:00.790495+00:00",
+  "flattened": false,
+  "friendly_name": "release prompt package verification",
+  "mission_id": "01KYG9MS7NN2WM58BKXPV6XJ4E",
+  "mission_number": null,
+  "mission_slug": "release-prompt-package-verification-01KYG9MS",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances release prompt package verification on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "release prompt package verification",
+  "slug": "release-prompt-package-verification-01KYG9MS",
+  "target_branch": "main",
+  "topology": "single_branch"
+}

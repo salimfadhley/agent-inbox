@@ -307,3 +307,70 @@ class TestExplicitEngine:
         out = capsys.readouterr().out
         assert "ambiguous" in out
         assert "claude, codex" in out
+
+    def test_naming_an_engine_the_project_lacks_says_so_precisely(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Spec edge case: chose an engine, and the choice does not exist.
+
+        Distinct from having chosen nothing. Before this, it fell through to the
+        generic "write agent-mailbox.toml in your project root" — telling someone to
+        create a file that is open in front of them, for an engine they just named.
+        """
+        self._project(tmp_path, "claude")
+        self._shell(tmp_path, monkeypatch)
+        assert main(["--engine", "codex", "ping"]) == 2
+        err = capsys.readouterr().err
+        assert "no entry for engine 'codex'" in err
+        assert "Configured engines: claude" in err
+        assert "join --engine codex" in err
+
+    def test_but_creating_that_entry_is_still_allowed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Acting as a missing engine is refused; *making* one is how it is made.
+
+        `join` and `config set` must stay permissive here or there would be no way to
+        add a second agent to a project.
+        """
+        self._project(tmp_path, "claude")
+        self._shell(tmp_path, monkeypatch)
+        assert main(["--engine", "codex", "config", "set", "role", "host"]) == 0
+        written = (tmp_path / "agent-mailbox.toml").read_text()
+        assert "[agents.codex]" in written
+        assert 'role = "host"' in written.split("[agents.codex]")[1]
+
+    def test_onboarding_advice_names_the_engine_when_one_must_be_chosen(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Spec edge case: a hub, no entries, no marker.
+
+        A bare `join` would refuse for the same reason everything else does, so
+        suggesting it would send the reader in a circle.
+        """
+        (tmp_path / "agent-mailbox.toml").write_text(
+            'hub = "http://hub.invalid:8081"\n'
+        )
+        self._shell(tmp_path, monkeypatch)
+
+        class Reachable:
+            """Answers as a live hub would, so doctor reaches the advice it gives."""
+
+            def __init__(self, config: Config) -> None:
+                self.config = config
+
+            def hub_info(self) -> dict[str, Any]:
+                return {"name": "hub", "version": "test", "authenticated": False}
+
+            def remote_doctor(self) -> dict[str, Any]:
+                return {"you": {"token": "not presented"}, "verdict": "no token needed"}
+
+        monkeypatch.setattr("agent_mailbox.cli.HubClient", Reachable)
+        main(["doctor"])
+        assert "join --engine <engine>" in capsys.readouterr().out

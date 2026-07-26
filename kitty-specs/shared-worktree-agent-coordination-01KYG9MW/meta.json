@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-26T22:45:03.762972+00:00",
+  "flattened": false,
+  "friendly_name": "shared worktree agent coordination",
+  "mission_id": "01KYG9MW4JASPCS24R55CBS2CR",
+  "mission_number": null,
+  "mission_slug": "shared-worktree-agent-coordination-01KYG9MW",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances shared worktree agent coordination on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "shared worktree agent coordination",
+  "slug": "shared-worktree-agent-coordination-01KYG9MW",
+  "target_branch": "main",
+  "topology": "single_branch"
+}

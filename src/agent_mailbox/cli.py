@@ -119,7 +119,28 @@ def _command_path(ctx: click.Context) -> str:
     return " ".join(reversed(parts))
 
 
-def _resolve_engine(ctx: click.Context) -> str | None:
+class EngineNotConfigured(click.ClickException):
+    """Named an engine this project has no entry for.
+
+    Distinct from EngineUnresolved on purpose: there the caller said nothing and must
+    choose, here they chose and the choice does not exist. Falling through to the
+    generic "write agent-mailbox.toml in your project root" told people to create a
+    file that was open in front of them.
+    """
+
+    exit_code = 2
+
+    def __init__(self, engine: str, engines: list[str]) -> None:
+        have = ", ".join(sorted(engines)) if engines else "none"
+        super().__init__(
+            f"this project has no entry for engine {engine!r}.\n"
+            f"Configured engines: {have}.\n"
+            "Either use one of those, or create this one:\n"
+            f"  agent-inbox join --engine {engine}"
+        )
+
+
+def _resolve_engine(ctx: click.Context, *, must_exist: bool = False) -> str | None:
     """Which engine this command should act as, or refuse.
 
     An agent session carries a marker and never notices this. A human shell does not,
@@ -132,11 +153,15 @@ def _resolve_engine(ctx: click.Context) -> str | None:
     The caller reports which engine that was, so the day a second agent joins and the
     same command starts refusing, the reason is already familiar.
     """
+    engines = configured_engines()
     if named := _engine(ctx):
+        # `must_exist` separates acting from creating. `join` and `config set` may
+        # legitimately name an engine that has no entry yet — that is how one is made.
+        if must_exist and engines and named not in engines:
+            raise EngineNotConfigured(named, engines)
         return named
     if detected := detect_engine():
         return detected
-    engines = configured_engines()
     if len(engines) > 1:
         raise EngineUnresolved(engines, _command_path(ctx) or "<command>")
     return engines[0] if engines else None
@@ -144,7 +169,7 @@ def _resolve_engine(ctx: click.Context) -> str | None:
 
 def _client(ctx: click.Context) -> HubClient:
     """A hub client acting as this project's agent — engine resolved or refused."""
-    return HubClient(load_config(engine=_resolve_engine(ctx)))
+    return HubClient(load_config(engine=_resolve_engine(ctx, must_exist=True)))
 
 
 def _print(value: Any) -> None:
@@ -557,7 +582,7 @@ def config_path(ctx: click.Context, is_global: bool) -> int:
 @click.pass_context
 def whoami(ctx: click.Context, role_definition: bool) -> int:
     """Who this engine is here."""
-    config = load_config(engine=_resolve_engine(ctx))
+    config = load_config(engine=_resolve_engine(ctx, must_exist=True))
     out: dict[str, Any] = {
         "name": config.name,
         "role": config.role,
@@ -580,7 +605,7 @@ def role(ctx: click.Context, name: str | None) -> int:
     drift out of step with each other and with the code; one source does not, and
     changing what a role means does not mean re-onboarding anyone.
     """
-    config = load_config(engine=_resolve_engine(ctx))
+    config = load_config(engine=_resolve_engine(ctx, must_exist=True))
     _print(HubClient(config).role_definition(name or config.role))
     return 0
 
@@ -807,9 +832,13 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     # step will work.
     if config is None:
         click.echo(f"{todo} api             not joined yet")
+        # With no engine resolved, a bare `join` would refuse for the same reason
+        # everything else does — so suggest the form that works rather than the one
+        # that sends them back here.
+        flag = "" if chosen else " --engine <engine>"
         click.echo(
             "\nThe hub is reachable and ready. Ask it for a name:\n\n"
-            f"    agent-inbox join --hub {hub_url}\n\n"
+            f"    agent-inbox join{flag} --hub {hub_url}\n\n"
             "The hub issues the name and settles uniqueness itself, so there is\n"
             "nothing to check first and nothing to retry. Add a name of your own\n"
             "only if you want one — you will be told if it is taken. Either way\n"
