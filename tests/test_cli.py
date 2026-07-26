@@ -21,13 +21,11 @@ def test_version_is_asked_for_without_a_subcommand(
 ) -> None:
     """The reader runs it before they have any idea what the subcommands are.
 
-    Subcommands are `required=True`, so this pins that `--version` still answers
-    without one — the whole point being that a copy too old to know today's
-    subcommands can still say how old it is.
+    A copy too old to know today's subcommands must still be able to say how old it
+    is, so this pins that `--version` answers with no subcommand at all — and answers
+    successfully, since the prompt treats any failure as "install it".
     """
-    with pytest.raises(SystemExit) as exit_:
-        main(["--version"])
-    assert exit_.value.code == 0
+    assert main(["--version"]) == 0
     out = capsys.readouterr().out
     # Compared against the package version, not a literal: a number typed into the
     # parser would stop being true at the next release without anything failing. The
@@ -37,16 +35,20 @@ def test_version_is_asked_for_without_a_subcommand(
     assert out.split()[0] in {"agent-mailbox", "agent-inbox", "pytest"}
 
 
-def test_doctor_is_a_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
-    """The onboarding prompt tells every arriving agent to run it.
+def test_every_documented_command_exists() -> None:
+    """The prompt, the help text and the token instructions all name commands.
 
-    Only that it exists and is wired up — what it reports needs a hub, which the live
-    smoke tests have and this file does not.
+    A command named in text and missing from the program is a dead end an agent cannot
+    diagnose, and the two drift apart silently.
     """
-    from agent_mailbox.cli import build_parser
+    from agent_mailbox.cli import cli
 
-    args = build_parser().parse_args(["doctor"])
-    assert args.func.__name__ == "cmd_doctor"
+    names = set(cli.commands)
+    assert {"doctor", "join", "config", "mcp", "serve", "console", "ping"} <= names
+    # `configure` is an alias rather than a second command, so it resolves without
+    # appearing twice in help.
+    assert "configure" not in names
+    assert cli.get_command(None, "configure") is cli.get_command(None, "config")  # type: ignore[arg-type]
 
 
 def test_doctor_says_what_to_do_when_there_is_no_configuration(
@@ -75,7 +77,7 @@ class TestConfigure:
         monkeypatch.delenv("AGENT_MAILBOX_HUB", raising=False)
         monkeypatch.delenv("AGENT_MAILBOX_NAME", raising=False)
         monkeypatch.chdir(tmp_path)
-        return main(["configure", *args])
+        return main(["config", *args])
 
     def test_a_shared_token_goes_machine_wide_and_stays_private(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -85,16 +87,16 @@ class TestConfigure:
         The default umask would leave it world-readable, which for a token that admits
         every agent on the box is the whole security of the thing.
         """
-        assert self._run(tmp_path, monkeypatch, "--global", "token=sekrit") == 0
+        run = self._run(tmp_path, monkeypatch, "set", "--global", "token", "sekrit")
+        assert run == 0
         written = tmp_path / "xdg" / "agent-inbox" / "config.toml"
         assert 'token = "sekrit"' in written.read_text()
         assert written.stat().st_mode & 0o077 == 0, "readable by others"
 
-    def test_set_may_lead_and_is_optional(
+    def test_the_key_value_form_is_accepted_too(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`configure set role=host` reads naturally; insisting on it would trap
-        anyone who wrote the shorter form, and vice versa."""
+        """`name=value` is what anyone who has used a config tool reaches for."""
         assert self._run(tmp_path, monkeypatch, "set", "role=host") == 0
         assert 'role = "host"' in (tmp_path / "agent-mailbox.toml").read_text()
 
@@ -106,10 +108,10 @@ class TestConfigure:
         A machine-wide name would quietly merge them into one inbox — the exact
         failure hub-issued names exist to prevent.
         """
-        assert self._run(tmp_path, monkeypatch, "--global", "name=someone") == 2
+        assert self._run(tmp_path, monkeypatch, "set", "--global", "name", "x") == 2
 
     def test_an_unknown_setting_is_refused_rather_than_written(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A silently accepted typo leaves a file that reads correct and is not."""
-        assert self._run(tmp_path, monkeypatch, "tokne=sekrit") == 2
+        assert self._run(tmp_path, monkeypatch, "set", "tokne", "sekrit") == 2

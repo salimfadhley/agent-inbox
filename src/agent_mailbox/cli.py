@@ -1,26 +1,33 @@
 """One tool, several modes.
 
-``agent-mailbox`` is the only command. It runs as an MCP server for an agent, as a
-terminal client for a human, or as the hub itself — and in every mode it is the thing
-that **owns the local configuration**.
+``agent-inbox`` is the command (``agent-mailbox`` is the same program under its older
+name). It runs as an MCP server for an agent, as a terminal client for a human, or as
+the hub itself — and in every mode it is the thing that **owns the local
+configuration**.
 
 That ownership is the point. Nobody hand-writes ``agent-mailbox.toml``: the first time
 an engine runs here it claims a name and records itself, and because the file persists,
 every later run is already configured. A second engine in the same directory gets its
-own entry and does not disturb the first.
+own entry and does not disturb the first. `config` is how anything in either file is
+changed, so that no one has to know which file, which engine's entry, or what
+permissions a file holding a credential needs.
 
-Standard library only. A tool an agent installs should not drag a dependency tree behind
-it, and argparse is enough for a dozen subcommands.
+Built on click. The CLI grew past what argparse does gracefully — a flag written
+anywhere but one exact position in `config set --global name value` was rejected as
+"unrecognized arguments", which is a parser limitation presented to the user as their
+mistake. click adds one pure-Python dependency (its only requirement is colorama, and
+only on Windows) and it is now a base dependency rather than a client-only one, because
+the hub's own entry point runs through this module.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
+
+import click
 
 from agent_mailbox import __version__
 from agent_mailbox.client import (
@@ -32,15 +39,43 @@ from agent_mailbox.client import (
     NotConfigured,
     detect_engine,
     duplicate_names,
+    effective_settings,
     find_config,
+    global_config_path,
     load_config,
     load_global,
     load_hub,
     project_root,
+    unset_global,
+    unset_project,
     write_config,
     write_global,
     write_project,
 )
+
+#: Settings `config` will write. Anything else is a typo, and a typo silently accepted
+#: leaves a file that reads correct and is not.
+KNOWN_SETTINGS = ("hub", "name", "role", "token")
+
+#: Per project, never machine-wide: the same engine in two repositories is two
+#: correspondents, and one machine-wide name would quietly merge them into one inbox.
+PROJECT_ONLY = ("name", "role")
+
+EPILOG = """\
+WHERE YOU RUN IT MATTERS. Identity is per project, so anything acting as an agent —
+join, config, doctor, ping, inbox, send, read, reply, agents, whoami, role, hub — reads
+agent-mailbox.toml from the directory you are in, searching upwards and stopping at the
+repository root. Run those inside the project. A shared token may live machine-wide
+(`config set --global token <token>`), because a credential admits the machine rather
+than naming an agent.
+
+`mcp` needs no particular directory: it asks the client that launched it for the
+workspace, falls back to this one, and takes which engine it serves from the client's
+own name. `--project` settles it for a client that offers neither.
+
+`serve` and `console` are the hub and its window: configured by the environment
+(AGENT_MAILBOX_*), not by a project, and they run anywhere.
+"""
 
 
 def _client() -> HubClient:
@@ -48,42 +83,114 @@ def _client() -> HubClient:
 
 
 def _print(value: Any) -> None:
-    print(json.dumps(value, indent=2) if not isinstance(value, str) else value)
+    click.echo(json.dumps(value, indent=2) if not isinstance(value, str) else value)
+
+
+def _err(message: str) -> None:
+    click.echo(message, err=True)
+
+
+class AliasedGroup(click.Group):
+    """A group whose commands may answer to more than one name.
+
+    Only for names people demonstrably type: `config`/`configure` is one command, and
+    making someone guess which we chose is a poor way to spend their attention.
+    """
+
+    aliases: dict[str, str] = {"configure": "config"}
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        return super().get_command(ctx, self.aliases.get(cmd_name, cmd_name))
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        _, command, rest = super().resolve_command(ctx, args)
+        # Report the canonical name, so help and errors do not echo an alias back.
+        return (command.name if command else None), command, rest
+
+
+@click.group(
+    cls=AliasedGroup,
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help="One mailbox tool: MCP server, terminal client, or the hub itself.",
+    epilog=EPILOG,
+)
+@click.version_option(
+    __version__,
+    "--version",
+    # The onboarding prompt asks an agent to run this *before* installing, to find out
+    # whether the copy it has is old enough to matter — so it must answer without a
+    # subcommand, and name whichever of the two commands was invoked.
+    message="%(prog)s %(version)s",
+)
+def cli() -> None:
+    """One mailbox tool: MCP server, terminal client, or the hub itself."""
 
 
 # -- modes -------------------------------------------------------------------
 
 
-def cmd_mcp(args: argparse.Namespace) -> int:
-    """Run as an MCP server over stdio, for an agent."""
+@cli.command()
+@click.option(
+    "--project",
+    type=click.Path(),
+    default=None,
+    help="the project this session is working in. Rarely needed: the server asks the "
+    "client for its workspace roots, and falls back to its working directory. Use it "
+    "when a client offers neither.",
+)
+def mcp(project: str | None) -> int:
+    """Run as an MCP server over stdio (for an agent)."""
     from agent_mailbox.mcp_client import main as run_mcp
 
-    run_mcp(Path(args.project).expanduser() if args.project else None)
+    run_mcp(Path(project).expanduser() if project else None)
     return 0
 
 
-def cmd_console(args: argparse.Namespace) -> int:
-    """Serve the human console — a browser window onto the hub."""
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="bind address")
+@click.option("--port", default=8090, type=int)
+def console(host: str, port: int) -> int:
+    """Serve the human console in a browser."""
     try:
         import uvicorn
 
         from agent_mailbox.console import build_console
     except ImportError as exc:  # pragma: no cover - only without server extras
-        print(f"the console needs the server dependencies: {exc}", file=sys.stderr)
+        _err(f"the console needs the server dependencies: {exc}")
         return 1
     config = load_config()
-    print(f"console for {config.hub} on http://{args.host}:{args.port}")
+    click.echo(f"console for {config.hub} on http://{host}:{port}")
     uvicorn.run(
-        build_console(HubClient(config)),
-        host=args.host,
-        port=args.port,
-        log_level="warning",
+        build_console(HubClient(config)), host=host, port=port, log_level="warning"
     )
     return 0
 
 
-def cmd_reset_admin(args: argparse.Namespace) -> int:
-    """Put an operator account back to first-run, and print its new password.
+@cli.command()
+@click.option(
+    "--reset-user-table",
+    is_flag=True,
+    help="on this start only: delete all operator accounts and seed a new admin, "
+    "printing its password. Agents' device tokens and all mail are untouched. Start "
+    "once with it, take the password from the log, then remove it.",
+)
+def serve(reset_user_table: bool) -> int:
+    """Run the hub."""
+    try:
+        from agent_mailbox.serve import main as run_hub
+    except ImportError as exc:  # pragma: no cover - only without server extras
+        _err(f"the hub needs the server dependencies: {exc}")
+        return 1
+    run_hub(reset_user_table=reset_user_table)
+    return 0
+
+
+@cli.command("reset-admin")
+@click.option("--username", default="admin", help="which account")
+def reset_admin(username: str) -> int:
+    """Put an operator account back to first-run (run on the hub).
 
     Runs **on the hub**, against its own storage — so it is for whoever deploys the
     thing, not for anyone who can reach it over the network. That is the whole security
@@ -99,17 +206,14 @@ def cmd_reset_admin(args: argparse.Namespace) -> int:
         from agent_mailbox.auth.store import SqliteAuthStore
         from agent_mailbox.serve import Settings
     except ImportError as exc:  # pragma: no cover - only without server extras
-        print(
-            f"this runs on the hub and needs its dependencies: {exc}", file=sys.stderr
-        )
+        _err(f"this runs on the hub and needs its dependencies: {exc}")
         return 1
 
     config = Settings.from_env()
     if not config.secret_key:
-        print(
+        _err(
             "AGENT_MAILBOX_SECRET_KEY is unset. Set the same key the hub runs with, "
-            "or the reset writes an account the hub cannot read.",
-            file=sys.stderr,
+            "or the reset writes an account the hub cannot read."
         )
         return 1
 
@@ -117,161 +221,253 @@ def cmd_reset_admin(args: argparse.Namespace) -> int:
         store = SqliteAuthStore(config.db)
         async with store:
             return await AuthService(store, secret_key=config.secret_key).reset_user(
-                args.username
+                username
             )
 
     try:
         password = anyio.run(go)
     except Exception as exc:  # noqa: BLE001 - the message is the whole output
-        print(f"could not reset {args.username!r}: {exc}", file=sys.stderr)
+        _err(f"could not reset {username!r}: {exc}")
         return 1
-    print(f"{args.username} password: {password}")
-    print("Sign in with it, leaving the 6-digit code blank, and enrol 2FA again.")
-    return 0
-
-
-def cmd_serve(args: argparse.Namespace) -> int:
-    """Run the hub itself. Needs the server dependencies."""
-    try:
-        from agent_mailbox.serve import main as run_hub
-    except ImportError as exc:  # pragma: no cover - only without server extras
-        print(f"the hub needs the server dependencies: {exc}", file=sys.stderr)
-        return 1
-    run_hub(reset_user_table=args.reset_user_table)
+    click.echo(f"{username} password: {password}")
+    click.echo("Sign in with it, leaving the 6-digit code blank, and enrol 2FA again.")
     return 0
 
 
 # -- configuration -----------------------------------------------------------
 
 
-def cmd_join(args: argparse.Namespace) -> int:
-    """Claim a name and record this engine in the project's configuration."""
-    engine = args.engine or detect_engine()
+@cli.command()
+@click.argument("name", required=False)
+@click.option("--hub", help="hub url; taken from the config file if present")
+@click.option("--role", default="agent", help="what this engine does here")
+@click.option("--engine", help="override engine detection")
+@click.option("--force", is_flag=True, help="replace an existing entry")
+@click.option(
+    "--token",
+    help="a device token minted for this agent; saved to its entry. Not needed when a "
+    "shared token is in the machine-wide config.",
+)
+def join(
+    name: str | None,
+    hub: str | None,
+    role: str,
+    engine: str | None,
+    force: bool,
+    token: str | None,
+) -> int:
+    """Claim a name and configure this engine. Omit NAME to be issued one."""
+    engine = engine or detect_engine()
     if engine is None:
-        print(
+        _err(
             "cannot tell which engine this is — pass --engine, so that two agents in "
-            "this directory do not end up sharing one identity.",
-            file=sys.stderr,
+            "this directory do not end up sharing one identity."
         )
         return 1
 
-    hub = args.hub or load_hub()
-    if not hub:
-        print(
-            f"no hub known. Pass --hub, or put one in {CONFIG_NAME}.", file=sys.stderr
-        )
+    hub_url = hub or load_hub()
+    if not hub_url:
+        _err(f"no hub known. Pass --hub, or put one in {CONFIG_NAME}.")
         return 1
 
     # Joining an enforcing hub needs a credential *before* there is a project config to
     # hold one, so the shared machine-wide token counts here too. Explicit beats
     # environment beats machine-wide; whichever it is, it authenticates this call.
-    token = (args.token or "").strip() or os.environ.get(
-        "AGENT_MAILBOX_TOKEN", ""
-    ).strip()
+    given = (token or "").strip() or os.environ.get("AGENT_MAILBOX_TOKEN", "").strip()
     shared = str(load_global().get("token", "")).strip()
     client = HubClient(
-        Config(
-            hub=hub, name=args.name or UNNAMED, role=args.role, token=token or shared
-        )
+        Config(hub=hub_url, name=name or UNNAMED, role=role, token=given or shared)
     )
     # Claim first, record second: a config asserting a refused name would be a file
     # claiming an identity that is not ours.
-    claimed = client.join(args.name)
-    granted = claimed.get("preferredUsername", args.name)
-    # Only a token given *to this agent* is written into the project. Copying the
-    # shared one in would defeat the point of having it in one place — and would
-    # scatter a machine-wide secret through every repository it ever joins.
+    claimed = client.join(name)
+    granted = claimed.get("preferredUsername", name)
+    # Only a token given *to this agent* is written into the project. Copying the shared
+    # one in would defeat the point of having it in one place — and would scatter a
+    # machine-wide secret through every repository it ever joins.
     path = write_config(
-        hub,
-        granted,
-        engine=engine,
-        role=args.role,
-        force=args.force,
-        token=token or None,
+        hub_url, granted, engine=engine, role=role, force=force, token=given or None
     )
-    _print({"name": granted, "role": args.role, "engine": engine, "config": str(path)})
+    _print({"name": granted, "role": role, "engine": engine, "config": str(path)})
     return 0
 
 
-def cmd_configure(args: argparse.Namespace) -> int:
-    """Set configuration values, so nobody has to know where the files live.
+@cli.group(
+    cls=AliasedGroup,
+    invoke_without_command=False,
+    help="Read and write configuration — use this rather than editing files by hand.",
+)
+@click.option(
+    "--global",
+    "is_global",
+    is_flag=True,
+    help="act on the machine-wide file rather than this project's",
+)
+@click.pass_context
+def config(ctx: click.Context, is_global: bool) -> None:
+    """Read and write configuration, so nobody has to know where the files live.
 
-    The tool owns its own configuration — that is the rule the rest of this module is
-    built on, and hand-editing is how it gets broken. Telling someone to open
-    `~/.config/agent-inbox/config.toml` in an editor asks them to know a path, a
-    format, and which of two files a given key belongs in; `configure` knows all three.
+    The tool owns its configuration, and hand-editing is how that gets broken. Opening
+    `~/.config/agent-inbox/config.toml` in an editor asks someone to know a path, a
+    format, which of two files a given setting belongs in, which engine's entry is
+    theirs, and what permissions a file holding a token needs. This knows all five.
 
-    `--global` writes the machine-wide file, which is where a **shared** token belongs:
-    a credential admits the machine, so repeating it in every project is both work and
-    a wider spill if one leaks. Without the flag it writes the project's file, next to
-    the identity it goes with.
+    `--global` is accepted here or on the verb, because both read naturally and
+    refusing one of them would be a parser's convenience, not a user's.
     """
-    # `configure set key=value` and `configure key=value` both work: `set` reads
-    # naturally and is what people type, but insisting on it would be a trap for anyone
-    # who did not.
-    pairs = list(args.setting)
-    if pairs and pairs[0] == "set":
-        pairs = pairs[1:]
-    if not pairs:
-        print("nothing to set — try `configure set name=…`", file=sys.stderr)
-        return 2
+    ctx.ensure_object(dict)["global"] = is_global
 
+
+def _scope_option(fn: Any) -> Any:
+    return click.option(
+        "--global",
+        "is_global",
+        is_flag=True,
+        help="the machine-wide file (where a shared token belongs) instead of this "
+        "project's",
+    )(click.pass_context(fn))
+
+
+def _machine_wide(ctx: click.Context, is_global: bool) -> bool:
+    """True if either the group or the verb was given ``--global``."""
+    return is_global or bool((ctx.obj or {}).get("global"))
+
+
+@config.command("set")
+@_scope_option
+@click.argument("pairs", nargs=-1, required=True, metavar="NAME VALUE [NAME VALUE ...]")
+def config_set(ctx: click.Context, is_global: bool, pairs: tuple[str, ...]) -> int:
+    """Set one or more settings: `config set name jed_smith`.
+
+    `NAME=VALUE` is accepted too, because that is what anyone who has used a config
+    tool reaches for. Known settings: hub, name, role, token.
+    """
+    is_global = _machine_wide(ctx, is_global)
+    words = list(pairs)
     settings: dict[str, str] = {}
-    for pair in pairs:
-        key, sep, value = pair.partition("=")
-        if not sep or not key.strip():
-            print(f"expected key=value, got {pair!r}", file=sys.stderr)
-            return 2
-        settings[key.strip()] = value.strip()
+    if any("=" in word for word in words):
+        for word in words:
+            key, sep, value = word.partition("=")
+            if not sep or not key.strip():
+                _err(f"expected NAME=VALUE, got {word!r}. Do not mix the two forms.")
+                return 2
+            settings[key.strip()] = value.strip()
+    elif len(words) % 2:
+        _err(f"expected NAME and VALUE in pairs, got {len(words)}: {' '.join(words)!r}")
+        return 2
+    else:
+        settings = dict(zip(words[::2], words[1::2], strict=True))
 
-    known = {"token", "hub", "name", "role"}
-    if unknown := set(settings) - known:
-        print(
+    if unknown := set(settings) - set(KNOWN_SETTINGS):
+        _err(
             f"unknown setting(s): {', '.join(sorted(unknown))}. "
-            f"Known: {', '.join(sorted(known))}.",
-            file=sys.stderr,
+            f"Known: {', '.join(KNOWN_SETTINGS)}."
         )
         return 2
-    if args.is_global and (settings.keys() & {"name", "role"}):
-        # Identity is per project on purpose: the same engine in two repositories is
-        # two correspondents. A machine-wide name would quietly merge them.
-        print(
-            "name and role are per project, not machine-wide — run `configure` "
-            "without --global, or `join` to claim a name.",
-            file=sys.stderr,
+    if is_global and (settings.keys() & set(PROJECT_ONLY)):
+        _err(
+            f"{' and '.join(PROJECT_ONLY)} are per project, not machine-wide — drop "
+            "--global, or run `join` to claim a name."
         )
         return 2
 
     # A name is not ours to simply write down. It has to be claimed on the hub, or the
-    # file would assert an identity we do not hold — and the first message sent under
-    # it would be refused, or worse, land in somebody else's inbox.
+    # file would assert an identity we do not hold — and the first message sent under it
+    # would be refused, or worse, land in somebody else's inbox.
     if name := settings.get("name"):
         hub = load_hub()
         if not hub:
-            print(
+            _err(
                 "no hub known, so a name cannot be claimed. Set one first:\n"
-                "  agent-inbox configure hub=http://<host>:8081",
-                file=sys.stderr,
+                "  agent-inbox config set hub http://<host>:8081"
             )
             return 2
         token = str(load_global().get("token", "")).strip()
         try:
-            granted = HubClient(
-                Config(hub=hub, name=UNNAMED, token=token or None)
-            ).join(name)
+            claimer = HubClient(Config(hub=hub, name=UNNAMED, token=token or None))
+            granted = claimer.join(name)
         except ClientError as exc:
-            print(f"could not claim {name!r}: {exc}", file=sys.stderr)
+            _err(f"could not claim {name!r}: {exc}")
             return 1
         settings["name"] = str(granted.get("preferredUsername", name))
 
-    path = write_global(settings) if args.is_global else write_project(settings)
+    path = write_global(settings) if is_global else write_project(settings)
     shown = {k: ("…" if k == "token" else v) for k, v in settings.items()}
     _print({"wrote": str(path), "set": shown})
     return 0
 
 
-def cmd_whoami(args: argparse.Namespace) -> int:
-    """Who this engine is on this project, and what its role means."""
+@config.command("get")
+@click.argument("name")
+def config_get(name: str) -> int:
+    """Print one setting's effective value, and where it came from."""
+    found = effective_settings()
+    if name not in found:
+        _err(f"{name} is not set. `config list` shows what is.")
+        return 1
+    value, source = found[name]
+    click.echo(value if name != "token" else "…")
+    _err(f"# from {source}")
+    return 0
+
+
+@config.command("list")
+@_scope_option
+def config_list(ctx: click.Context, is_global: bool) -> int:
+    """Show the settings in force, and which file each came from.
+
+    A value can arrive from the environment, this project, or the machine-wide file,
+    and "which one won" is the question people open the files to answer.
+    """
+    if _machine_wide(ctx, is_global):
+        data = load_global()
+        if not data:
+            click.echo(f"nothing set in {global_config_path()}")
+            return 0
+        for key in sorted(data):
+            click.echo(f"{key:8} {'…' if key == 'token' else data[key]}")
+        return 0
+
+    found = effective_settings()
+    if not found:
+        click.echo("nothing configured here — `join` or `config set` to start")
+        return 0
+    width = max(len(k) for k in found)
+    for key in sorted(found):
+        value, source = found[key]
+        click.echo(f"{key:{width}}  {'…' if key == 'token' else value:30}  {source}")
+    return 0
+
+
+@config.command("unset")
+@_scope_option
+@click.argument("name")
+def config_unset(ctx: click.Context, is_global: bool, name: str) -> int:
+    """Remove a setting from this project, or from the machine-wide file."""
+    is_global = _machine_wide(ctx, is_global)
+    removed = unset_global(name) if is_global else unset_project(name)
+    if not removed:
+        _err(f"{name} was not set {'machine-wide' if is_global else 'here'}")
+        return 1
+    click.echo(f"unset {name}")
+    return 0
+
+
+@config.command("path")
+@_scope_option
+def config_path(ctx: click.Context, is_global: bool) -> int:
+    """Print the file this scope writes to, whether or not it exists yet."""
+    if _machine_wide(ctx, is_global):
+        click.echo(str(global_config_path()))
+    else:
+        click.echo(str(find_config() or (project_root() / CONFIG_NAME)))
+    return 0
+
+
+@cli.command()
+@click.option("--role-definition", is_flag=True, help="also fetch what the role means")
+def whoami(role_definition: bool) -> int:
+    """Who this engine is here."""
     config = load_config()
     out: dict[str, Any] = {
         "name": config.name,
@@ -279,22 +475,27 @@ def cmd_whoami(args: argparse.Namespace) -> int:
         "engine": config.engine,
         "hub": config.hub,
     }
-    if args.role_definition:
+    if role_definition:
         out["role_definition"] = HubClient(config).role_definition(config.role)
     _print(out)
     return 0
 
 
-def cmd_role(args: argparse.Namespace) -> int:
-    """What a role means, according to the hub.
+@cli.command()
+@click.argument("name", required=False)
+def role(name: str | None) -> int:
+    """What a role means, according to the hub. Defaults to your own.
 
-    Definitions live on the hub rather than in a prompt page per role. Three separate
-    pages drift out of step with each other and with the code; one source does not, and
+    Definitions live on the hub rather than in a prompt page per role. Separate pages
+    drift out of step with each other and with the code; one source does not, and
     changing what a role means does not mean re-onboarding anyone.
     """
     config = load_config()
-    _print(HubClient(config).role_definition(args.name or config.role))
+    _print(HubClient(config).role_definition(name or config.role))
     return 0
+
+
+# -- diagnosis ---------------------------------------------------------------
 
 
 def _token_help(hub_url: str, name: str, path: Path) -> str:
@@ -302,7 +503,7 @@ def _token_help(hub_url: str, name: str, path: Path) -> str:
 
     An agent cannot fix this alone — minting a token is an operator action behind a
     human login — so the text is written to be handed straight to a human, naming the
-    exact file and key rather than describing them.
+    exact command rather than describing it.
     """
     return (
         "\nThis hub authenticates, and this engine has no device token.\n"
@@ -310,27 +511,31 @@ def _token_help(hub_url: str, name: str, path: Path) -> str:
         f"  1. Sign in to the console for {hub_url}\n"
         "  2. Tokens -> Mint a shared token (it is shown once, with a copy button)\n"
         "  3. Give it to you, and run **one** of:\n\n"
-        "       agent-inbox configure --global token=<token>   # this whole machine\n"
-        "       agent-inbox configure token=<token>            # this project only\n\n"
-        "Do not edit the files by hand: `configure` knows where each setting belongs\n"
+        "       agent-inbox config set --global token <token>   # this whole machine\n"
+        "       agent-inbox config set token <token>            # this project only\n\n"
+        "Do not edit the files by hand: `config` knows where each setting belongs\n"
         f"(machine-wide, or {path}) and writes it readable only by you. A shared\n"
         "token admits the machine, so one is enough however many agents run here.\n"
         "Nothing else needs it — it is sent automatically once it is set."
     )
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
-    """Check the whole path — configuration, reachability, the API, credentials.
+@cli.command()
+@click.option(
+    "--hub", help="hub url to test; taken from the config or the environment if set"
+)
+def doctor(hub: str | None) -> int:
+    """Check config, connectivity, credentials and the API, in that order.
 
-    Four things can be wrong and they look alike from inside an agent: no config, an
-    unreachable hub, a hub that answers but rejects us, and a hub that works but has
-    not been told who we are. `ping` proves only the last of them. This walks the chain
-    in order and stops at the first break, because a later check would only produce a
+    Fix what it reports with `config set`, never by editing files.
+
+    Several things can be wrong and they look alike from inside an agent: no config, an
+    unreachable hub, a hub that answers but rejects us, and a hub that works but has not
+    been told who we are. `ping` proves only the last of them. This walks the chain in
+    order and stops at the first break, because a later check would only produce a
     second, more confusing error about the same cause.
     """
-    ok = "ok  "
-    bad = "FAIL"
-    todo = "--  "
+    ok, bad, todo = "ok  ", "FAIL", "--  "
     where = find_config() or (project_root() / CONFIG_NAME)
 
     # 1. Configuration. Having none is the *normal* state before `join`, not an error:
@@ -343,123 +548,104 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except NotConfigured:
         pass
 
-    hub_url = args.hub or (config.hub if config else "") or load_hub()
+    hub_url = hub or (config.hub if config else "") or load_hub()
     if not hub_url:
-        print(f"{bad} configuration   no hub url", file=sys.stderr, flush=True)
-        print(
-            f"     Nothing here knows where the mailbox is. Run:\n"
-            f"       agent-mailbox join --hub http://<host>:8081\n"
-            f"     and it will write {where} for you.",
-            file=sys.stderr,
+        _err(f"{bad} configuration   no hub url")
+        _err(
+            "     Nothing here knows where the mailbox is. Run:\n"
+            "       agent-inbox join --hub http://<host>:8081\n"
+            f"     and it will write {where} for you."
         )
         return 2
 
     if config is None:
-        print(
-            f"{todo} configuration   no entry for this engine yet ({where})",
-            flush=True,
-        )
-        print(
-            f"{todo} identity        none yet — ask the hub for one below", flush=True
-        )
+        click.echo(f"{todo} configuration   no entry for this engine yet ({where})")
+        click.echo(f"{todo} identity        none yet — ask the hub for one below")
     else:
-        print(f"{ok} configuration   {where}", flush=True)
-        print(
+        click.echo(f"{ok} configuration   {where}")
+        click.echo(
             f"{ok} identity        {config.name} "
-            f"({config.role}, engine {config.engine})",
-            flush=True,
+            f"({config.role}, engine {config.engine})"
         )
 
-    # Two engines sharing a name share an *inbox*, and the symptom is mail that
-    # quietly vanishes — whichever reads first consumes it. The hub cannot see the
-    # mistake, since both sides present the same name and are indistinguishable to it,
-    # so this file is the only place it can be caught. Reported here, but the walk
-    # continues: the engine running now may be working perfectly while another is
-    # having its mail eaten.
+    # Two engines sharing a name share an *inbox*, and the symptom is mail that quietly
+    # vanishes — whichever reads first consumes it. The hub cannot see the mistake,
+    # since both sides present the same name and are indistinguishable to it, so this
+    # file is the only place it can be caught. Reported here, but the walk continues:
+    # the engine running now may be working perfectly while another is having its mail
+    # eaten.
     clashes = duplicate_names()
     for clashing, engines in sorted(clashes.items()):
-        print(
-            f"{bad} unique names    {', '.join(engines)} all claim {clashing!r}",
-            file=sys.stderr,
-        )
+        _err(f"{bad} unique names    {', '.join(engines)} all claim {clashing!r}")
     if clashes:
-        print(
+        _err(
             "     They share one inbox: mail for any of them is taken by whichever\n"
             "     reads first, and is then gone. Give each engine its own name — from\n"
             "     the one that should change, run:\n\n"
-            "       agent-inbox configure set name=<a_new_name>\n\n"
+            "       agent-inbox config set name <a_new_name>\n\n"
             "     or omit the name and let the hub issue one. It is claimed before it\n"
-            f"     is written, so it is really that engine's. File: {where}",
-            file=sys.stderr,
+            f"     is written, so it is really that engine's. File: {where}"
         )
     else:
-        print(f"{ok} unique names    one name per engine", flush=True)
+        click.echo(f"{ok} unique names    one name per engine")
 
     # Without an identity there is still a hub to talk to, and reaching it is the
     # question that matters. UNNAMED never goes over the wire as a claim.
     client = HubClient(config or Config(hub=hub_url, name=UNNAMED))
 
-    # 2. Reachability, which is the network alone — no identity, no credential. A
-    #    failure here is a wrong url or a hub that is down, and saying which of the
-    #    later checks was never reached saves someone chasing a credential problem
-    #    that does not exist.
+    # 2. Reachability, the network alone — no identity, no credential. A failure here is
+    #    a wrong url or a hub that is down, and saying which later checks were never
+    #    reached saves someone chasing a credential problem that does not exist.
     try:
-        hub = client.hub_info()
+        info = client.hub_info()
     except ClientError as exc:
-        print(f"{bad} connectivity    {exc}", file=sys.stderr, flush=True)
-        print(f"     the hub url is {hub_url}", file=sys.stderr)
+        _err(f"{bad} connectivity    {exc}")
+        _err(f"     the hub url is {hub_url}")
         return 1
-    print(
-        f"{ok} connectivity    {hub_url} — {hub.get('name')} {hub.get('version')}",
-        flush=True,
+    click.echo(
+        f"{ok} connectivity    {hub_url} — {info.get('name')} {info.get('version')}"
     )
 
     # 3. The hub's own verdict on us, credential included. Only the hub knows whether
     #    the token we sent was accepted, refused or revoked, and whether it has ever
     #    heard of this name — a client that guessed at those is the thing being
-    #    debugged. The route answers rather than refusing, so it works when nothing
+    #    debugged. That route answers rather than refusing, so it works when nothing
     #    else does; an older hub has no such route, which is not a fault of ours.
     remote: dict[str, Any] = {}
     try:
         remote = client.remote_doctor() or {}
     except ClientError as exc:
-        print(f"{todo} hub check       not available ({exc})", flush=True)
+        click.echo(f"{todo} hub check       not available ({exc})")
 
     you = remote.get("you") or {}
     token_state = str(you.get("token", ""))
-    authenticated = hub.get("authenticated") is True
+    authenticated = info.get("authenticated") is True
     has_token = bool(config.token) if config else False
 
     if token_state in ("rejected", "revoked") or (authenticated and not has_token):
         # Reported before the API call rather than after: that call is about to fail,
         # and this is the reason, stated as something a person can act on.
-        print(
+        _err(
             f"{bad} credentials     "
-            + (f"token {token_state}" if token_state else "no device token"),
-            file=sys.stderr,
+            + (f"token {token_state}" if token_state else "no device token")
         )
         if verdict := remote.get("verdict"):
-            print(f"     the hub says: {verdict}", file=sys.stderr)
-        print(
-            _token_help(hub_url, config.name if config else "<your name>", where),
-            file=sys.stderr,
-        )
+            _err(f"     the hub says: {verdict}")
+        _err(_token_help(hub_url, config.name if config else "<your name>", where))
         return 1
 
     # Say *where* the token came from. A shared token in the machine-wide file is
-    # invisible from inside the project, so "token present" alone leaves someone
-    # hunting through a config that does not contain it.
+    # invisible from inside the project, so "token present" alone leaves someone hunting
+    # through a config that does not contain it.
     source = ""
     if has_token and config is not None:
-        from agent_mailbox.client import global_config_path, load_global
-
         if os.environ.get("AGENT_MAILBOX_TOKEN", "").strip():
             source = " (from AGENT_MAILBOX_TOKEN)"
         elif config.token == str(load_global().get("token", "")).strip():
             source = f" (shared, from {global_config_path()})"
         else:
             source = f" (from {where})"
-    print(
+    click.echo(
         f"{ok} credentials     "
         + (
             f"device token accepted by the hub{source}"
@@ -467,20 +653,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             else f"device token present{source}"
             if has_token
             else "none needed — this hub does not authenticate"
-        ),
-        flush=True,
+        )
     )
     if verdict := remote.get("verdict"):
-        print(f"{ok} hub check       {verdict}", flush=True)
+        click.echo(f"{ok} hub check       {verdict}")
 
-    # Reachable, and nothing is in the way — but we are nobody here yet. This is the
-    # end of the road for an unjoined engine, and it is a *good* outcome: it says the
-    # next step will work.
+    # Reachable, and nothing is in the way — but we are nobody here yet. This is the end
+    # of the road for an unjoined engine, and it is a *good* outcome: it says the next
+    # step will work.
     if config is None:
-        print(f"{todo} api             not joined yet", flush=True)
-        print(
+        click.echo(f"{todo} api             not joined yet")
+        click.echo(
             "\nThe hub is reachable and ready. Ask it for a name:\n\n"
-            f"    agent-mailbox join --hub {hub_url}\n\n"
+            f"    agent-inbox join --hub {hub_url}\n\n"
             "The hub issues the name and settles uniqueness itself, so there is\n"
             "nothing to check first and nothing to retry. Add a name of your own\n"
             "only if you want one — you will be told if it is taken. Either way\n"
@@ -488,27 +673,25 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # 4. The API, as us. Everything above can be right while a real call still fails,
-    #    and only a real call finds that out.
+    # 4. The API, as us. Everything above can be right while a real call still
+    #    fails, and only a real call finds that out.
     try:
         client.ping()
     except ClientError as exc:
-        print(f"{bad} api             {exc}", file=sys.stderr, flush=True)
+        _err(f"{bad} api             {exc}")
         if "auth" in str(exc).lower() or "token" in str(exc).lower():
-            print(_token_help(hub_url, config.name, where), file=sys.stderr)
+            _err(_token_help(hub_url, config.name, where))
         return 1
     waiting = len(client.check_inbox().get("items", []))
-    print(
-        f"{ok} api             ping answered; {waiting} message(s) waiting", flush=True
-    )
+    click.echo(f"{ok} api             ping answered; {waiting} message(s) waiting")
 
-    # A local fault the network checks cannot see, so it decides the exit code even
-    # when everything else answered.
+    # A local fault the network checks cannot see, so it decides the exit code even when
+    # everything else answered.
     if clashes:
         return 1
 
     if not authenticated:
-        print(
+        click.echo(
             "\nNote: this hub does not authenticate. Anyone who can reach it can "
             "claim to be anyone.\nThat is fine on a trusted network and not fine on "
             "the open internet."
@@ -519,270 +702,146 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 # -- mailbox -----------------------------------------------------------------
 
 
-def cmd_ping(args: argparse.Namespace) -> int:
+@cli.command()
+def ping() -> int:
+    """Prove the connection."""
     _print(_client().ping())
     return 0
 
 
-def cmd_inbox(args: argparse.Namespace) -> int:
-    page = _client().check_inbox()
-    items = page.get("items", [])
+@cli.command()
+def inbox() -> int:
+    """What is waiting."""
+    items = _client().check_inbox().get("items", [])
     if not items:
-        print("nothing waiting")
+        click.echo("nothing waiting")
         return 0
     for note in items:
         sender = (note.get("attributedTo") or "").rsplit("/", 1)[-1]
         ident = (note.get("id") or "").rsplit("/", 1)[-1]
-        print(f"{ident}  {sender:20} {note.get('summary') or '(no subject)'}")
+        click.echo(f"{ident}  {sender:20} {note.get('summary') or '(no subject)'}")
     return 0
 
 
-def cmd_send(args: argparse.Namespace) -> int:
-    sent = _client().send_message(args.to, args.body, args.subject)
+@cli.command()
+@click.argument("to")
+@click.argument("body")
+@click.option("-s", "--subject")
+def send(to: str, body: str, subject: str | None) -> int:
+    """Send a message."""
+    sent = _client().send_message(to, body, subject)
     _print({"sent": sent.get("id"), "to": sent.get("to")})
     return 0
 
 
-def cmd_read(args: argparse.Namespace) -> int:
-    note = _client().read_message(args.id)
-    print(f"from    : {(note.get('attributedTo') or '').rsplit('/', 1)[-1]}")
-    print(f"subject : {note.get('summary') or '(none)'}")
-    print()
-    print(note.get("content", ""))
+@cli.command()
+@click.argument("id")
+def read(id: str) -> int:  # noqa: A002 - the argument is named for the user, not us
+    """Read and consume a message."""
+    note = _client().read_message(id)
+    click.echo(f"from    : {(note.get('attributedTo') or '').rsplit('/', 1)[-1]}")
+    click.echo(f"subject : {note.get('summary') or '(none)'}")
+    click.echo()
+    click.echo(note.get("content", ""))
     return 0
 
 
-def cmd_reply(args: argparse.Namespace) -> int:
-    _print(_client().reply_message(args.id, args.body, args.subject))
+@cli.command()
+@click.argument("id")
+@click.argument("body")
+@click.option("-s", "--subject")
+def reply(id: str, body: str, subject: str | None) -> int:  # noqa: A002
+    """Reply to a message."""
+    _print(_client().reply_message(id, body, subject))
     return 0
 
 
-def cmd_agents(args: argparse.Namespace) -> int:
+@cli.command()
+def agents() -> int:
+    """Who is on the hub."""
     for actor in _client().list_agents().get("items", []):
         name = actor.get("preferredUsername", "?")
-        role = (actor.get("profile") or {}).get("role", "")
+        role_name = (actor.get("profile") or {}).get("role", "")
         about = (actor.get("summary") or "").split(".")[0]
-        print(f"{name:24} {role:10} {about[:60]}")
+        click.echo(f"{name:24} {role_name:10} {about[:60]}")
     return 0
 
 
-def cmd_hub(args: argparse.Namespace) -> int:
+@cli.command()
+def hub() -> int:
+    """What this hub is."""
     _print(_client().hub_info())
     return 0
 
 
-def cmd_wake_check(args: argparse.Namespace) -> int:
-    """Run as a Claude Code hook: notice new mail. Fail-silent, fast, announce-once."""
+# -- the wake hook -----------------------------------------------------------
+
+
+@cli.command("wake-check")
+@click.option(
+    "--event",
+    default="SessionStart",
+    help="the hook event: SessionStart, UserPromptSubmit, or Stop",
+)
+def wake_check(event: str) -> int:
+    """Session hook: notice new mail (fail-silent)."""
     from agent_mailbox.wake import run
 
-    return run(args.event)
+    return run(event)
 
 
-def cmd_install_hook(args: argparse.Namespace) -> int:
-    """Install the wake hooks into this project's .claude/settings.json (merging)."""
-    from pathlib import Path
-
+@cli.command("install-hook")
+@click.option("--dir", "directory", help="project dir (default: this repo root)")
+@click.option(
+    "--rewake",
+    is_flag=True,
+    help="also wake a fully idle session (async; needs a live-session check)",
+)
+def install_hook(directory: str | None, rewake: bool) -> int:
+    """Add the wake hooks to .claude/settings.json."""
     from agent_mailbox import hookconfig
-    from agent_mailbox.client import project_root
 
-    root = Path(args.dir) if args.dir else project_root()
-    path = hookconfig.install(root, rewake=args.rewake)
-    extra = " (with async rewake)" if args.rewake else ""
-    print(f"wake hooks installed in {path}{extra}")
-    print("Restart Claude Code so it picks up the hooks.")
+    root = Path(directory) if directory else project_root()
+    path = hookconfig.install(root, rewake=rewake)
+    extra = " (with async rewake)" if rewake else ""
+    click.echo(f"wake hooks installed in {path}{extra}")
+    click.echo("Restart your session so it picks up the hooks.")
     return 0
 
 
-def cmd_uninstall_hook(args: argparse.Namespace) -> int:
-    """Remove exactly our wake hooks from this project's .claude/settings.json."""
-    from pathlib import Path
-
+@cli.command("uninstall-hook")
+@click.option("--dir", "directory", help="project dir (default: this repo root)")
+def uninstall_hook(directory: str | None) -> int:
+    """Remove the wake hooks from .claude/settings.json."""
     from agent_mailbox import hookconfig
-    from agent_mailbox.client import project_root
 
-    root = Path(args.dir) if args.dir else project_root()
-    path = hookconfig.uninstall(root)
-    print(f"wake hooks removed from {path}")
+    root = Path(directory) if directory else project_root()
+    click.echo(f"wake hooks removed from {hookconfig.uninstall(root)}")
     return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="One mailbox tool: MCP server, terminal client, or the hub itself.",
-        epilog=(
-            "WHERE YOU RUN IT MATTERS. Identity is per project, so anything that acts "
-            "as an agent — join, configure, doctor, ping, inbox, send, read, reply, "
-            "agents, whoami, role, hub — reads agent-mailbox.toml from the directory "
-            "you are in, searching upwards and stopping at the repository root. Run "
-            "them inside the project. A shared token may live machine-wide "
-            "(`configure --global token=…`), because a credential admits the machine "
-            "rather than naming an agent.\n\n"
-            "`mcp` is the exception and needs no particular directory: it asks the "
-            "client that launched it for the workspace, falling back to this one, and "
-            "takes which engine it serves from the client's own name. `--project` "
-            "settles it for a client that offers neither.\n\n"
-            "`serve` and `console` are the hub and its window: they are configured by "
-            "the environment (AGENT_MAILBOX_*), not by a project, and run anywhere."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    # Without a subcommand on purpose. The onboarding prompt asks an agent to run this
-    # before installing, to find out whether it already has the tool and whether that
-    # copy is old enough to matter — a question it must be able to ask of a version too
-    # old to know the answer, so it cannot hide behind a subcommand added later.
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    subs = parser.add_subparsers(dest="mode", required=True)
-
-    run = subs.add_parser("mcp", help="run as an MCP server over stdio (for an agent)")
-    run.add_argument(
-        "--project",
-        help="the project this session is working in. Rarely needed: the server asks "
-        "the client for its workspace roots, and falls back to its working directory. "
-        "Use it when a client offers neither.",
-    )
-    run.set_defaults(func=cmd_mcp)
-
-    hub = subs.add_parser("serve", help="run the hub")
-    # A one-shot, and the help says so: left in place it empties the table on every
-    # start, so an operator would enrol, restart for some unrelated reason, and find
-    # themselves a stranger to their own hub.
-    hub.add_argument(
-        "--reset-user-table",
-        action="store_true",
-        help="on this start only: delete all operator accounts and seed a new admin, "
-        "printing its password. Agents' device tokens and all mail are untouched. "
-        "Start once with it, take the password from the log, then remove it.",
-    )
-    hub.set_defaults(func=cmd_serve)
-
-    # Runs on the hub, against its storage — an operator's escape hatch, not a route.
-    reset = subs.add_parser(
-        "reset-admin", help="put an operator account back to first-run (run on the hub)"
-    )
-    reset.add_argument("--username", default="admin", help="which account")
-    reset.set_defaults(func=cmd_reset_admin)
-
-    con = subs.add_parser("console", help="serve the human console in a browser")
-    con.add_argument("--host", default="127.0.0.1", help="bind address")
-    con.add_argument("--port", type=int, default=8090)
-    con.set_defaults(func=cmd_console)
-
-    join = subs.add_parser("join", help="claim a name and configure this engine")
-    join.add_argument(
-        "name", nargs="?", help="the name to claim; omit to be issued one"
-    )
-    join.add_argument("--hub", help="hub url; taken from the config file if present")
-    join.add_argument("--role", default="agent", help="what this engine does here")
-    join.add_argument("--engine", help="override engine detection")
-    join.add_argument("--force", action="store_true", help="replace an existing entry")
-    join.add_argument(
-        "--token",
-        help="a device token minted for this agent; saved to its entry. Not needed "
-        "when a shared token is in the machine-wide config.",
-    )
-    join.set_defaults(func=cmd_join)
-
-    conf = subs.add_parser(
-        "configure",
-        help="set configuration; use this rather than editing files by hand",
-    )
-    conf.add_argument(
-        "--global",
-        dest="is_global",
-        action="store_true",
-        help="write the machine-wide file (where a shared token belongs) instead of "
-        "this project's",
-    )
-    conf.add_argument(
-        "setting",
-        nargs="+",
-        metavar="key=value",
-        help="name=…, role=…, token=… or hub=…. A literal `set` may lead. Changing a "
-        "name claims it on the hub first, so it is really yours.",
-    )
-    conf.set_defaults(func=cmd_configure)
-
-    who = subs.add_parser("whoami", help="who this engine is here")
-    who.add_argument(
-        "--role-definition", action="store_true", help="also fetch what the role means"
-    )
-    who.set_defaults(func=cmd_whoami)
-
-    role = subs.add_parser("role", help="what a role means, according to the hub")
-    role.add_argument("name", nargs="?", help="defaults to your own role")
-    role.set_defaults(func=cmd_role)
-
-    doc = subs.add_parser(
-        "doctor",
-        help="check config, connectivity, credentials and the API in order; "
-        "fix what it reports with `configure`, never by editing files",
-    )
-    doc.add_argument(
-        "--hub", help="hub url to test; taken from the config or the environment if set"
-    )
-    doc.set_defaults(func=cmd_doctor)
-    subs.add_parser("ping", help="prove the connection").set_defaults(func=cmd_ping)
-    subs.add_parser("inbox", help="what is waiting").set_defaults(func=cmd_inbox)
-    subs.add_parser("agents", help="who is on the hub").set_defaults(func=cmd_agents)
-    subs.add_parser("hub", help="what this hub is").set_defaults(func=cmd_hub)
-
-    send = subs.add_parser("send", help="send a message")
-    send.add_argument("to")
-    send.add_argument("body")
-    send.add_argument("-s", "--subject")
-    send.set_defaults(func=cmd_send)
-
-    read = subs.add_parser("read", help="read and consume a message")
-    read.add_argument("id")
-    read.set_defaults(func=cmd_read)
-
-    reply = subs.add_parser("reply", help="reply to a message")
-    reply.add_argument("id")
-    reply.add_argument("body")
-    reply.add_argument("-s", "--subject")
-    reply.set_defaults(func=cmd_reply)
-
-    wake = subs.add_parser(
-        "wake-check", help="Claude Code hook: notice new mail (fail-silent)"
-    )
-    wake.add_argument(
-        "--event",
-        default="SessionStart",
-        help="the hook event: SessionStart, UserPromptSubmit, or Stop",
-    )
-    wake.set_defaults(func=cmd_wake_check)
-
-    inst = subs.add_parser(
-        "install-hook", help="add the wake hooks to .claude/settings.json"
-    )
-    inst.add_argument("--dir", help="project dir (default: this repo root)")
-    inst.add_argument(
-        "--rewake",
-        action="store_true",
-        help="also wake a fully idle session (async; needs a live-session check)",
-    )
-    inst.set_defaults(func=cmd_install_hook)
-
-    uninst = subs.add_parser(
-        "uninstall-hook", help="remove the wake hooks from .claude/settings.json"
-    )
-    uninst.add_argument("--dir", help="project dir (default: this repo root)")
-    uninst.set_defaults(func=cmd_uninstall_hook)
-
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    """Entry point for both console scripts, returning an exit code.
+
+    `standalone_mode=False` so a command's return value reaches us instead of click
+    exiting on our behalf — the container and the tests both want the code, not a raised
+    SystemExit. In that mode click also *returns* the code for `--help` and `--version`
+    rather than raising, which is why there is no branch for them here; the console
+    script turns whatever comes back into the process's exit status.
+    """
     try:
-        return int(args.func(args))
+        return int(cli.main(args=argv, standalone_mode=False) or 0)
+    except click.ClickException as exc:  # usage errors, unknown commands
+        exc.show()
+        return exc.exit_code
+    except click.Abort:  # pragma: no cover - interrupted at a prompt
+        _err("aborted")
+        return 1
     except NotConfigured as exc:
-        print(exc, file=sys.stderr)
+        _err(str(exc))
         return 2
     except ClientError as exc:
-        print(exc, file=sys.stderr)
+        _err(str(exc))
         return 1
 
 

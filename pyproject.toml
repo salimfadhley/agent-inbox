@@ -36,6 +36,10 @@ classifiers = [
 ]
 dependencies = [
     "aiosqlite>=0.20",
+    # The CLI's parser. One pure-Python package (colorama on Windows is its only
+    # requirement), and a base dependency rather than a client-only one because the
+    # hub's own entry point runs through cli.py.
+    "click>=8.1",
     "argon2-cffi>=23.1",
     "cryptography>=43",
     "litestar>=2.24.0",
@@ -51,7 +55,6 @@ dependencies = [
 clients = [
     "mcp[cli]>=1.12",
     "httpx>=0.27",
-    "click>=8.1",
 ]
 # Vestigial. The console renders its own HTML and reaches the hub over urllib, so it
 # needs nothing here — which is why the image, which carries no extras, can run it.

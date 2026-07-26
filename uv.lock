@@ -16,6 +16,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "argon2-cffi" },
+    { name = "click" },
     { name = "cryptography" },
     { name = "litestar" },
     { name = "msgspec" },
@@ -26,7 +27,6 @@ dependencies = [
 
 [package.optional-dependencies]
 clients = [
-    { name = "click" },
     { name = "httpx" },
     { name = "mcp", extra = ["cli"] },
 ]
@@ -49,7 +49,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "argon2-cffi", specifier = ">=23.1" },
-    { name = "click", marker = "extra == 'clients'", specifier = ">=8.1" },
+    { name = "click", specifier = ">=8.1" },
     { name = "cryptography", specifier = ">=43" },
     { name = "httpx", marker = "extra == 'clients'", specifier = ">=0.27" },
     { name = "jinja2", marker = "extra == 'ui'", specifier = ">=3.1" },

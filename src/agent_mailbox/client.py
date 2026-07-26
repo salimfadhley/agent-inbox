@@ -95,6 +95,94 @@ def write_project(
     return _render_project(path, hub, entries)
 
 
+def unset_global(name: str, env: dict[str, str] | None = None) -> bool:
+    """Remove one machine-wide setting. True if it was there."""
+    data = load_global(env)
+    if name not in data:
+        return False
+    del data[name]
+    path = global_config_path(env)
+    lines = [
+        "# agent-inbox — machine-wide settings, written by `agent-inbox config`.",
+        "# A shared token belongs here: it admits this machine, whatever project an",
+        "# agent is working in. Identity stays per project, in agent-mailbox.toml.",
+        "",
+        *(f"{key} = {_toml_str(str(value))}" for key, value in sorted(data.items())),
+        "",
+    ]
+    path.write_text("\n".join(lines))
+    path.chmod(0o600)
+    return True
+
+
+def unset_project(
+    name: str, start: Path | None = None, env: dict[str, str] | None = None
+) -> bool:
+    """Remove one setting from this engine's entry. True if it was there."""
+    environ = env if env is not None else dict(os.environ)
+    engine = detect_engine(environ) or "default"
+    path = find_config(start)
+    if path is None or not path.is_file():
+        return False
+    data = tomllib.loads(path.read_text())
+    if name == "hub":
+        if not data.get("hub"):
+            return False
+        _render_project(path, "", dict(data.get("agents") or {}))
+        return True
+    entries = dict(data.get("agents") or {})
+    mine = dict(entries.get(engine) or {})
+    if name not in mine:
+        return False
+    del mine[name]
+    entries[engine] = mine
+    _render_project(path, str(data.get("hub") or ""), entries)
+    return True
+
+
+def effective_settings(
+    start: Path | None = None, env: dict[str, str] | None = None
+) -> dict[str, tuple[str, str]]:
+    """Every setting in force, mapped to ``(value, where it came from)``.
+
+    The point of `config list`: a value can arrive from the environment, this project,
+    or the machine-wide file, and "which one won" is the question people open the files
+    to answer. Answering it here is what keeps them shut.
+    """
+    environ = env if env is not None else dict(os.environ)
+    engine = detect_engine(environ)
+    found: dict[str, tuple[str, str]] = {}
+
+    shared = load_global(environ)
+    for key in ("hub", "token"):
+        if value := str(shared.get(key, "")).strip():
+            found[key] = (value, str(global_config_path(environ)))
+
+    path = find_config(start)
+    if path is not None:
+        data = tomllib.loads(path.read_text())
+        if hub := str(data.get("hub", "")).strip():
+            found["hub"] = (hub, str(path))
+        entries = data.get("agents") or {}
+        mine = entries.get(engine) if engine else None
+        if mine is None and len(entries) == 1 and not engine:
+            mine = next(iter(entries.values()))
+        if isinstance(mine, dict):
+            for key in ("name", "role", "token"):
+                if value := str(mine.get(key, "")).strip():
+                    found[key] = (value, str(path))
+
+    for key, var in (
+        ("hub", "AGENT_MAILBOX_HUB"),
+        ("name", "AGENT_MAILBOX_NAME"),
+        ("role", "AGENT_MAILBOX_ROLE"),
+        ("token", "AGENT_MAILBOX_TOKEN"),
+    ):
+        if value := environ.get(var, "").strip():
+            found[key] = (value, var)
+    return found
+
+
 def load_global(env: dict[str, str] | None = None) -> dict[str, Any]:
     """The machine-wide file, or an empty mapping. Never raises for absence."""
     path = global_config_path(env)
