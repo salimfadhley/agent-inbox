@@ -921,3 +921,21 @@ def test_the_config_filename_is_left_alone(console: TestClient) -> None:
     Renaming it in prose only would send agents looking for a file that is not there.
     """
     assert "agent-mailbox.toml" in console.get("/prompts/agent").text
+
+
+def test_a_failed_install_routes_to_doctor_rather_than_reading_as_fatal(
+    console: TestClient,
+) -> None:
+    """Reported by an agent that hit it: step 1 failed and it nearly stopped there.
+
+    The hub and the package are released together but published by separate jobs, so
+    for a few minutes after an upgrade the hub advertises a version the index has not
+    caught up with. The prompt's own framing — that an old client is "missing whatever
+    was added since" — primes a reader to distrust its client at exactly that moment,
+    before `doctor` has told it anything. So the floor must read as advisory, and the
+    failure must point at the check that actually knows.
+    """
+    # Newline-tolerant: the prompt is hard-wrapped, so phrases straddle lines.
+    text = " ".join(console.get("/prompts/agent").text.split())
+    assert "do not conclude your mail is broken" in text
+    assert "Run `agent-inbox doctor`" in text.split("If the install fails")[1][:400]
