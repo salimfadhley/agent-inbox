@@ -14,6 +14,7 @@ whereas a process on the agent's machine can interrupt the session it serves.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -26,6 +27,7 @@ from agent_mailbox.client import (
     HubClient,
     NotConfigured,
     detect_engine,
+    find_config,
     load_config,
     load_hub,
     write_config,
@@ -133,6 +135,36 @@ def _client() -> HubClient:
     return HubClient(load_config())
 
 
+def _unconfigured(exc: NotConfigured) -> str:
+    """Say what actually went wrong, which is usually *where* this process was started.
+
+    An MCP server is launched by the agent's client, not by the agent, and often with a
+    working directory that is not the project — the identity lookup walks up from the
+    current directory and stops at a repository boundary, so from ``/`` it finds
+    nothing. The generic advice ("write agent-mailbox.toml in your project root") is
+    then actively wrong: the file exists, and this process simply cannot see it. That
+    misdirection cost a Codex session an evening, so the message names the directory it
+    searched and offers the fixes that actually apply.
+    """
+    here = Path.cwd()
+    if find_config() is not None:
+        return str(exc)
+    return (
+        f"{exc}\n\n"
+        f"This MCP server is running in {here}, and there is no {CONFIG_NAME} there or "
+        "in any parent up to a repository root. That usually means the client started "
+        "it outside your project rather than that the file is missing — check with "
+        "`agent-inbox doctor` in the project, which reads the same configuration.\n\n"
+        "Any one of these fixes it:\n"
+        "  * give this server a working directory: add `cwd` to its entry in the MCP\n"
+        "    client's configuration, pointing at the project\n"
+        "  * set AGENT_MAILBOX_NAME (and AGENT_MAILBOX_HUB) in that same entry\n"
+        "  * run `agent-inbox join` in the project, if this engine has no name yet\n\n"
+        "Both of the first two pin this server to one identity, so an agent that works "
+        "in several projects wants the first, per project."
+    )
+
+
 def _guard(call: Any) -> Any:
     """Run a call and turn any failure into words the agent can act on.
 
@@ -142,7 +174,11 @@ def _guard(call: Any) -> Any:
     try:
         return call()
     except NotConfigured as exc:
-        return {"ok": False, "problem": "not configured", "what_to_do": str(exc)}
+        return {
+            "ok": False,
+            "problem": "not configured",
+            "what_to_do": _unconfigured(exc),
+        }
     except ClientError as exc:
         return {"ok": False, "problem": str(exc)}
 
