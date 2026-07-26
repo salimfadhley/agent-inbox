@@ -166,6 +166,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/static/icon.svg">
 <title>{html.escape(title)} — {name}</title><style>{STYLE}</style></head>
 <body>
 <h1><a href="/">{name}</a></h1>
@@ -423,9 +424,10 @@ def build_console(client: HubClient) -> Litestar:
                     html.escape(str(a.get("type", ""))),
                     html.escape((a.get("summary") or "")[:80]),
                     f'<span class="dim">{facts}</span>',
+                    f'<a href="/tokens/{html.escape(name)}">Tokens</a>',
                 ]
             )
-        body = _table(["Who", "Type", "About", "Profile"], rows, "Nobody yet.")
+        body = _table(["Who", "Type", "About", "Profile", ""], rows, "Nobody yet.")
         return Response(
             _page("Agents", body, hub, "/agents"), media_type=MediaType.HTML
         )
@@ -612,6 +614,148 @@ def build_console(client: HubClient) -> Litestar:
             '<p><a href="/compose">Write another</a> · <a href="/inbox">Inbox</a></p>'
         )
 
+    # -- device tokens -----------------------------------------------------
+
+    def _token_instructions(name: str, secret: str) -> str:
+        """What to do with a token, shown at the only moment it is visible.
+
+        The hub stores a hash, so this is the one and only time anyone can read it.
+        Anything the agent needs must therefore be on this page, in a form that can be
+        pasted — not a description of the file, but the command that writes it.
+        """
+        return (
+            '<div class="warn"><p><strong>Copy it now.</strong> The hub keeps only a '
+            "hash, so this is the only time it can be read. If it is lost, mint "
+            "another and revoke this one.</p>"
+            f"<p><code>{html.escape(secret)}</code></p></div>"
+            "<p>Give it to the agent and have it run:</p>"
+            f"<pre>agent-mailbox join {html.escape(name)} --token {html.escape(secret)}"
+            "</pre>"
+            "<p>That writes the token into <code>agent-mailbox.toml</code> in the "
+            "agent's project root, under its own engine's entry, and it is sent "
+            "automatically from then on. <code>agent-mailbox doctor</code> confirms "
+            "it works.</p>"
+        )
+
+    def _tokens_page(request: Request, name: str, extra: str = "") -> Response:
+        """List an agent's device tokens, and offer to mint another.
+
+        Operator-only, and the console holds none of that judgement itself — it relays
+        the human's session inward and reports whatever the hub decides.
+        """
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call(
+            "GET", f"/auth/agents/{name}/tokens", session=sid
+        )
+        if status in (401, 403):
+            page = (
+                f"<p>Minting a token for <code>{html.escape(name)}</code> is an "
+                "operator action. <a href='/login'>Sign in</a> first.</p>"
+            )
+            return Response(
+                _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
+            )
+        if status >= 400:
+            detail = (body or {}).get("detail", "the hub refused")
+            hint = (
+                "<p class='dim'>This hub has authentication turned off, so device "
+                "tokens do nothing here. Set <code>AGENT_MAILBOX_AUTH_MODE</code> to "
+                "<code>warn</code> or <code>enforce</code> to use them.</p>"
+                if (hub or {}).get("authenticated") is False
+                else ""
+            )
+            page = f"<p>{html.escape(str(detail))}</p>{hint}"
+            return Response(
+                _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
+            )
+
+        safe = html.escape(name)
+
+        def actions(t: dict[str, Any]) -> str:
+            if t.get("revoked"):
+                return '<span class="dim">revoked</span>'
+            tid = html.escape(str(t.get("id", "")))
+            return (
+                f'<form method="post" action="/tokens/{safe}/revoke">'
+                f'<input type="hidden" name="id" value="{tid}">'
+                "<button type='submit'>Revoke</button></form>"
+            )
+
+        rows = [
+            [
+                f"<code>{html.escape(str(t.get('id', '')))}</code>",
+                html.escape(str(t.get("label") or "")),
+                f'<span class="dim">{_shortdate(str(t.get("created") or ""))}</span>',
+                '<span class="dim">'
+                f"{_shortdate(str(t.get('lastUsed') or '')) or 'never'}</span>",
+                actions(t),
+            ]
+            for t in (body or {}).get("items", [])
+        ]
+        page = (
+            f"<h2>Device tokens for <code>{safe}</code></h2>"
+            f"{extra}"
+            + _table(
+                ["Id", "Label", "Created", "Last used", ""],
+                rows,
+                "No tokens. This agent cannot authenticate yet.",
+            )
+            + "<h2>Mint a token</h2>"
+            f'<form method="post" action="/tokens/{safe}/mint">'
+            "<label>Label (what machine or session is this for?)</label>"
+            '<input type="text" name="label" placeholder="laptop, ci, …">'
+            "<p style='margin-top:.6rem'><button type='submit'>Mint</button></p>"
+            "</form>"
+        )
+        return Response(
+            _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
+        )
+
+    @get("/tokens/{name:str}", media_type=MediaType.HTML, sync_to_thread=True)
+    def tokens(name: str, request: Request) -> Response:
+        return _tokens_page(request, name)
+
+    @post("/tokens/{name:str}/mint", status_code=200, sync_to_thread=True)
+    def mint(name: str, request: Request, data: Form) -> Response:
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call(
+            "POST",
+            f"/auth/agents/{name}/tokens",
+            {"label": str(data.get("label", ""))},
+            session=sid,
+        )
+        if status not in (200, 201):
+            detail = (body or {}).get("detail", "the hub refused to mint a token")
+            return Response(
+                _page(
+                    "Tokens",
+                    f"<p>{html.escape(str(detail))}</p>"
+                    f"<p><a href='/tokens/{html.escape(name)}'>Back</a></p>",
+                    hub,
+                    "/agents",
+                ),
+                media_type=MediaType.HTML,
+            )
+        return _tokens_page(
+            request, name, _token_instructions(name, str((body or {}).get("token", "")))
+        )
+
+    @post("/tokens/{name:str}/revoke", status_code=200, sync_to_thread=True)
+    def revoke(name: str, request: Request, data: Form) -> Response:
+        sid = request.cookies.get(SESSION_COOKIE)
+        token_id = str(data.get("id", ""))
+        status, body, _ = client.auth_call(
+            "DELETE", f"/auth/agents/{name}/tokens/{token_id}", session=sid
+        )
+        note = (
+            "<p>Revoked. Any agent still using it is now locked out.</p>"
+            if status in (200, 204)
+            else f"<p>{html.escape(str((body or {}).get('detail', 'failed')))}</p>"
+        )
+        return _tokens_page(request, name, note)
+
     # -- the prompt --------------------------------------------------------
 
     @get("/prompts", media_type=MediaType.HTML, sync_to_thread=True)
@@ -701,6 +845,7 @@ def build_console(client: HubClient) -> Litestar:
         allowed = {
             "vis-network.min.js": "application/javascript",
             "console.js": "application/javascript",
+            "icon.svg": "image/svg+xml",
         }
         media = allowed.get(name)
         if media is None:
@@ -982,6 +1127,9 @@ def build_console(client: HubClient) -> Litestar:
             do_read,
             compose_form,
             do_compose,
+            tokens,
+            mint,
+            revoke,
             prompts,
             prompt_for_role,
             prompt_text,

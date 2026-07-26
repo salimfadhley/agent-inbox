@@ -40,6 +40,7 @@ class StubHub(HubClient):
     def __init__(self, hub: str = HUB, name: str = "console") -> None:
         super().__init__(Config(hub=hub, name=name))
         self.calls: list[str] = []
+        self.tokens: list[dict[str, Any]] = []
 
     def hub_info(self) -> dict[str, Any]:
         return {
@@ -151,6 +152,31 @@ class StubHub(HubClient):
             return 200, {"next": "ok"}, None
         if path == "/auth/change-password":
             return 200, {"next": "ok"}, None
+        # Device tokens: operator-only on the hub, so the stub refuses without a
+        # session exactly as the hub does — that is the property the console must
+        # relay rather than decide for itself.
+        if path.endswith("/tokens") and method == "GET":
+            if not session:
+                return 401, {"detail": "log in as an operator"}, None
+            return 200, {"items": list(self.tokens)}, None
+        if path.endswith("/tokens") and method == "POST":
+            if not session:
+                return 401, {"detail": "log in as an operator"}, None
+            minted = {
+                "id": "tok1",
+                "token": "secret-shown-once",
+                "actor": path.split("/")[-2],
+            }
+            self.tokens.append(
+                {"id": "tok1", "label": (body or {}).get("label", ""), "created": ""}
+            )
+            return 201, minted, None
+        if "/tokens/" in path and method == "DELETE":
+            if not session:
+                return 401, {"detail": "log in as an operator"}, None
+            for t in self.tokens:
+                t["revoked"] = True
+            return 204, None, None
         return 404, {"detail": "no"}, None
 
 
@@ -164,6 +190,55 @@ def console() -> Iterator[TestClient]:
     client, _ = make()
     with client as c:
         yield c
+
+
+# -- device tokens ---------------------------------------------------------
+
+
+def test_minting_a_token_requires_an_operator_session(console: TestClient) -> None:
+    """The console decides nothing here — it relays and reports what the hub says.
+
+    Minting is an operator action behind a human login. The console must not invent
+    its own answer, in either direction: no session means the hub's refusal is shown
+    and the reader is sent to sign in.
+    """
+    got = console.get("/tokens/rosemary_nasrin")
+    assert got.status_code == 200
+    assert "operator action" in got.text
+    assert "/login" in got.text
+
+
+def test_a_minted_token_is_shown_once_with_what_to_do_with_it(
+    console: TestClient,
+) -> None:
+    """The hub stores only a hash, so this page is the single chance to read it.
+
+    Anything the agent needs must therefore be here and pasteable — the command that
+    installs it, not a description of the file it goes in.
+    """
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    got = console.post("/tokens/rosemary_nasrin/mint", data={"label": "laptop"})
+    assert got.status_code == 200
+    assert "secret-shown-once" in got.text
+    assert "only time it can be read" in got.text
+    assert "agent-mailbox join rosemary_nasrin --token secret-shown-once" in got.text
+    # and it now appears in the list, so the page reflects the mint that just happened
+    assert "laptop" in got.text
+
+
+def test_a_token_can_be_revoked_from_the_same_page(console: TestClient) -> None:
+    """A token you cannot revoke is worse than no token — this is the whole point."""
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    console.post("/tokens/rosemary_nasrin/mint", data={"label": "laptop"})
+    got = console.post("/tokens/rosemary_nasrin/revoke", data={"id": "tok1"})
+    assert got.status_code == 200
+    assert "Revoked" in got.text
+    assert "locked out" in got.text
+
+
+def test_the_agents_table_links_to_each_agent_s_tokens(console: TestClient) -> None:
+    """Discoverability: the feature existed in the API and nowhere a human could see."""
+    assert "/tokens/rosemary_nasrin" in console.get("/agents").text
 
 
 # -- the prompt ------------------------------------------------------------

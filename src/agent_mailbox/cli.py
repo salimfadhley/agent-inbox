@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from agent_mailbox import __version__
@@ -29,8 +30,10 @@ from agent_mailbox.client import (
     HubClient,
     NotConfigured,
     detect_engine,
+    find_config,
     load_config,
     load_hub,
+    project_root,
     write_config,
 )
 
@@ -140,6 +143,143 @@ def cmd_role(args: argparse.Namespace) -> int:
     """
     config = load_config()
     _print(HubClient(config).role_definition(args.name or config.role))
+    return 0
+
+
+def _token_help(hub_url: str, name: str, path: Path) -> str:
+    """What to do about a missing device token, in the order someone can act on it.
+
+    An agent cannot fix this alone — minting a token is an operator action behind a
+    human login — so the text is written to be handed straight to a human, naming the
+    exact file and key rather than describing them.
+    """
+    return (
+        "\nThis hub authenticates, and this engine has no device token.\n"
+        "A token is issued by a human operator, so ask yours to:\n\n"
+        f"  1. Sign in to the console for {hub_url}\n"
+        f"  2. Agents -> {name} -> Tokens -> Mint a token (it is shown once)\n"
+        f"  3. Give it to you, and run:  agent-mailbox join {name} --token <token>\n\n"
+        f"That writes it to {path}, under this engine's entry:\n\n"
+        f'    [agents.<engine>]\n    name = "{name}"\n    token = "<token>"\n\n'
+        "Do not commit that file. Nothing else needs the token — it is sent\n"
+        "automatically on every call once it is there."
+    )
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check the whole path — configuration, reachability, the API, credentials.
+
+    Four things can be wrong and they look alike from inside an agent: no config, an
+    unreachable hub, a hub that answers but rejects us, and a hub that works but has
+    not been told who we are. `ping` proves only the last of them. This walks the chain
+    in order and stops at the first break, because a later check would only produce a
+    second, more confusing error about the same cause.
+    """
+    ok = "ok  "
+    bad = "FAIL"
+    todo = "--  "
+    where = find_config() or (project_root() / CONFIG_NAME)
+
+    # 1. Configuration. Having none is the *normal* state before `join`, not an error:
+    #    doctor is meant to be run first, to find out whether joining is even worth
+    #    attempting. So a missing identity does not stop the connectivity check — that
+    #    is the one an agent most needs answered before it asks for a name.
+    config: Config | None = None
+    try:
+        config = load_config()
+    except NotConfigured:
+        pass
+
+    hub_url = args.hub or (config.hub if config else "") or load_hub()
+    if not hub_url:
+        print(f"{bad} configuration   no hub url", file=sys.stderr)
+        print(
+            f"     Nothing here knows where the mailbox is. Run:\n"
+            f"       agent-mailbox join --hub http://<host>:8081\n"
+            f"     and it will write {where} for you.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if config is None:
+        print(f"{todo} configuration   no entry for this engine yet ({where})")
+        print(f"{todo} identity        none yet — ask the hub for one below")
+    else:
+        print(f"{ok} configuration   {where}")
+        print(
+            f"{ok} identity        {config.name} "
+            f"({config.role}, engine {config.engine})"
+        )
+
+    # Without an identity there is still a hub to talk to, and reaching it is the
+    # question that matters. UNNAMED never goes over the wire as a claim.
+    client = HubClient(config or Config(hub=hub_url, name=UNNAMED))
+
+    # 2. Reachability, which is the network alone — no identity, no credential. A
+    #    failure here is a wrong url or a hub that is down, and saying which of the
+    #    later checks was never reached saves someone chasing a credential problem
+    #    that does not exist.
+    try:
+        hub = client.hub_info()
+    except ClientError as exc:
+        print(f"{bad} connectivity    {exc}", file=sys.stderr)
+        print(f"     the hub url is {hub_url}", file=sys.stderr)
+        return 1
+    print(f"{ok} connectivity    {hub_url} — {hub.get('name')} {hub.get('version')}")
+
+    authenticated = hub.get("authenticated") is True
+    has_token = bool(config.token) if config else False
+    if authenticated and not has_token:
+        # Reported before the API call rather than after: the call is about to fail,
+        # and this is the reason, stated as something a person can act on.
+        print(f"{bad} credentials     no device token", file=sys.stderr)
+        print(
+            _token_help(hub_url, config.name if config else "<your name>", where),
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"{ok} credentials     "
+        + (
+            "device token present"
+            if has_token
+            else "none needed — this hub does not authenticate"
+        )
+    )
+
+    # Reachable, and nothing is in the way — but we are nobody here yet. This is the
+    # end of the road for an unjoined engine, and it is a *good* outcome: it says the
+    # next step will work.
+    if config is None:
+        print(f"{todo} api             not joined yet")
+        print(
+            "\nThe hub is reachable and ready. Ask it for a name:\n\n"
+            f"    agent-mailbox join --hub {hub_url}\n\n"
+            "The hub issues the name and settles uniqueness itself, so there is\n"
+            "nothing to check first and nothing to retry. Add a name of your own\n"
+            "only if you want one — you will be told if it is taken. Either way\n"
+            f"{where} is written for you; there is no second step."
+        )
+        return 2
+
+    # 3. The API, as us. Everything above can be right while the hub still refuses or
+    #    has never heard of this name, and only a real call finds that out.
+    try:
+        client.ping()
+    except ClientError as exc:
+        print(f"{bad} api             {exc}", file=sys.stderr)
+        if "auth" in str(exc).lower() or "token" in str(exc).lower():
+            print(_token_help(hub_url, config.name, where), file=sys.stderr)
+        return 1
+    waiting = len(client.check_inbox().get("items", []))
+    print(f"{ok} api             ping answered; {waiting} message(s) waiting")
+
+    if not authenticated:
+        print(
+            "\nNote: this hub does not authenticate. Anyone who can reach it can "
+            "claim to be anyone.\nThat is fine on a trusted network and not fine on "
+            "the open internet."
+        )
     return 0
 
 
@@ -278,6 +418,13 @@ def build_parser() -> argparse.ArgumentParser:
     role.add_argument("name", nargs="?", help="defaults to your own role")
     role.set_defaults(func=cmd_role)
 
+    doc = subs.add_parser(
+        "doctor", help="check config, connectivity, credentials and the API in order"
+    )
+    doc.add_argument(
+        "--hub", help="hub url to test; taken from the config or the environment if set"
+    )
+    doc.set_defaults(func=cmd_doctor)
     subs.add_parser("ping", help="prove the connection").set_defaults(func=cmd_ping)
     subs.add_parser("inbox", help="what is waiting").set_defaults(func=cmd_inbox)
     subs.add_parser("agents", help="who is on the hub").set_defaults(func=cmd_agents)

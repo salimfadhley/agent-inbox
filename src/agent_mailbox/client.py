@@ -271,9 +271,10 @@ def write_config(
     agents[engine] = entry
 
     lines = [
-        "# agent-mailbox — where the mailbox is, and who each agent here is on it.",
-        "# Written by `join`, one entry per engine. Safe to edit; safe to commit",
-        "# unless the hub url or a token is private to your deployment.",
+        "# agent-inbox — where the mailbox is, and who each agent here is on it.",
+        "# Written by `join`, one entry per engine. Do not commit it: it names a",
+        "# deployment and may carry a device token. Do not hand-edit it either —",
+        "# `join` again (with --force to replace an entry) and run `doctor`.",
         "",
         f"hub = {_toml_str(str(existing.get('hub') or hub))}",
         "",
