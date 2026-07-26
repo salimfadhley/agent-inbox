@@ -339,6 +339,27 @@ def build_console(client: HubClient) -> Litestar:
         that is the hub's call, and this only decides how to report a refusal."""
         return bool(request.cookies.get(SESSION_COOKIE))
 
+    def acting_for(request: Request) -> tuple[HubClient, str]:
+        """The client and name to *act* as — the signed-in operator, or the console.
+
+        Observation borrows the operator's session; acting has to go further and use
+        their **name**, because the hub resolves a session to that human and every
+        mailbox route checks the path against the caller. Reading `/actors/console/…`
+        with an admin's session is refused, which is what left Inbox and Compose broken
+        on an authenticating hub even after the session was being forwarded.
+
+        With no session — an open hub — nothing changes: the console acts as itself,
+        the ordinary agent it joined as.
+        """
+        session = request.cookies.get(SESSION_COOKIE)
+        if not session:
+            return client, client.config.name
+        borrowed = client.with_session(session)
+        who = borrowed.whoami()
+        if not who:
+            return borrowed, client.config.name
+        return borrowed.acting_as(who, session), who
+
     def seen_by(request: Request) -> HubClient:
         """The hub client to use for one request, carrying the operator's session.
 
@@ -575,9 +596,9 @@ def build_console(client: HubClient) -> Litestar:
         and marks messages read exactly as any agent would.
         """
         hub = hub_or_none()
-        me = client.config.name
+        acting, me = acting_for(request)
         try:
-            items = client.check_inbox().get("items", [])
+            items = acting.check_inbox().get("items", [])
         except ClientError as exc:
             return _err(exc, hub, "Inbox", signed_in=_signed_in(request))
         rows = []
@@ -603,11 +624,11 @@ def build_console(client: HubClient) -> Litestar:
         return Response(_page("Inbox", body, hub, "/inbox"), media_type=MediaType.HTML)
 
     @post("/inbox/read", sync_to_thread=True)
-    def do_read(data: Form) -> Redirect:
+    def do_read(request: Request, data: Form) -> Redirect:
         oid = str(data.get("id", "")).strip()
         if oid:
             try:
-                client.read_message(oid)
+                acting_for(request)[0].read_message(oid)
             except ClientError:
                 pass  # the inbox will simply still show it; no page to break
         return Redirect("/inbox")
@@ -615,7 +636,7 @@ def build_console(client: HubClient) -> Litestar:
     @get("/compose", media_type=MediaType.HTML, sync_to_thread=True)
     def compose_form(request: Request) -> Response:
         hub = hub_or_none()
-        me = html.escape(client.config.name)
+        me = html.escape(acting_for(request)[1])
         sent = ""  # populated by the redirect target below via query, kept simple
         body = (
             f"<h2>Send a message as <code>{me}</code></h2>"
@@ -656,7 +677,7 @@ def build_console(client: HubClient) -> Litestar:
                 media_type=MediaType.HTML,
             )
         try:
-            client.send_message(recipients, body_text, subject=subject)
+            acting_for(request)[0].send_message(recipients, body_text, subject=subject)
         except ClientError as exc:
             return _err(exc, hub, "Compose", signed_in=_signed_in(request))
         done = (

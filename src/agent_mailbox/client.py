@@ -354,6 +354,37 @@ class HubClient:
         #: A human operator's session, borrowed for the length of one request.
         self.session = session
 
+    def acting_as(self, name: str, session: str | None = None) -> HubClient:
+        """The same client, acting under a different name.
+
+        The console needs this once a hub authenticates: a signed-in operator is their
+        own correspondent, not the console process. Reading "the console's inbox" while
+        logged in as somebody else showed the wrong mailbox at best, and was refused at
+        worst — the hub resolves a session to *that human*, and the path has to agree.
+        """
+        return HubClient(
+            Config(
+                hub=self.config.hub,
+                name=name,
+                role=self.config.role,
+                engine=self.config.engine,
+                token=self.config.token,
+            ),
+            self.timeout,
+            session=session or self.session,
+        )
+
+    def whoami(self) -> str | None:
+        """Who the hub says we are, given whatever credential we carry.
+
+        Asked of `/doctor`, which answers rather than refusing, so this works for a
+        caller whose credential is missing as well as one whose credential is good.
+        """
+        try:
+            return (self.remote_doctor() or {}).get("you", {}).get("verified")
+        except ClientError:
+            return None
+
     def with_session(self, session: str | None) -> HubClient:
         """The same client, acting with a human's session attached.
 

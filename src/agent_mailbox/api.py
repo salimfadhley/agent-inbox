@@ -467,10 +467,15 @@ def build_api(
 
         token_state = "not presented"
         verified: str | None = None
-        if request.headers.get("Authorization", "").lower().startswith("bearer "):
+        # Resolve whatever credential arrived — a bearer token *or* a session cookie.
+        # Only asking about the token left `verified` empty for a signed-in human,
+        # which is how the console came to act as itself rather than as the operator.
+        bearer = request.headers.get("Authorization", "").lower().startswith("bearer ")
+        if bearer or request.cookies.get(SESSION_COOKIE):
             try:
                 verified = await resolve_verified_caller(request)
-                token_state = "accepted" if verified else "rejected"
+                if bearer:
+                    token_state = "accepted" if verified else "rejected"
             except AuthError:
                 # A revoked token raises. That is an answer worth giving precisely,
                 # since "revoked" and "wrong" call for different actions.

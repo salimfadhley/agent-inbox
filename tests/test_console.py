@@ -41,6 +41,9 @@ class StubHub(HubClient):
         super().__init__(Config(hub=hub, name=name))
         self.calls: list[str] = []
         self.tokens: list[dict[str, Any]] = []
+        #: Who the hub says a session belongs to, when a test wants one.
+        self.operator: str | None = None
+        self.acting: str | None = None
 
     def hub_info(self) -> dict[str, Any]:
         return {
@@ -49,6 +52,18 @@ class StubHub(HubClient):
             "version": "1.2.3",
             "authenticated": False,
         }
+
+    # The console derives a per-request client from these. The stub stays itself, so
+    # its canned answers are used instead of a real socket.
+    def with_session(self, session: str | None) -> HubClient:
+        return self
+
+    def acting_as(self, name: str, session: str | None = None) -> HubClient:
+        self.acting = name
+        return self
+
+    def whoami(self) -> str | None:
+        return self.operator
 
     def join(self, name: str | None = None) -> dict[str, Any]:
         self.calls.append("join")
@@ -832,3 +847,26 @@ def test_a_signed_in_operator_is_not_bounced_to_a_login_they_already_passed() ->
     with client2 as c:
         got = c.get("/inbox", follow_redirects=False)
         assert got.status_code in (302, 303, 307)
+
+
+def test_a_signed_in_operator_reads_their_own_mailbox_not_the_console_s() -> None:
+    """Acting needs the operator's *name*, not just their session.
+
+    The hub resolves a session to that human, and every mailbox route checks the path
+    against the caller — so `/actors/console/inbox` carrying an admin's session is
+    refused. Forwarding the session alone left Inbox and Compose broken on an
+    authenticating hub; the console has to act as the person who is signed in.
+    """
+    stub = StubHub()
+    stub.operator = "admin"
+    client, _ = make(stub)
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        page = c.get("/inbox")
+    assert page.status_code == 200
+    assert stub.acting == "admin", "acted as the console instead of the operator"
+
+
+def test_with_no_session_the_console_still_acts_as_itself(console: TestClient) -> None:
+    """On an open hub nothing changes — it is an ordinary agent that joined."""
+    assert console.get("/inbox").status_code == 200
