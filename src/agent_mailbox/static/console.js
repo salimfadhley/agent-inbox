@@ -14,20 +14,53 @@
     return el ? (typeof el.value === "string" ? el.value : el.textContent || "") : "";
   }
 
+  // Select the element's text, whatever kind of element it is. `select()` exists only
+  // on inputs; a <code> block needs a Range, and without one the "press ctrl/cmd+C"
+  // fallback below would be advice about a selection that was never made.
+  function selectText(el) {
+    if (typeof el.select === "function") {
+      el.select();
+      return;
+    }
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   document.querySelectorAll("[data-copy]").forEach(function (button) {
     button.addEventListener("click", async function () {
       var target = document.getElementById(button.getAttribute("data-copy"));
       var said = document.getElementById(button.getAttribute("data-said") || "said");
       if (!target) return;
-      if (typeof target.select === "function") target.select();
-      try {
-        await navigator.clipboard.writeText(textOf(target).trim());
-        if (said) said.textContent = "Copied.";
-      } catch (e) {
-        // Clipboard access can be refused (insecure origin, denied permission). The
-        // selection above still stands, so say what to press rather than failing mute.
-        if (said) said.textContent = "Selected — press ctrl/cmd+C.";
+      var text = textOf(target).trim();
+      selectText(target);
+
+      // navigator.clipboard exists only in a secure context. A self-hosted hub is
+      // typically plain http on a LAN name — neither https nor localhost — so on
+      // Chrome and its derivatives the whole API is simply absent, and the button
+      // appeared to do nothing at all.
+      if (window.isSecureContext && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(text);
+          if (said) said.textContent = "Copied.";
+          return;
+        } catch (e) {
+          // Permission refused; fall through to the older path.
+        }
       }
+
+      // execCommand is deprecated and still the only thing that copies over http.
+      try {
+        if (document.execCommand("copy")) {
+          if (said) said.textContent = "Copied.";
+          return;
+        }
+      } catch (e) {
+        // Nothing left to try.
+      }
+      if (said) said.textContent = "Selected — press ctrl/cmd+C.";
     });
   });
 
