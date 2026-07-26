@@ -600,7 +600,7 @@ def build_console(client: HubClient) -> Litestar:
             "plain text. Written for <code>"
             f"{html.escape(address)}</code>.</p>"
             "<h2>The full prompt</h2>"
-            f"<pre>{html.escape(onboarding(address))}</pre>"
+            f"<pre>{html.escape(onboarding(address, prompt_url))}</pre>"
             # The copy behaviour lives in /static/console.js (same-origin), so the CSP
             # can forbid inline scripts. It selects the textarea first, so a browser
             # that withholds the clipboard still leaves the text selected to copy.
@@ -609,8 +609,18 @@ def build_console(client: HubClient) -> Litestar:
             _page("Prompt", body, hub, "/prompts"), media_type=MediaType.HTML
         )
 
+    def _full_prompt(request: Request) -> str:
+        """The prompt as served, named by the address it was fetched from.
+
+        The text asks the reader to leave a pointer to this page behind in their
+        project's instructions, so it has to know where "here" is. Whichever URL they
+        reached it by is the one that demonstrably works for them.
+        """
+        address = _advertised(hub_or_none() or {}, client.config.base)
+        return onboarding(address, f"{_console_base(request)}/prompts/agent")
+
     @get("/prompts/{role:str}", media_type=MediaType.TEXT, sync_to_thread=True)
-    def prompt_for_role(role: str) -> str:
+    def prompt_for_role(role: str, request: Request) -> str:
         """The whole prompt as plain text — the address agents are pointed at.
 
         Any role name serves the same text, and that is the point rather than an
@@ -619,12 +629,12 @@ def build_console(client: HubClient) -> Litestar:
         hub, so there is nothing per-role to say here. Accepting the names keeps old
         bookmarks working without reviving three pages to drift apart.
         """
-        return onboarding(_advertised(hub_or_none() or {}, client.config.base))
+        return _full_prompt(request)
 
     @get("/prompts.txt", media_type=MediaType.TEXT, sync_to_thread=True)
-    def prompt_text() -> str:
+    def prompt_text(request: Request) -> str:
         """The same prompt again, at the name `curl` users already have."""
-        return onboarding(_advertised(hub_or_none() or {}, client.config.base))
+        return _full_prompt(request)
 
     # -- static assets and the flow graph ----------------------------------
 

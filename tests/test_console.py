@@ -259,6 +259,31 @@ def test_the_pasted_prompt_points_at_this_console_not_the_hub(
     assert HUB not in box
 
 
+def test_the_prompt_explains_the_config_file_it_writes(console: TestClient) -> None:
+    """`join` writes a file into someone's repository; the prompt must say so.
+
+    Where it lands, what is in it, and that it must not be committed — the last
+    matters most, because it carries a deployment's hostname and may carry a token.
+    """
+    text = console.get("/prompts/agent").text
+    assert "agent-mailbox.toml" in text
+    assert "[agents." in text, "the per-engine table is not shown"
+    assert ".gitignore" in text, "the prompt does not say to keep it out of git"
+
+
+def test_the_prompt_tells_the_agent_to_fix_stale_instructions(
+    console: TestClient,
+) -> None:
+    """Every project's AGENTS.md is where the last set of instructions went to rot.
+
+    The prompt has to name the address to leave behind, or "replace it with a
+    pointer" is advice the reader cannot act on.
+    """
+    text = console.get("/prompts/agent").text
+    assert "AGENTS.md" in text and "CLAUDE.md" in text
+    assert "/prompts/agent" in text, "no address to point the stale section at"
+
+
 def test_the_prompt_says_the_hub_does_not_authenticate(console: TestClient) -> None:
     assert "does not authenticate" in console.get("/prompts.txt").text
 

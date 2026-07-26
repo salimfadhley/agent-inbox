@@ -2,7 +2,7 @@
 # Written by `join`, one entry per engine. Safe to edit; safe to commit
 # unless the hub url or a token is private to your deployment.
 
-hub = "http://halob.local:8080"
+hub = "http://halob.local:8081"
 
 # One identity per engine: several agents work in this repository and they
 # are different correspondents. Names are permanent and deliberately
