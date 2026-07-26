@@ -158,25 +158,25 @@ still make the selected engine visible where identity is reported.
 
 | ID | Requirement | Status |
 |---|---|---|
-| FR-001 | The CLI provides an explicit engine selector named `--engine`, applicable to commands that need to resolve a project agent entry. | proposed |
-| FR-002 | `load_config` and related config helpers can be called with an explicit engine and use it ahead of environment detection. Existing MCP behaviour, where the MCP server supplies the client engine, remains supported. | proposed |
-| FR-003 | Project-scoped writes (`config set/unset` for `name`, `role`, or project token; `join`) refuse to run from an unresolved multi-engine shell. | proposed |
-| FR-004 | Agent-acting commands refuse to run from an unresolved multi-engine shell before contacting the hub. | proposed |
-| FR-005 | Machine-wide config commands remain engine-free and never create or mutate project agent entries. | proposed |
-| FR-006 | `doctor` can run without an engine as a diagnostic: it checks configuration path, duplicate names, hub reachability, and credential status, including machine-wide shared tokens. | proposed |
-| FR-007 | `doctor` distinguishes missing credentials from missing engine selection. If a shared token is present and accepted, the credentials line reports that instead of asking for a new token. | proposed |
-| FR-008 | When engine selection is required, the error message lists configured engine keys and shows a concrete retry command using `--engine`. | proposed |
-| FR-009 | If exactly one project agent entry exists and no engine marker is available, commands may use it as a compatibility fallback and report which engine was selected. | proposed |
-| FR-010 | `config list` shows effective values with provenance without requiring engine selection; when project agent values cannot be resolved because multiple entries exist, it should show that ambiguity rather than silently omitting or inventing an entry. | proposed |
+| FR-001 | The CLI provides an explicit engine selector named `--engine`, applicable to commands that need to resolve a project agent entry. | implemented |
+| FR-002 | `load_config` and related config helpers can be called with an explicit engine and use it ahead of environment detection. Existing MCP behaviour, where the MCP server supplies the client engine, remains supported. | implemented |
+| FR-003 | Project-scoped writes (`config set/unset` for `name`, `role`, or project token; `join`) refuse to run from an unresolved multi-engine shell. | implemented |
+| FR-004 | Agent-acting commands refuse to run from an unresolved multi-engine shell before contacting the hub. | implemented |
+| FR-005 | Machine-wide config commands remain engine-free and never create or mutate project agent entries. | implemented |
+| FR-006 | `doctor` can run without an engine as a diagnostic: it checks configuration path, duplicate names, hub reachability, and credential status, including machine-wide shared tokens. | implemented |
+| FR-007 | `doctor` distinguishes missing credentials from missing engine selection. If a shared token is present and accepted, the credentials line reports that instead of asking for a new token. | implemented |
+| FR-008 | When engine selection is required, the error message lists configured engine keys and shows a concrete retry command using `--engine`. | implemented |
+| FR-009 | If exactly one project agent entry exists and no engine marker is available, commands may use it as a compatibility fallback and report which engine was selected. | implemented |
+| FR-010 | `config list` shows effective values with provenance without requiring engine selection; when project agent values cannot be resolved because multiple entries exist, it should show that ambiguity rather than silently omitting or inventing an entry. | implemented |
 
 ## Non-functional requirements
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| NFR-001 | No wrong-agent writes. | In tests, a plain shell in a multi-engine project cannot modify any `[agents.<engine>]` table unless `--engine` is supplied. | proposed |
-| NFR-002 | Diagnostics remain useful before onboarding is complete. | `doctor` without engine still reaches the hub and remote doctor route when a hub URL is known. | proposed |
-| NFR-003 | Existing agent sessions keep working. | Codex/Claude engine detection and MCP-supplied engine context continue to resolve the same entries as before. | proposed |
-| NFR-004 | No deployment-specific facts enter the repo. | Tests and docs use generic hub URLs and fake names only; no real hostnames, tokens, or local operator identities. | proposed |
+| NFR-001 | No wrong-agent writes. | In tests, a plain shell in a multi-engine project cannot modify any `[agents.<engine>]` table unless `--engine` is supplied. | implemented |
+| NFR-002 | Diagnostics remain useful before onboarding is complete. | `doctor` without engine still reaches the hub and remote doctor route when a hub URL is known. | implemented |
+| NFR-003 | Existing agent sessions keep working. | Codex/Claude engine detection and MCP-supplied engine context continue to resolve the same entries as before. | implemented |
+| NFR-004 | No deployment-specific facts enter the repo. | Tests and docs use generic hub URLs and fake names only; no real hostnames, tokens, or local operator identities. | implemented |
 
 ## Constraints
 
@@ -241,3 +241,28 @@ still make the selected engine visible where identity is reported.
   missing-entry diagnostic.
 - **Explicit engine conflicts with detected engine** → the explicit flag wins, and output
   should make the selected engine visible.
+
+## Implementation notes (nicole_ruzickova, 2026-07-26)
+
+Implemented as a **root** option — `agent-inbox --engine codex doctor` — which the
+assumptions allowed for but did not assume. click threads it through the group context
+cleanly, so no per-command flags were needed and the concept stays singular. `join`
+keeps its own `--engine` as well, since it predates this and reads naturally there; the
+root option wins when both are given.
+
+Three points where the spec left a choice and this is what was chosen:
+
+- **The refusal happens before anything else.** `_resolve_engine` raises before a hub
+  client is constructed, so an unresolved shell cannot contact the hub *or* touch a
+  file. The test for FR-004 uses an unroutable hub deliberately: if the order were
+  wrong the failure would be a timeout rather than a usage error.
+- **The selection is reported, and how it was made.** `doctor` says `engine codex —
+  named`, `— detected`, or `— the only one configured`. FR-009's fallback means the
+  same command behaves differently as a project grows a second agent; saying which
+  engine was chosen, and why, is what makes that legible when it changes.
+- **Ambiguity is a value, not an omission.** `config list` shows
+  `<ambiguous: claude, codex>` for name and role rather than dropping the rows, so a
+  configured project is never reported as empty (FR-010).
+
+Verified against the six user scenarios, including that a plain shell in a two-engine
+project leaves `agent-mailbox.toml` byte-identical after a refused write (NFR-001).

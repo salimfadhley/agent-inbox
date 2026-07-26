@@ -121,11 +121,18 @@ def test_doctor_keeps_the_global_token_when_identity_is_unresolved(
     assert main(["doctor"]) == 2
 
     out = capsys.readouterr().out
+    # The property this test was written for, unchanged: the shared token reaches the
+    # hub and is reported as accepted even though no identity could be resolved.
     assert FakeHubClient.configs[0].token == "shared-secret"
-    assert "no entry for this engine yet" in out
     assert "device token accepted by the hub" in out
     assert "shared, from" in out
-    assert "api             not joined yet" in out
+    # The wording moved with the explicit-engine mission. "No entry for this engine"
+    # was the old diagnosis and it was wrong here: the project has two entries, and
+    # what is missing is the *choice*, not the configuration. Saying so — and naming
+    # both engines — is the difference between "join" and "rerun with --engine".
+    assert "no engine selected" in out
+    assert "claude, codex" in out
+    assert "--engine claude doctor" in out
 
 
 class TestConfigure:
@@ -175,3 +182,128 @@ class TestConfigure:
     ) -> None:
         """A silently accepted typo leaves a file that reads correct and is not."""
         assert self._run(tmp_path, monkeypatch, "set", "tokne", "sekrit") == 2
+
+
+class TestExplicitEngine:
+    """A human shell must not be able to act as, or write to, the wrong agent.
+
+    An agent session carries a marker and never meets any of this. A human shell does
+    not, and in a project configuring several agents there is no honest default:
+    picking one acts as somebody else, and a synthetic `default` entry belongs to
+    nobody. So the CLI refuses and says how.
+    """
+
+    def _project(self, tmp_path: Path, *engines: str) -> Path:
+        body = 'hub = "http://hub.invalid:8081"\n'
+        for engine in engines:
+            body += f'\n[agents.{engine}]\nname = "name_{engine}"\nrole = "agent"\n'
+        (tmp_path / "agent-mailbox.toml").write_text(body)
+        return tmp_path
+
+    def _shell(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A plain human shell: no engine marker of any kind."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        for var in (
+            "CLAUDECODE",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CODEX_SANDBOX",
+            "CODEX_HOME",
+            "CODEX_THREAD_ID",
+            "CODEX_MANAGED_BY_NPM",
+            "CODEX_CI",
+            "AGENT_MAILBOX_HUB",
+            "AGENT_MAILBOX_NAME",
+            "AGENT_MAILBOX_TOKEN",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_a_project_write_refuses_and_names_the_engines(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """NFR-001: nothing is written. The file must be byte-identical afterwards."""
+        self._project(tmp_path, "claude", "codex")
+        before = (tmp_path / "agent-mailbox.toml").read_text()
+        self._shell(tmp_path, monkeypatch)
+
+        assert main(["config", "set", "role", "host"]) == 2
+
+        err = capsys.readouterr().err
+        assert "cannot tell which engine" in err
+        assert "claude, codex" in err
+        assert "--engine claude config" in err
+        assert (tmp_path / "agent-mailbox.toml").read_text() == before
+
+    def test_an_agent_command_refuses_before_reaching_the_hub(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """FR-004. The hub url here is unroutable: if it were contacted the failure
+        would be a timeout, not a usage error, so this also pins the *ordering*."""
+        self._project(tmp_path, "claude", "codex")
+        self._shell(tmp_path, monkeypatch)
+        assert main(["ping"]) == 2
+        assert "cannot tell which engine" in capsys.readouterr().err
+
+    def test_the_flag_resolves_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FR-001/FR-003: named explicitly, the write lands in that engine's entry."""
+        self._project(tmp_path, "claude", "codex")
+        self._shell(tmp_path, monkeypatch)
+
+        assert main(["--engine", "codex", "config", "set", "role", "host"]) == 0
+
+        written = (tmp_path / "agent-mailbox.toml").read_text()
+        assert 'name = "name_codex"' in written
+        codex_block = written.split("[agents.codex]")[1]
+        assert 'role = "host"' in codex_block
+        # and the other agent is untouched
+        claude_block = written.split("[agents.claude]")[1].split("[agents.")[0]
+        assert 'role = "agent"' in claude_block
+
+    def test_machine_wide_settings_need_no_engine(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FR-005: a credential admits the machine and names no agent, so a plain
+        shell must be able to set one — and must not create a project entry doing it."""
+        self._project(tmp_path, "claude", "codex")
+        before = (tmp_path / "agent-mailbox.toml").read_text()
+        self._shell(tmp_path, monkeypatch)
+
+        assert main(["config", "set", "--global", "token", "sekrit"]) == 0
+        assert main(["config", "list"]) == 0
+        assert main(["config", "path"]) == 0
+
+        assert (tmp_path / "agent-mailbox.toml").read_text() == before
+
+    def test_a_single_entry_still_works_without_a_flag(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """FR-009: one entry, nothing to get wrong. The compatibility case."""
+        self._project(tmp_path, "claude")
+        self._shell(tmp_path, monkeypatch)
+        assert main(["config", "set", "role", "host"]) == 0
+        assert 'role = "host"' in (tmp_path / "agent-mailbox.toml").read_text()
+
+    def test_ambiguity_is_shown_rather_than_omitted(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """FR-010: `config list` must not report a configured project as empty."""
+        self._project(tmp_path, "claude", "codex")
+        self._shell(tmp_path, monkeypatch)
+        assert main(["config", "list"]) == 0
+        out = capsys.readouterr().out
+        assert "ambiguous" in out
+        assert "claude, codex" in out

@@ -73,14 +73,20 @@ def write_project(
     settings: dict[str, str],
     start: Path | None = None,
     env: dict[str, str] | None = None,
+    engine: str | None = None,
 ) -> Path:
-    """Merge *settings* into this project's file, under this engine's entry.
+    """Merge *settings* into this project's file, under one engine's entry.
 
-    `hub` is the project's and sits at the top level; everything else belongs to the
-    engine running now, so two agents in one repository do not overwrite each other.
+    `hub` is the project's and sits at the top level; everything else belongs to an
+    engine, so two agents in one repository do not overwrite each other.
+
+    *engine* is passed when the caller was told which one — a human with `--engine`,
+    or the MCP server acting for a named client. Falling back to `"default"` when
+    nothing is known was how a human shell could write an entry that no real agent
+    owns; callers that could be wrong now refuse rather than reach that line.
     """
     environ = env if env is not None else dict(os.environ)
-    engine = detect_engine(environ) or "default"
+    engine = engine or detect_engine(environ) or "default"
     path = find_config(start) or (project_root(start) / CONFIG_NAME)
     existing: dict[str, Any] = {}
     if path.is_file():
@@ -116,11 +122,14 @@ def unset_global(name: str, env: dict[str, str] | None = None) -> bool:
 
 
 def unset_project(
-    name: str, start: Path | None = None, env: dict[str, str] | None = None
+    name: str,
+    start: Path | None = None,
+    env: dict[str, str] | None = None,
+    engine: str | None = None,
 ) -> bool:
-    """Remove one setting from this engine's entry. True if it was there."""
+    """Remove one setting from one engine's entry. True if it was there."""
     environ = env if env is not None else dict(os.environ)
-    engine = detect_engine(environ) or "default"
+    engine = engine or detect_engine(environ) or "default"
     path = find_config(start)
     if path is None or not path.is_file():
         return False
@@ -171,6 +180,15 @@ def effective_settings(
             for key in ("name", "role", "token"):
                 if value := str(mine.get(key, "")).strip():
                     found[key] = (value, str(path))
+        elif len(entries) > 1 and not engine:
+            # Ambiguous rather than absent. Omitting these silently would report a
+            # project as unconfigured when it is configured several times over.
+            for key in ("name", "role"):
+                if any(str((e or {}).get(key, "")).strip() for e in entries.values()):
+                    found[key] = (
+                        f"<ambiguous: {', '.join(sorted(entries))}>",
+                        str(path),
+                    )
 
     for key, var in (
         ("hub", "AGENT_MAILBOX_HUB"),
@@ -299,6 +317,24 @@ def load_hub(start: Path | None = None, env: dict[str, str] | None = None) -> st
         if hub := str(tomllib.loads(path.read_text()).get("hub", "")).strip():
             return hub
     return str(load_global(environ).get("hub", "")).strip()
+
+
+def configured_engines(start: Path | None = None) -> list[str]:
+    """Which engines this project has entries for, in file order.
+
+    The CLI needs this to *ask a good question*. "I cannot tell which engine you are"
+    is a dead end; "configured engines: claude, codex — rerun with --engine codex" is
+    an instruction, and the difference is whether the caller has to go and read a file
+    to answer.
+    """
+    path = find_config(start)
+    if path is None:
+        return []
+    try:
+        data = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    return [str(key) for key in (data.get("agents") or {})]
 
 
 def duplicate_names(start: Path | None = None) -> dict[str, list[str]]:

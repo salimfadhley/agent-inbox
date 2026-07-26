@@ -37,6 +37,7 @@ from agent_mailbox.client import (
     Config,
     HubClient,
     NotConfigured,
+    configured_engines,
     detect_engine,
     duplicate_names,
     effective_settings,
@@ -78,8 +79,72 @@ own name. `--project` settles it for a client that offers neither.
 """
 
 
-def _client() -> HubClient:
-    return HubClient(load_config())
+class EngineUnresolved(click.ClickException):
+    """No engine could be resolved, and guessing would write to the wrong agent.
+
+    Raised *before* anything is contacted or written. The message names the engines the
+    project actually has and the exact command to rerun, because "I cannot tell which
+    engine you are" sends the reader to a file, and a list plus a retry line does not.
+    """
+
+    exit_code = 2
+
+    def __init__(self, engines: list[str], command: str) -> None:
+        super().__init__(
+            "cannot tell which engine to use for this project.\n"
+            f"Configured engines: {', '.join(sorted(engines))}.\n"
+            "Rerun with:\n"
+            f"  agent-inbox --engine {sorted(engines)[0]} {command}"
+        )
+
+
+def _engine(ctx: click.Context) -> str | None:
+    """The engine the caller named, if any. Explicit beats detection everywhere."""
+    return (ctx.find_root().obj or {}).get("engine")
+
+
+def _command_path(ctx: click.Context) -> str:
+    """How the caller spelled this command, for a retry line they can paste.
+
+    `ctx.info_name` alone is the leaf, so a nested command comes out as `set` and the
+    suggestion does not run. Walking up to (but not including) the root gives back
+    `config set`.
+    """
+    parts: list[str] = []
+    node: click.Context | None = ctx
+    while node is not None and node.parent is not None:
+        if node.info_name:
+            parts.append(node.info_name)
+        node = node.parent
+    return " ".join(reversed(parts))
+
+
+def _resolve_engine(ctx: click.Context) -> str | None:
+    """Which engine this command should act as, or refuse.
+
+    An agent session carries a marker and never notices this. A human shell does not,
+    and in a project configuring several agents there is no honest default: picking one
+    writes to someone else's identity, and a synthetic `default` entry belongs to
+    nobody. So the third option — refuse and say how — is the only one that keeps the
+    invariant that every project identity belongs to a real engine.
+
+    One entry and no marker is still allowed (FR-009): there is nothing to get wrong.
+    The caller reports which engine that was, so the day a second agent joins and the
+    same command starts refusing, the reason is already familiar.
+    """
+    if named := _engine(ctx):
+        return named
+    if detected := detect_engine():
+        return detected
+    engines = configured_engines()
+    if len(engines) > 1:
+        raise EngineUnresolved(engines, _command_path(ctx) or "<command>")
+    return engines[0] if engines else None
+
+
+def _client(ctx: click.Context) -> HubClient:
+    """A hub client acting as this project's agent — engine resolved or refused."""
+    return HubClient(load_config(engine=_resolve_engine(ctx)))
 
 
 def _print(value: Any) -> None:
@@ -116,6 +181,14 @@ class AliasedGroup(click.Group):
     help="One mailbox tool: MCP server, terminal client, or the hub itself.",
     epilog=EPILOG,
 )
+@click.option(
+    "--engine",
+    "engine",
+    metavar="ENGINE",
+    help="which engine's entry in agent-mailbox.toml to act as (claude, codex, …). "
+    "An agent session is detected automatically; a human shell in a project with more "
+    "than one agent must say.",
+)
 @click.version_option(
     __version__,
     "--version",
@@ -124,8 +197,10 @@ class AliasedGroup(click.Group):
     # subcommand, and name whichever of the two commands was invoked.
     message="%(prog)s %(version)s",
 )
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context, engine: str | None) -> None:
     """One mailbox tool: MCP server, terminal client, or the hub itself."""
+    ctx.ensure_object(dict)["engine"] = engine
 
 
 # -- modes -------------------------------------------------------------------
@@ -248,7 +323,9 @@ def reset_admin(username: str) -> int:
     help="a device token minted for this agent; saved to its entry. Not needed when a "
     "shared token is in the machine-wide config.",
 )
+@click.pass_context
 def join(
+    ctx: click.Context,
     name: str | None,
     hub: str | None,
     role: str,
@@ -257,7 +334,9 @@ def join(
     token: str | None,
 ) -> int:
     """Claim a name and configure this engine. Omit NAME to be issued one."""
-    engine = engine or detect_engine()
+    # `--engine` on the command still works and wins; otherwise the root option, then
+    # detection, then a refusal that names the project's engines.
+    engine = engine or _resolve_engine(ctx)
     if engine is None:
         _err(
             "cannot tell which engine this is — pass --engine, so that two agents in "
@@ -391,7 +470,12 @@ def config_set(ctx: click.Context, is_global: bool, pairs: tuple[str, ...]) -> i
             return 1
         settings["name"] = str(granted.get("preferredUsername", name))
 
-    path = write_global(settings) if is_global else write_project(settings)
+    if is_global:
+        path = write_global(settings)
+    else:
+        # A project write lands in one engine's entry. Getting that wrong writes into
+        # another agent's identity, which is why this refuses rather than defaults.
+        path = write_project(settings, engine=_resolve_engine(ctx))
     shown = {k: ("…" if k == "token" else v) for k, v in settings.items()}
     _print({"wrote": str(path), "set": shown})
     return 0
@@ -445,7 +529,11 @@ def config_list(ctx: click.Context, is_global: bool) -> int:
 def config_unset(ctx: click.Context, is_global: bool, name: str) -> int:
     """Remove a setting from this project, or from the machine-wide file."""
     is_global = _machine_wide(ctx, is_global)
-    removed = unset_global(name) if is_global else unset_project(name)
+    removed = (
+        unset_global(name)
+        if is_global
+        else unset_project(name, engine=_resolve_engine(ctx))
+    )
     if not removed:
         _err(f"{name} was not set {'machine-wide' if is_global else 'here'}")
         return 1
@@ -466,9 +554,10 @@ def config_path(ctx: click.Context, is_global: bool) -> int:
 
 @cli.command()
 @click.option("--role-definition", is_flag=True, help="also fetch what the role means")
-def whoami(role_definition: bool) -> int:
+@click.pass_context
+def whoami(ctx: click.Context, role_definition: bool) -> int:
     """Who this engine is here."""
-    config = load_config()
+    config = load_config(engine=_resolve_engine(ctx))
     out: dict[str, Any] = {
         "name": config.name,
         "role": config.role,
@@ -483,14 +572,15 @@ def whoami(role_definition: bool) -> int:
 
 @cli.command()
 @click.argument("name", required=False)
-def role(name: str | None) -> int:
+@click.pass_context
+def role(ctx: click.Context, name: str | None) -> int:
     """What a role means, according to the hub. Defaults to your own.
 
     Definitions live on the hub rather than in a prompt page per role. Separate pages
     drift out of step with each other and with the code; one source does not, and
     changing what a role means does not mean re-onboarding anyone.
     """
-    config = load_config()
+    config = load_config(engine=_resolve_engine(ctx))
     _print(HubClient(config).role_definition(name or config.role))
     return 0
 
@@ -524,7 +614,8 @@ def _token_help(hub_url: str, name: str, path: Path) -> str:
 @click.option(
     "--hub", help="hub url to test; taken from the config or the environment if set"
 )
-def doctor(hub: str | None) -> int:
+@click.pass_context
+def doctor(ctx: click.Context, hub: str | None) -> int:
     """Check config, connectivity, credentials and the API, in that order.
 
     Fix what it reports with `config set`, never by editing files.
@@ -542,9 +633,17 @@ def doctor(hub: str | None) -> int:
     #    doctor is meant to be run first, to find out whether joining is even worth
     #    attempting. So a missing identity does not stop the connectivity check — that
     #    is the one an agent most needs answered before it asks for a name.
+    # Never refuses for want of an engine: diagnosing is exactly what a caller does
+    # *before* they know what to select, so an unresolved engine is a finding to report
+    # rather than a reason to stop. That is why this does not call `_resolve_engine`.
+    engines = configured_engines()
+    chosen = _engine(ctx) or detect_engine()
+    if chosen is None and len(engines) == 1:
+        chosen = engines[0]  # nothing to get wrong (FR-009)
+
     config: Config | None = None
     try:
-        config = load_config()
+        config = load_config(engine=chosen)
     except NotConfigured:
         pass
 
@@ -558,14 +657,31 @@ def doctor(hub: str | None) -> int:
         )
         return 2
 
-    if config is None:
+    # An unresolved engine and an unconfigured project look identical from a distance
+    # and need opposite actions — one is "tell me who you are", the other "join". Say
+    # which, and name the engines, so the next command is obvious.
+    ambiguous = chosen is None and len(engines) > 1
+    if ambiguous:
+        click.echo(f"{ok} configuration   {where}")
+        click.echo(
+            f"{todo} identity        no engine selected — this project has "
+            f"{', '.join(sorted(engines))}"
+        )
+    elif config is None:
         click.echo(f"{todo} configuration   no entry for this engine yet ({where})")
         click.echo(f"{todo} identity        none yet — ask the hub for one below")
     else:
+        # Say which engine was chosen and why. When a second agent joins and this
+        # command starts refusing, the reader has already seen the mechanism.
+        how = (
+            "named"
+            if _engine(ctx)
+            else ("detected" if detect_engine() else "the only one configured")
+        )
         click.echo(f"{ok} configuration   {where}")
         click.echo(
             f"{ok} identity        {config.name} "
-            f"({config.role}, engine {config.engine})"
+            f"({config.role}, engine {config.engine or chosen} — {how})"
         )
 
     # Two engines sharing a name share an *inbox*, and the symptom is mail that quietly
@@ -601,6 +717,9 @@ def doctor(hub: str | None) -> int:
     if not token:
         token = str(load_global().get("token", "")).strip()
     diagnostic = config or Config(hub=hub_url, name=UNNAMED, token=token or None)
+    # NFR-002: with no engine we still reach the hub and its remote doctor, carrying
+    # whatever shared credential exists. A machine token authenticates the machine; it
+    # does not need an identity to be checked.
     client = HubClient(diagnostic)
 
     # 2. Reachability, the network alone — no identity, no credential. A failure here is
@@ -668,6 +787,21 @@ def doctor(hub: str | None) -> int:
     if verdict := remote.get("verdict"):
         click.echo(f"{ok} hub check       {verdict}")
 
+    # FR-007: an unresolved engine is not a missing credential. Inviting someone to
+    # mint a token when the blocking issue is "which of your two agents am I" sends
+    # them to an operator for a problem they can fix themselves in one flag.
+    if ambiguous:
+        click.echo(f"{todo} api             no engine selected")
+        click.echo(
+            "\nThe hub is reachable and your credentials are in order. Say which "
+            "agent to act as:\n\n"
+            f"    agent-inbox --engine {sorted(engines)[0]} doctor\n\n"
+            f"This project configures {', '.join(sorted(engines))}. Identity is per "
+            "engine, so there is no safe default — picking one for you would act as, "
+            "and could write to, the wrong agent."
+        )
+        return 2
+
     # Reachable, and nothing is in the way — but we are nobody here yet. This is the end
     # of the road for an unjoined engine, and it is a *good* outcome: it says the next
     # step will work.
@@ -713,16 +847,18 @@ def doctor(hub: str | None) -> int:
 
 
 @cli.command()
-def ping() -> int:
+@click.pass_context
+def ping(ctx: click.Context) -> int:
     """Prove the connection."""
-    _print(_client().ping())
+    _print(_client(ctx).ping())
     return 0
 
 
 @cli.command()
-def inbox() -> int:
+@click.pass_context
+def inbox(ctx: click.Context) -> int:
     """What is waiting."""
-    items = _client().check_inbox().get("items", [])
+    items = _client(ctx).check_inbox().get("items", [])
     if not items:
         click.echo("nothing waiting")
         return 0
@@ -737,18 +873,20 @@ def inbox() -> int:
 @click.argument("to")
 @click.argument("body")
 @click.option("-s", "--subject")
-def send(to: str, body: str, subject: str | None) -> int:
+@click.pass_context
+def send(ctx: click.Context, to: str, body: str, subject: str | None) -> int:
     """Send a message."""
-    sent = _client().send_message(to, body, subject)
+    sent = _client(ctx).send_message(to, body, subject)
     _print({"sent": sent.get("id"), "to": sent.get("to")})
     return 0
 
 
 @cli.command()
 @click.argument("id")
-def read(id: str) -> int:  # noqa: A002 - the argument is named for the user, not us
+@click.pass_context
+def read(ctx: click.Context, id: str) -> int:  # noqa: A002 - named for the user
     """Read and consume a message."""
-    note = _client().read_message(id)
+    note = _client(ctx).read_message(id)
     click.echo(f"from    : {(note.get('attributedTo') or '').rsplit('/', 1)[-1]}")
     click.echo(f"subject : {note.get('summary') or '(none)'}")
     click.echo()
@@ -760,16 +898,18 @@ def read(id: str) -> int:  # noqa: A002 - the argument is named for the user, no
 @click.argument("id")
 @click.argument("body")
 @click.option("-s", "--subject")
-def reply(id: str, body: str, subject: str | None) -> int:  # noqa: A002
+@click.pass_context
+def reply(ctx: click.Context, id: str, body: str, subject: str | None) -> int:  # noqa: A002
     """Reply to a message."""
-    _print(_client().reply_message(id, body, subject))
+    _print(_client(ctx).reply_message(id, body, subject))
     return 0
 
 
 @cli.command()
-def agents() -> int:
+@click.pass_context
+def agents(ctx: click.Context) -> int:
     """Who is on the hub."""
-    for actor in _client().list_agents().get("items", []):
+    for actor in _client(ctx).list_agents().get("items", []):
         name = actor.get("preferredUsername", "?")
         role_name = (actor.get("profile") or {}).get("role", "")
         about = (actor.get("summary") or "").split(".")[0]
@@ -778,9 +918,10 @@ def agents() -> int:
 
 
 @cli.command()
-def hub() -> int:
+@click.pass_context
+def hub(ctx: click.Context) -> int:
     """What this hub is."""
-    _print(_client().hub_info())
+    _print(_client(ctx).hub_info())
     return 0
 
 
