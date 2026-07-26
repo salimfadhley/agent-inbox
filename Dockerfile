@@ -56,8 +56,12 @@ EXPOSE 8080
 
 # Health does not touch the database on purpose, so a wedged store is reported by the
 # routes that need it rather than hidden behind a check that hangs too.
+#
+# The port is read at runtime rather than baked in, because this image runs in two modes
+# and they do not listen on the same port. Hardcoding 8080 left the console sidecar
+# permanently `unhealthy` — it serves fine on 8090, and nothing was ever wrong with it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health').status==200 else 1)"
+    CMD python -c "import os,urllib.request,sys; p=os.environ.get('AGENT_MAILBOX_HEALTH_PORT') or os.environ.get('AGENT_MAILBOX_PORT') or '8080'; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health').status==200 else 1)"
 
 # One command, several modes. This must track [project.scripts]: unifying the entry
 # points once broke the image because this line still named a console script that no

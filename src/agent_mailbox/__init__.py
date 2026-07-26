@@ -21,7 +21,12 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("agent-mailbox")
+    # The *distribution* name, which is not the import package's name: the project is
+    # `agent-inbox` on PyPI and always has been. Getting this wrong does not raise —
+    # it silently reports 0.0.0.dev0 forever — and the onboarding prompt now asks
+    # agents to compare this number against the hub's, so a silent 0.0.0 would tell
+    # every one of them to reinstall on every session.
+    __version__ = version("agent-inbox")
 except PackageNotFoundError:  # pragma: no cover - only when running from a bare tree
     __version__ = "0.0.0.dev0"
 

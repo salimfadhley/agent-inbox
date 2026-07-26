@@ -1,4 +1,4 @@
-# Deploy the agent-mailbox hub and its console from the official release image.
+# Deploy the agent-inbox hub and its console from the official release image.
 #
 #   docker compose pull && docker compose up -d
 #
@@ -21,7 +21,7 @@
 
 services:
   agent-mailbox:
-    image: salimfadhley/agent-mailbox:${AGENT_MAILBOX_VERSION:-latest}
+    image: salimfadhley/agent-inbox:${AGENT_MAILBOX_VERSION:-latest}
     # To build locally instead of pulling, comment out `image:` and uncomment:
     # build: .
     restart: unless-stopped
@@ -42,7 +42,7 @@ services:
       - agent-mailbox-data:/data
 
   console:
-    image: salimfadhley/agent-mailbox:${AGENT_MAILBOX_VERSION:-latest}
+    image: salimfadhley/agent-inbox:${AGENT_MAILBOX_VERSION:-latest}
     # ENTRYPOINT is `agent-mailbox`; this selects the console mode instead of `serve`.
     command: ["console", "--host", "0.0.0.0", "--port", "8090"]
     restart: unless-stopped
@@ -61,6 +61,9 @@ services:
       # agent could use).
       AGENT_MAILBOX_HUB: http://agent-mailbox:8080
       AGENT_MAILBOX_NAME: console
+      # The image's healthcheck defaults to the hub's port. This mode listens on 8090,
+      # so without this the console reports `unhealthy` forever while serving perfectly.
+      AGENT_MAILBOX_HEALTH_PORT: "8090"
     # No volume. That absence is the guarantee: the console cannot touch the store.
 
 volumes:

@@ -11,8 +11,8 @@ name: Docker image
 # point: **deploy pulls :latest (or a pinned :X.Y.Z), and those are only ever an
 # official release.** A merge to main gives you :edge to try, not something to ship.
 #
-# Publishes to Docker Hub (docker.io/<user>/agent-mailbox) and, for free, to GHCR
-# (ghcr.io/<owner>/agent-mailbox). Docker Hub needs two repo secrets (Settings ->
+# Publishes to Docker Hub (docker.io/<user>/agent-inbox) and, for free, to GHCR
+# (ghcr.io/<owner>/agent-inbox). Docker Hub needs two repo secrets (Settings ->
 # Secrets and variables -> Actions); without them the Docker Hub push is skipped, not
 # failed, and only GHCR is written:
 #   DOCKERHUB_USERNAME  the Docker Hub account/namespace
@@ -78,9 +78,9 @@ jobs:
         id: reg
         # GHCR always; Docker Hub only when its secrets are configured.
         run: |
-          imgs="ghcr.io/${{ github.repository_owner }}/agent-mailbox"
+          imgs="ghcr.io/${{ github.repository_owner }}/agent-inbox"
           if [ "${HAS_DOCKERHUB}" = "true" ]; then
-            imgs=$(printf 'docker.io/%s/agent-mailbox\n%s' "${{ secrets.DOCKERHUB_USERNAME }}" "$imgs")
+            imgs=$(printf 'docker.io/%s/agent-inbox\n%s' "${{ secrets.DOCKERHUB_USERNAME }}" "$imgs")
           fi
           { echo 'images<<EOF'; printf '%s\n' "$imgs"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 

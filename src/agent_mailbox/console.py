@@ -296,6 +296,18 @@ def build_console(client: HubClient) -> Litestar:
             # Already joined (the restart case) or hub unreachable (the pages will say).
             pass
 
+    @get("/health", sync_to_thread=False)
+    def health() -> dict[str, str]:
+        """Is this console process up — nothing more.
+
+        Deliberately does not ask the hub. A console that is serving pages perfectly
+        well is healthy even while the hub is down; conflating the two would have the
+        orchestrator restart the console over an outage it cannot fix, and hide the
+        real fault behind the wrong red light. The pages already report an unreachable
+        hub, which is where that belongs.
+        """
+        return {"status": "ok"}
+
     # -- observing (no caller; consumes nothing) ---------------------------
 
     @get("/", media_type=MediaType.HTML, sync_to_thread=True)
@@ -937,6 +949,7 @@ def build_console(client: HubClient) -> Litestar:
         on_startup=[ensure_own_mailbox],
         after_request=_add_csp,
         route_handlers=[
+            health,
             overview,
             agents,
             graph,

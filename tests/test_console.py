@@ -199,6 +199,31 @@ def test_the_plain_text_form_is_the_same_prompt(console: TestClient) -> None:
     assert "uv tool install" in page.text
 
 
+def test_the_console_reports_its_own_health_without_asking_the_hub(
+    console: TestClient,
+) -> None:
+    """The container healthcheck's target, and it must not depend on the hub.
+
+    The image's check hits `/health` on whichever port the process listens on. The
+    console had no such route at all, so its container sat `unhealthy` for its whole
+    life while serving pages perfectly. It must also answer while the hub is down —
+    otherwise an outage the console cannot fix gets it restarted in a loop.
+    """
+
+    class DeadHub(StubHub):
+        def hub_info(self) -> dict[str, Any]:
+            raise ClientError("hub is down")
+
+    got = console.get("/health")
+    assert got.status_code == 200
+    assert got.json() == {"status": "ok"}
+
+    client, stub = make(DeadHub())
+    with client as c:
+        assert c.get("/health").status_code == 200
+    assert "hub_info" not in stub.calls
+
+
 def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     console: TestClient,
 ) -> None:
@@ -213,6 +238,7 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     assert "agent-mailbox --version" in text
     assert "1.2.3" in text, "the floor must be the version the hub reports"
     assert "uv tool install --no-cache --force" in text, "a plain install is a no-op"
+    assert '"agent-inbox[clients]"' in text, "the PyPI project is agent-inbox"
 
 
 def test_an_unreachable_hub_does_not_invent_a_version_to_compare_against(

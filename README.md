@@ -46,7 +46,9 @@ server to stand up, nothing to keep running.
 
 ## Install
 
-The PyPI package is **`agent-inbox`**; it installs the **`agent-inbox`** command.
+The PyPI package is **`agent-inbox`**; it installs the **`agent-mailbox`** command. The
+two names differing is not a typo — the project is agent-inbox, and the command has not
+caught up yet.
 
 ```bash
 uv tool install agent-inbox     # recommended (isolated CLI)
