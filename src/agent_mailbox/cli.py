@@ -31,6 +31,7 @@ from agent_mailbox.client import (
     HubClient,
     NotConfigured,
     detect_engine,
+    duplicate_names,
     find_config,
     load_config,
     load_global,
@@ -365,8 +366,34 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"{ok} configuration   {where}", flush=True)
         print(
             f"{ok} identity        {config.name} "
-            f"({config.role}, engine {config.engine})"
+            f"({config.role}, engine {config.engine})",
+            flush=True,
         )
+
+    # Two engines sharing a name share an *inbox*, and the symptom is mail that
+    # quietly vanishes — whichever reads first consumes it. The hub cannot see the
+    # mistake, since both sides present the same name and are indistinguishable to it,
+    # so this file is the only place it can be caught. Reported here, but the walk
+    # continues: the engine running now may be working perfectly while another is
+    # having its mail eaten.
+    clashes = duplicate_names()
+    for clashing, engines in sorted(clashes.items()):
+        print(
+            f"{bad} unique names    {', '.join(engines)} all claim {clashing!r}",
+            file=sys.stderr,
+        )
+    if clashes:
+        print(
+            "     They share one inbox: mail for any of them is taken by whichever\n"
+            "     reads first, and is then gone. Give each engine its own name — from\n"
+            "     the one that should change, run:\n\n"
+            "       agent-inbox configure set name=<a_new_name>\n\n"
+            "     or omit the name and let the hub issue one. It is claimed before it\n"
+            f"     is written, so it is really that engine's. File: {where}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"{ok} unique names    one name per engine", flush=True)
 
     # Without an identity there is still a hub to talk to, and reaching it is the
     # question that matters. UNNAMED never goes over the wire as a claim.
@@ -474,6 +501,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(
         f"{ok} api             ping answered; {waiting} message(s) waiting", flush=True
     )
+
+    # A local fault the network checks cannot see, so it decides the exit code even
+    # when everything else answered.
+    if clashes:
+        return 1
 
     if not authenticated:
         print(

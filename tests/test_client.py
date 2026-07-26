@@ -12,9 +12,12 @@ from pathlib import Path
 import pytest
 
 from agent_mailbox.client import (
+    UNNAMED,
     Config,
     HubClient,
     _toml_str,
+    detect_engine,
+    duplicate_names,
     load_config,
     write_config,
 )
@@ -198,3 +201,60 @@ class TestGlobalConfig:
         )
         env = {"XDG_CONFIG_HOME": str(tmp_path / "nothing"), "CLAUDECODE": "1"}
         assert load_config(project, env).token is None
+
+
+class TestUniqueNames:
+    """Two engines on one name share an inbox — the failure the file must not hold."""
+
+    def _write(self, tmp_path: Path, body: str) -> Path:
+        (tmp_path / "agent-mailbox.toml").write_text(body)
+        return tmp_path
+
+    def test_two_engines_claiming_one_name_are_reported(self, tmp_path: Path) -> None:
+        """Observed in this very repository: claude and codex both `nicole_ruzickova`.
+
+        The hub cannot catch it — both sides present the same name and are, to it, one
+        correspondent — so mail is consumed by whichever reads first and simply goes
+        missing. The file that assigns the names is the only place to notice.
+        """
+        self._write(
+            tmp_path,
+            'hub = "http://h:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n\n'
+            '[agents.codex]\nname = "nicole_ruzickova"\n',
+        )
+        assert duplicate_names(tmp_path) == {"nicole_ruzickova": ["claude", "codex"]}
+
+    def test_a_difference_of_case_is_still_a_clash(self, tmp_path: Path) -> None:
+        """Issued names are lowercase, so differing case means a hand-edited file —
+        and two such entries collide on the hub while looking distinct in the file."""
+        self._write(
+            tmp_path,
+            'hub = "http://h:8081"\n\n[agents.claude]\nname = "jed_smith"\n\n'
+            '[agents.codex]\nname = "Jed_Smith"\n',
+        )
+        assert list(duplicate_names(tmp_path)) == ["jed_smith"]
+
+    def test_distinct_names_are_not_reported(self, tmp_path: Path) -> None:
+        self._write(
+            tmp_path,
+            'hub = "http://h:8081"\n\n[agents.claude]\nname = "jed_smith"\n\n'
+            '[agents.codex]\nname = "pablo_fantomas"\n',
+        )
+        assert duplicate_names(tmp_path) == {}
+
+    def test_the_unnamed_placeholder_is_not_a_clash(self, tmp_path: Path) -> None:
+        """Before `join`, every engine holds the same placeholder. That is not a
+        collision — nobody has claimed anything yet — and reporting it would train
+        people to ignore the check."""
+        self._write(
+            tmp_path,
+            f'hub = "http://h:8081"\n\n[agents.claude]\nname = "{UNNAMED}"\n\n'
+            f'[agents.codex]\nname = "{UNNAMED}"\n',
+        )
+        assert duplicate_names(tmp_path) == {}
+
+
+def test_codex_is_detected_by_the_markers_a_real_session_carries() -> None:
+    """From a session log: CODEX_SANDBOX and CODEX_HOME were both absent."""
+    for marker in ("CODEX_THREAD_ID", "CODEX_MANAGED_BY_NPM", "CODEX_CI"):
+        assert detect_engine({marker: "1"}) == "codex", marker

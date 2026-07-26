@@ -126,6 +126,14 @@ ENGINE_MARKERS: tuple[tuple[str, str], ...] = (
     ("CLAUDE_CODE_ENTRYPOINT", "claude"),
     ("CODEX_SANDBOX", "codex"),
     ("CODEX_HOME", "codex"),
+    # A real Codex session was not detected by the two markers above: it carried
+    # CODEX_THREAD_ID, CODEX_CI and CODEX_MANAGED_BY_NPM instead, so the agent had to
+    # pass --engine and set AGENT_MAILBOX_* by hand for every command. Detection that
+    # only works on some installs is worse than none, because the failure is a wrong
+    # identity rather than an honest "I do not know".
+    ("CODEX_THREAD_ID", "codex"),
+    ("CODEX_MANAGED_BY_NPM", "codex"),
+    ("CODEX_CI", "codex"),
     ("GEMINI_CLI", "gemini"),
     ("CURSOR_TRACE_ID", "cursor"),
 )
@@ -203,6 +211,37 @@ def load_hub(start: Path | None = None, env: dict[str, str] | None = None) -> st
         if hub := str(tomllib.loads(path.read_text()).get("hub", "")).strip():
             return hub
     return str(load_global(environ).get("hub", "")).strip()
+
+
+def duplicate_names(start: Path | None = None) -> dict[str, list[str]]:
+    """Names claimed by more than one engine in this project, mapped to those engines.
+
+    Two engines sharing a name is not a cosmetic mistake: they share an *inbox*. Mail
+    for one is consumed by whichever reads first and is then gone, so the symptom is
+    messages that vanish rather than an error anybody can see. The hub cannot catch it
+    — each side presents the same name and is, as far as it can tell, the same
+    correspondent — so the only place it can be noticed is here, in the file that
+    assigns them.
+
+    Compared case-insensitively. Hub-issued names are lowercase, so a difference of
+    case means a hand-edited file, and two entries differing only in case would collide
+    on the hub while looking distinct in the file — the worst of both.
+    """
+    path = find_config(start)
+    if path is None:
+        return {}
+    try:
+        data = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    seen: dict[str, list[str]] = {}
+    for engine, entry in (data.get("agents") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        if name and name != UNNAMED:
+            seen.setdefault(name.casefold(), []).append(str(engine))
+    return {n: sorted(e) for n, e in seen.items() if len(e) > 1}
 
 
 def load_config(start: Path | None = None, env: dict[str, str] | None = None) -> Config:
