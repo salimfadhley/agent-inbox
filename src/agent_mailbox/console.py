@@ -118,7 +118,8 @@ code { font: 13px ui-monospace, monospace; }
 .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
        background: #3c3; margin-right: .35rem; }
 .dot.off { background: var(--line); }
-textarea, input[type=text] { width: 100%; font: 13px/1.45 ui-monospace, monospace;
+textarea, input[type=text], input[type=password] { width: 100%;
+           font: 13px/1.45 ui-monospace, monospace;
            padding: .6rem; border: 1px solid var(--line); border-radius: 4px;
            background: transparent; color: inherit; resize: vertical; }
 label { display: block; font-size: .8rem; opacity: .7; margin: .8rem 0 .25rem; }
@@ -708,7 +709,9 @@ def build_console(client: HubClient) -> Litestar:
             '<div class="warn"><p><strong>Copy it now.</strong> The hub keeps only a '
             "hash, so this is the only time it can be read. If it is lost, mint "
             "another and revoke this one.</p>"
-            f"<p><code>{html.escape(secret)}</code></p></div>"
+            f'<p><code id="minted">{html.escape(secret)}</code></p>'
+            "<p><button data-copy='minted' data-said='copied' type='button'>"
+            "Copy the token</button> <span id='copied' class='dim'></span></p></div>"
             + (
                 "<p>Put it in <code>~/.config/agent-inbox/config.toml</code> on the "
                 "machine it is for. Every agent there is then admitted, whatever name "
@@ -932,7 +935,7 @@ def build_console(client: HubClient) -> Litestar:
             "<p>Paste this to an agent. It is short on purpose: it tells the agent "
             "to fetch the full prompt from this console every time it starts, so an "
             "agent onboarded months ago still follows current instructions.</p>"
-            "<p><button id='copy' type='button'>Copy the prompt</button> "
+            "<p><button data-copy='prompt' type='button'>Copy the prompt</button> "
             "<span id='said' class='dim'></span></p>"
             "<textarea id='prompt' readonly rows='16'>"
             f"{html.escape(bootstrap(prompt_url))}</textarea>"
@@ -1110,10 +1113,11 @@ def build_console(client: HubClient) -> Litestar:
             '<label for="u">Username</label>'
             '<input type="text" id="u" name="username" autocomplete="username">'
             '<label for="p">Password</label>'
-            '<input type="text" id="p" name="password" '
-            'style="-webkit-text-security:disc" autocomplete="current-password">'
+            '<input type="password" id="p" name="password" '
+            'autocomplete="current-password">'
             '<label for="o">6-digit code (blank on first login)</label>'
-            '<input type="text" id="o" name="otp" inputmode="numeric">'
+            '<input type="text" id="o" name="otp" inputmode="numeric" '
+            'autocomplete="one-time-code">'
             '<p style="margin-top:.8rem"><button type="submit">Sign in</button></p>'
             "</form>" + first_run
         )
@@ -1164,6 +1168,10 @@ def build_console(client: HubClient) -> Litestar:
     def account(request: Request) -> Response:
         hub = hub_or_none()
         sid = request.cookies.get(SESSION_COOKIE)
+        # Named on the form so a password manager can attribute the credential it is
+        # being asked to update. Without an account it has a password belonging to
+        # nobody, and offers to save nothing.
+        me = acting_for(request)[1]
         if not sid:
             return Response(
                 _page(
@@ -1178,10 +1186,13 @@ def build_console(client: HubClient) -> Litestar:
             "<h2>Your account</h2>"
             "<h2>Change password</h2>"
             '<form method="post" action="/account/password/submit">'
+            "<label>Account</label>"
+            f'<input type="text" name="username" value="{html.escape(me)}" '
+            'autocomplete="username" readonly>'
             "<label>Current password</label>"
-            '<input type="text" name="current" style="-webkit-text-security:disc">'
+            '<input type="password" name="current" autocomplete="current-password">'
             "<label>New password</label>"
-            '<input type="text" name="new" style="-webkit-text-security:disc">'
+            '<input type="password" name="new" autocomplete="new-password">'
             '<p style="margin-top:.6rem"><button type="submit">Change</button></p>'
             "</form>"
             '<p><a href="/account/enrol">Re-scan / rotate 2FA</a></p>'
@@ -1213,6 +1224,7 @@ def build_console(client: HubClient) -> Litestar:
     def enrol_form(request: Request) -> Response:
         hub = hub_or_none()
         sid = request.cookies.get(SESSION_COOKIE)
+        who = acting_for(request)[1]
         if not sid:
             return Redirect("/login")  # type: ignore[return-value]
         status, offer, _ = client.auth_call("GET", "/auth/enrol", session=sid)
@@ -1239,8 +1251,11 @@ def build_console(client: HubClient) -> Litestar:
             "works once if you lose your phone:</p>"
             f"<ul>{codes}</ul>"
             '<form method="post" action="/account/enrol/submit">'
+            "<label>Account</label>"
+            f'<input type="text" name="username" value="{html.escape(who)}" '
+            'autocomplete="username" readonly>'
             "<label>Choose a password</label>"
-            '<input type="text" name="password" style="-webkit-text-security:disc">'
+            '<input type="password" name="password" autocomplete="new-password">'
             "<label>6-digit code from the app</label>"
             '<input type="text" name="otp" inputmode="numeric">'
             '<p style="margin-top:.6rem"><button type="submit">Confirm</button></p>'

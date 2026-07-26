@@ -7,21 +7,29 @@
 (function () {
   "use strict";
 
-  // -- copy the onboarding prompt -----------------------------------------
-  var copy = document.getElementById("copy");
-  if (copy) {
-    copy.addEventListener("click", async function () {
-      var t = document.getElementById("prompt");
-      var said = document.getElementById("said");
-      t.select();
+  // -- copy to clipboard --------------------------------------------------
+  // Any button carrying data-copy="<id>" copies that element's text. A secret shown
+  // once should never depend on the reader selecting it accurately by hand.
+  function textOf(el) {
+    return el ? (typeof el.value === "string" ? el.value : el.textContent || "") : "";
+  }
+
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    button.addEventListener("click", async function () {
+      var target = document.getElementById(button.getAttribute("data-copy"));
+      var said = document.getElementById(button.getAttribute("data-said") || "said");
+      if (!target) return;
+      if (typeof target.select === "function") target.select();
       try {
-        await navigator.clipboard.writeText(t.value);
+        await navigator.clipboard.writeText(textOf(target).trim());
         if (said) said.textContent = "Copied.";
       } catch (e) {
+        // Clipboard access can be refused (insecure origin, denied permission). The
+        // selection above still stands, so say what to press rather than failing mute.
         if (said) said.textContent = "Selected — press ctrl/cmd+C.";
       }
     });
-  }
+  });
 
   // -- message-flow graph -------------------------------------------------
   // Data is injected as a non-executable <script type="application/json">, which a strict

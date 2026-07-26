@@ -45,6 +45,56 @@ def global_config_path(env: dict[str, str] | None = None) -> Path:
     return root / GLOBAL_CONFIG_DIR / GLOBAL_CONFIG_NAME
 
 
+def write_global(settings: dict[str, str], env: dict[str, str] | None = None) -> Path:
+    """Merge *settings* into the machine-wide file, creating it if need be.
+
+    Merging, never replacing: the file may already hold a hub for another deployment,
+    and a tool that silently discarded it would be worse than one that never wrote at
+    all. Written 0600 — it holds a credential, and the default umask does not.
+    """
+    path = global_config_path(env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = load_global(env)
+    data.update(settings)
+    lines = [
+        "# agent-inbox — machine-wide settings, written by `agent-inbox configure`.",
+        "# A shared token belongs here: it admits this machine, whatever project an",
+        "# agent is working in. Identity stays per project, in agent-mailbox.toml.",
+        "",
+        *(f"{key} = {_toml_str(str(value))}" for key, value in sorted(data.items())),
+        "",
+    ]
+    path.write_text("\n".join(lines))
+    path.chmod(0o600)
+    return path
+
+
+def write_project(
+    settings: dict[str, str],
+    start: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> Path:
+    """Merge *settings* into this project's file, under this engine's entry.
+
+    `hub` is the project's and sits at the top level; everything else belongs to the
+    engine running now, so two agents in one repository do not overwrite each other.
+    """
+    environ = env if env is not None else dict(os.environ)
+    engine = detect_engine(environ) or "default"
+    path = find_config(start) or (project_root(start) / CONFIG_NAME)
+    existing: dict[str, Any] = {}
+    if path.is_file():
+        existing = tomllib.loads(path.read_text())
+    hub = str(settings.get("hub") or existing.get("hub") or "").strip()
+    entries = dict(existing.get("agents") or {})
+    mine = dict(entries.get(engine) or {})
+    for key, value in settings.items():
+        if key != "hub":
+            mine[key] = value
+    entries[engine] = mine
+    return _render_project(path, hub, entries)
+
+
 def load_global(env: dict[str, str] | None = None) -> dict[str, Any]:
     """The machine-wide file, or an empty mapping. Never raises for absence."""
     path = global_config_path(env)
@@ -305,13 +355,18 @@ def write_config(
         entry["token"] = kept_token
     agents[engine] = entry
 
+    return _render_project(target, str(existing.get("hub") or hub), agents)
+
+
+def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
+    """Write the project file. One renderer, so `join` and `configure` cannot drift."""
     lines = [
         "# agent-inbox — where the mailbox is, and who each agent here is on it.",
-        "# Written by `join`, one entry per engine. Do not commit it: it names a",
-        "# deployment and may carry a device token. Do not hand-edit it either —",
-        "# `join` again (with --force to replace an entry) and run `doctor`.",
+        "# Written by `join` and `agent-inbox configure`, one entry per engine. Do not",
+        "# commit it: it names a deployment and may carry a device token. Do not",
+        "# hand-edit it either — `configure` knows where every setting belongs.",
         "",
-        f"hub = {_toml_str(str(existing.get('hub') or hub))}",
+        f"hub = {_toml_str(hub)}",
         "",
         "# One identity per engine: several agents work in this repository and they",
         "# are different correspondents. Names are permanent and deliberately",
@@ -320,12 +375,10 @@ def write_config(
     ]
     for key in sorted(agents):
         item = agents[key]
-        lines += [
-            "",
-            f"[agents.{key}]",
-            f"name = {_toml_str(str(item.get('name', '')))}",
-            f"role = {_toml_str(str(item.get('role', 'agent')))}",
-        ]
+        lines += ["", f"[agents.{key}]"]
+        if item.get("name"):
+            lines.append(f"name = {_toml_str(str(item['name']))}")
+        lines.append(f"role = {_toml_str(str(item.get('role', 'agent')))}")
         if item.get("token"):
             lines.append(f"token = {_toml_str(str(item['token']))}")
     # Atomic: write a sibling temp file and rename over the target, so a crash mid-write

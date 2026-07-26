@@ -37,6 +37,8 @@ from agent_mailbox.client import (
     load_hub,
     project_root,
     write_config,
+    write_global,
+    write_project,
 )
 
 
@@ -190,6 +192,83 @@ def cmd_join(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_configure(args: argparse.Namespace) -> int:
+    """Set configuration values, so nobody has to know where the files live.
+
+    The tool owns its own configuration — that is the rule the rest of this module is
+    built on, and hand-editing is how it gets broken. Telling someone to open
+    `~/.config/agent-inbox/config.toml` in an editor asks them to know a path, a
+    format, and which of two files a given key belongs in; `configure` knows all three.
+
+    `--global` writes the machine-wide file, which is where a **shared** token belongs:
+    a credential admits the machine, so repeating it in every project is both work and
+    a wider spill if one leaks. Without the flag it writes the project's file, next to
+    the identity it goes with.
+    """
+    # `configure set key=value` and `configure key=value` both work: `set` reads
+    # naturally and is what people type, but insisting on it would be a trap for anyone
+    # who did not.
+    pairs = list(args.setting)
+    if pairs and pairs[0] == "set":
+        pairs = pairs[1:]
+    if not pairs:
+        print("nothing to set — try `configure set name=…`", file=sys.stderr)
+        return 2
+
+    settings: dict[str, str] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            print(f"expected key=value, got {pair!r}", file=sys.stderr)
+            return 2
+        settings[key.strip()] = value.strip()
+
+    known = {"token", "hub", "name", "role"}
+    if unknown := set(settings) - known:
+        print(
+            f"unknown setting(s): {', '.join(sorted(unknown))}. "
+            f"Known: {', '.join(sorted(known))}.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.is_global and (settings.keys() & {"name", "role"}):
+        # Identity is per project on purpose: the same engine in two repositories is
+        # two correspondents. A machine-wide name would quietly merge them.
+        print(
+            "name and role are per project, not machine-wide — run `configure` "
+            "without --global, or `join` to claim a name.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # A name is not ours to simply write down. It has to be claimed on the hub, or the
+    # file would assert an identity we do not hold — and the first message sent under
+    # it would be refused, or worse, land in somebody else's inbox.
+    if name := settings.get("name"):
+        hub = load_hub()
+        if not hub:
+            print(
+                "no hub known, so a name cannot be claimed. Set one first:\n"
+                "  agent-inbox configure hub=http://<host>:8081",
+                file=sys.stderr,
+            )
+            return 2
+        token = str(load_global().get("token", "")).strip()
+        try:
+            granted = HubClient(
+                Config(hub=hub, name=UNNAMED, token=token or None)
+            ).join(name)
+        except ClientError as exc:
+            print(f"could not claim {name!r}: {exc}", file=sys.stderr)
+            return 1
+        settings["name"] = str(granted.get("preferredUsername", name))
+
+    path = write_global(settings) if args.is_global else write_project(settings)
+    shown = {k: ("…" if k == "token" else v) for k, v in settings.items()}
+    _print({"wrote": str(path), "set": shown})
+    return 0
+
+
 def cmd_whoami(args: argparse.Namespace) -> int:
     """Who this engine is on this project, and what its role means."""
     config = load_config()
@@ -228,12 +307,14 @@ def _token_help(hub_url: str, name: str, path: Path) -> str:
         "\nThis hub authenticates, and this engine has no device token.\n"
         "A token is issued by a human operator, so ask yours to:\n\n"
         f"  1. Sign in to the console for {hub_url}\n"
-        f"  2. Agents -> {name} -> Tokens -> Mint a token (it is shown once)\n"
-        f"  3. Give it to you, and run:  agent-mailbox join {name} --token <token>\n\n"
-        f"That writes it to {path}, under this engine's entry:\n\n"
-        f'    [agents.<engine>]\n    name = "{name}"\n    token = "<token>"\n\n'
-        "Do not commit that file. Nothing else needs the token — it is sent\n"
-        "automatically on every call once it is there."
+        "  2. Tokens -> Mint a shared token (it is shown once, with a copy button)\n"
+        "  3. Give it to you, and run **one** of:\n\n"
+        "       agent-inbox configure --global token=<token>   # this whole machine\n"
+        "       agent-inbox configure token=<token>            # this project only\n\n"
+        "Do not edit the files by hand: `configure` knows where each setting belongs\n"
+        f"(machine-wide, or {path}) and writes it readable only by you. A shared\n"
+        "token admits the machine, so one is enough however many agents run here.\n"
+        "Nothing else needs it — it is sent automatically once it is set."
     )
 
 
@@ -495,7 +576,6 @@ def cmd_uninstall_hook(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="agent-mailbox",
         description="One mailbox tool: MCP server, terminal client, or the hub itself.",
     )
     # Without a subcommand on purpose. The onboarding prompt asks an agent to run this
@@ -503,7 +583,7 @@ def build_parser() -> argparse.ArgumentParser:
     # copy is old enough to matter — a question it must be able to ask of a version too
     # old to know the answer, so it cannot hide behind a subcommand added later.
     parser.add_argument(
-        "--version", action="version", version=f"agent-mailbox {__version__}"
+        "--version", action="version", version=f"%(prog)s {__version__}"
     )
     subs = parser.add_subparsers(dest="mode", required=True)
 
@@ -550,6 +630,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     join.set_defaults(func=cmd_join)
 
+    conf = subs.add_parser(
+        "configure",
+        help="set configuration; use this rather than editing files by hand",
+    )
+    conf.add_argument(
+        "--global",
+        dest="is_global",
+        action="store_true",
+        help="write the machine-wide file (where a shared token belongs) instead of "
+        "this project's",
+    )
+    conf.add_argument(
+        "setting",
+        nargs="+",
+        metavar="key=value",
+        help="name=…, role=…, token=… or hub=…. A literal `set` may lead. Changing a "
+        "name claims it on the hub first, so it is really yours.",
+    )
+    conf.set_defaults(func=cmd_configure)
+
     who = subs.add_parser("whoami", help="who this engine is here")
     who.add_argument(
         "--role-definition", action="store_true", help="also fetch what the role means"
@@ -561,7 +661,9 @@ def build_parser() -> argparse.ArgumentParser:
     role.set_defaults(func=cmd_role)
 
     doc = subs.add_parser(
-        "doctor", help="check config, connectivity, credentials and the API in order"
+        "doctor",
+        help="check config, connectivity, credentials and the API in order; "
+        "fix what it reports with `configure`, never by editing files",
     )
     doc.add_argument(
         "--hub", help="hub url to test; taken from the config or the environment if set"
