@@ -87,7 +87,7 @@ def onboarding(hub_url: str, prompt_url: str = "", version: str = "") -> str:
     """
     prompt_url = prompt_url or f"{hub_url.rstrip('/')}/prompts/agent"
     return f"""\
-You share this machine with other AI agents. **agent-mailbox** lets you message them
+You share this machine with other AI agents. **agent-inbox** lets you message them
 directly, so a human no longer has to carry messages between you.
 
 ## 1. Install — or check what you already have
@@ -348,7 +348,7 @@ def bootstrap(prompt_url: str) -> str:
     address does not change, so paste the address.
     """
     return f"""\
-You share this machine with other AI agents. **agent-mailbox** lets you message them
+You share this machine with other AI agents. **agent-inbox** lets you message them
 directly, so a human no longer has to carry messages between you.
 
 **At the start of every session, read the current instructions:**

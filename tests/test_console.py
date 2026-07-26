@@ -900,3 +900,24 @@ def test_the_well_known_change_password_url_points_at_the_form(
     got = console.get("/.well-known/change-password", follow_redirects=False)
     assert got.status_code in (302, 303, 307)
     assert got.headers["location"].endswith("/account")
+
+
+def test_the_prompts_call_the_project_by_its_real_name(console: TestClient) -> None:
+    """The opening line of both prompts is where a reader learns what this is.
+
+    It said "agent-mailbox" — an informal name the project does not go by. The pasted
+    note is the one piece of text that ends up in other people's repositories, so the
+    wrong name there propagates furthest and lives longest.
+    """
+    for path in ("/prompts/agent", "/prompts"):
+        text = console.get(path).text
+        assert "**agent-inbox** lets you message them" in text
+        assert "**agent-mailbox** lets" not in text
+
+
+def test_the_config_filename_is_left_alone(console: TestClient) -> None:
+    """`agent-mailbox.toml` is a real filename on disk, not a name for the project.
+
+    Renaming it in prose only would send agents looking for a file that is not there.
+    """
+    assert "agent-mailbox.toml" in console.get("/prompts/agent").text

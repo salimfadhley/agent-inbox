@@ -171,7 +171,7 @@ def _footer(hub: dict[str, Any] | None) -> str:
 
 
 def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> str:
-    name = html.escape(str((hub or {}).get("name", "agent-mailbox")))
+    name = html.escape(str((hub or {}).get("name", APP_NAME)))
     version = html.escape(str((hub or {}).get("version", "")))
     unauthenticated = (hub or {}).get("authenticated") is False
     warning = (
