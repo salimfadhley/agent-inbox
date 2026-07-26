@@ -263,3 +263,64 @@ class TestStructuralBoundary:
                 if any(i.endswith(f"agent_mailbox.{e}") for e in engine)
             }
             assert not leaked, f"{path.name} imports the engine: {leaked}"
+
+
+class TestRemoteDoctor:
+    """The hub's verdict on the caller — the half a client cannot see for itself."""
+
+    def test_it_answers_the_caller_it_would_otherwise_refuse(self) -> None:
+        """Unguarded on purpose, on a hub that refuses everything else.
+
+        The caller who needs this most is the one whose credential is missing or
+        rejected. A guarded route would meet them with the very 401 they came here to
+        understand, so it answers — with no name and no token at all.
+        """
+        client, _ = _build("enforce")
+        with client as c:
+            got = c.get("/doctor")
+        assert got.status_code == 200
+        body = got.json()
+        assert body["hub"]["credentialRequired"] is True
+        assert body["you"]["token"] == "not presented"
+        assert "ask an operator" in body["verdict"]
+
+    def test_it_blames_the_credential_before_the_unknown_name(self) -> None:
+        """On an enforcing hub `join` is guarded too.
+
+        So telling a caller with a bad token to "join to claim your name" is advice
+        they cannot act on: the credential is the blocking problem, and saying anything
+        else sends them round a loop they cannot leave.
+        """
+        client, _ = _build("enforce")
+        with client as c:
+            body = c.get(
+                "/doctor",
+                headers={
+                    IDENTITY_HEADER: "nobody_at_all",
+                    "Authorization": "Bearer nonsense",
+                },
+            ).json()
+        assert body["you"]["token"] == "rejected"
+        assert "not recognised" in body["verdict"]
+        assert "join to claim" not in body["verdict"]
+
+    async def test_a_working_token_is_confirmed_as_working(self) -> None:
+        """The positive case matters too: it is how an agent knows it is set up."""
+        client, auth = _build("enforce")
+        with client as c:
+            minted = await auth.mint_token(ROSEMARY, label="test")
+            c.post(
+                "/actors",
+                json={"preferredUsername": ROSEMARY},
+                headers={"Authorization": f"Bearer {minted.secret}"},
+            )
+            body = c.get(
+                "/doctor",
+                headers={
+                    IDENTITY_HEADER: ROSEMARY,
+                    "Authorization": f"Bearer {minted.secret}",
+                },
+            ).json()
+        assert body["you"]["token"] == "accepted"
+        assert body["you"]["verified"] == ROSEMARY
+        assert body["verdict"] == "your token was accepted"

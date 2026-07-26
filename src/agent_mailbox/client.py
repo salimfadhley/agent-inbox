@@ -400,6 +400,16 @@ class HubClient:
     def hub_info(self) -> Any:
         return self._call("GET", "/")
 
+    def remote_doctor(self) -> Any:
+        """Ask the hub what it makes of us — credential included, if we have one.
+
+        The half of a diagnosis a client cannot reach on its own: whether the token it
+        sent was accepted, revoked or never recognised, and whether the hub has ever
+        heard of the name it is using. The route answers rather than refusing, so this
+        works precisely when nothing else does.
+        """
+        return self._call("GET", "/doctor")
+
     def join(self, name: str | None = None) -> Any:
         """Claim *name*, or this engine's configured name, or one the hub issues.
 

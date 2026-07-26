@@ -192,7 +192,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     hub_url = args.hub or (config.hub if config else "") or load_hub()
     if not hub_url:
-        print(f"{bad} configuration   no hub url", file=sys.stderr)
+        print(f"{bad} configuration   no hub url", file=sys.stderr, flush=True)
         print(
             f"     Nothing here knows where the mailbox is. Run:\n"
             f"       agent-mailbox join --hub http://<host>:8081\n"
@@ -202,10 +202,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         return 2
 
     if config is None:
-        print(f"{todo} configuration   no entry for this engine yet ({where})")
-        print(f"{todo} identity        none yet — ask the hub for one below")
+        print(
+            f"{todo} configuration   no entry for this engine yet ({where})",
+            flush=True,
+        )
+        print(
+            f"{todo} identity        none yet — ask the hub for one below", flush=True
+        )
     else:
-        print(f"{ok} configuration   {where}")
+        print(f"{ok} configuration   {where}", flush=True)
         print(
             f"{ok} identity        {config.name} "
             f"({config.role}, engine {config.engine})"
@@ -222,36 +227,64 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     try:
         hub = client.hub_info()
     except ClientError as exc:
-        print(f"{bad} connectivity    {exc}", file=sys.stderr)
+        print(f"{bad} connectivity    {exc}", file=sys.stderr, flush=True)
         print(f"     the hub url is {hub_url}", file=sys.stderr)
         return 1
-    print(f"{ok} connectivity    {hub_url} — {hub.get('name')} {hub.get('version')}")
+    print(
+        f"{ok} connectivity    {hub_url} — {hub.get('name')} {hub.get('version')}",
+        flush=True,
+    )
 
+    # 3. The hub's own verdict on us, credential included. Only the hub knows whether
+    #    the token we sent was accepted, refused or revoked, and whether it has ever
+    #    heard of this name — a client that guessed at those is the thing being
+    #    debugged. The route answers rather than refusing, so it works when nothing
+    #    else does; an older hub has no such route, which is not a fault of ours.
+    remote: dict[str, Any] = {}
+    try:
+        remote = client.remote_doctor() or {}
+    except ClientError as exc:
+        print(f"{todo} hub check       not available ({exc})", flush=True)
+
+    you = remote.get("you") or {}
+    token_state = str(you.get("token", ""))
     authenticated = hub.get("authenticated") is True
     has_token = bool(config.token) if config else False
-    if authenticated and not has_token:
-        # Reported before the API call rather than after: the call is about to fail,
+
+    if token_state in ("rejected", "revoked") or (authenticated and not has_token):
+        # Reported before the API call rather than after: that call is about to fail,
         # and this is the reason, stated as something a person can act on.
-        print(f"{bad} credentials     no device token", file=sys.stderr)
+        print(
+            f"{bad} credentials     "
+            + (f"token {token_state}" if token_state else "no device token"),
+            file=sys.stderr,
+        )
+        if verdict := remote.get("verdict"):
+            print(f"     the hub says: {verdict}", file=sys.stderr)
         print(
             _token_help(hub_url, config.name if config else "<your name>", where),
             file=sys.stderr,
         )
         return 1
+
     print(
         f"{ok} credentials     "
         + (
-            "device token present"
+            "device token accepted by the hub"
+            if token_state == "accepted"
+            else "device token present"
             if has_token
             else "none needed — this hub does not authenticate"
         )
     )
+    if verdict := remote.get("verdict"):
+        print(f"{ok} hub check       {verdict}", flush=True)
 
     # Reachable, and nothing is in the way — but we are nobody here yet. This is the
     # end of the road for an unjoined engine, and it is a *good* outcome: it says the
     # next step will work.
     if config is None:
-        print(f"{todo} api             not joined yet")
+        print(f"{todo} api             not joined yet", flush=True)
         print(
             "\nThe hub is reachable and ready. Ask it for a name:\n\n"
             f"    agent-mailbox join --hub {hub_url}\n\n"
@@ -262,17 +295,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # 3. The API, as us. Everything above can be right while the hub still refuses or
-    #    has never heard of this name, and only a real call finds that out.
+    # 4. The API, as us. Everything above can be right while a real call still fails,
+    #    and only a real call finds that out.
     try:
         client.ping()
     except ClientError as exc:
-        print(f"{bad} api             {exc}", file=sys.stderr)
+        print(f"{bad} api             {exc}", file=sys.stderr, flush=True)
         if "auth" in str(exc).lower() or "token" in str(exc).lower():
             print(_token_help(hub_url, config.name, where), file=sys.stderr)
         return 1
     waiting = len(client.check_inbox().get("items", []))
-    print(f"{ok} api             ping answered; {waiting} message(s) waiting")
+    print(
+        f"{ok} api             ping answered; {waiting} message(s) waiting", flush=True
+    )
 
     if not authenticated:
         print(

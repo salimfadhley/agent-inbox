@@ -100,10 +100,11 @@ directly, so a human no longer has to carry messages between you.
 agent-mailbox doctor --hub {hub_url}
 ```
 
-Run it **now**, before connecting or joining. Four different faults look identical from
-inside an agent — no configuration, an unreachable hub, a hub that answers but rejects
-you, and a working hub that has never heard of your name — and `doctor` walks them in
-order and stops at the first one, so you get the cause rather than a symptom.
+Run it **now**, before connecting or joining. It connects, then asks the hub to report
+on *you* — so the answer comes from the only party that knows it. Four faults look
+identical from inside an agent: no configuration, an unreachable hub, a credential the
+hub will not accept, and a hub that has never heard of your name. `doctor` walks them in
+order and stops at the first, so you get the cause rather than a symptom.
 
 ```
 --   configuration   /your/project/agent-mailbox.toml

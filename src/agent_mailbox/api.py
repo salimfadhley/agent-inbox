@@ -419,6 +419,88 @@ def build_api(
     async def health() -> dict[str, str]:
         return await api.health()
 
+    @get("/doctor")
+    async def doctor(request: Request) -> dict[str, Any]:
+        """What the hub makes of *this* caller — the half a client cannot see.
+
+        **Deliberately unguarded, and deliberately never a 4xx.** The caller who most
+        needs this answer is the one whose credential is missing or revoked, and a route
+        that refused them would meet them with the very status they came here to
+        understand. So it reports, always, and reports only on the hub's posture and on
+        the caller themselves — never who else is here, which is what a guard would
+        properly protect.
+
+        It answers what a client can otherwise only guess at: does this hub require a
+        credential, did mine arrive, was it accepted, and does the hub know the name I
+        think I have? A client guessing at those was the thing being debugged.
+        """
+        # Not `caller_name`: that refuses a missing header with a 400, and "you did not
+        # tell me who you are" is a finding here, not a failure.
+        claimed = request.headers.get(IDENTITY_HEADER, "").strip()
+        enforced = auth is not None and auth_mode == "enforce"
+        checking = auth is not None and auth_mode != "off"
+
+        token_state = "not presented"
+        verified: str | None = None
+        if request.headers.get("Authorization", "").lower().startswith("bearer "):
+            try:
+                verified = await resolve_verified_caller(request)
+                token_state = "accepted" if verified else "rejected"
+            except AuthError:
+                # A revoked token raises. That is an answer worth giving precisely,
+                # since "revoked" and "wrong" call for different actions.
+                token_state = "revoked"
+
+        known = await house.mailbox.whois(claimed) if claimed else None
+
+        # Credentials are judged before identity, because on an enforcing hub they
+        # block the very step that would fix an unknown name: joining is guarded too,
+        # so "join to claim it" would be advice the caller cannot take.
+        if token_state == "revoked":
+            verdict = "your token has been revoked — ask an operator to mint another"
+        elif token_state == "rejected":
+            verdict = "your token was not recognised — ask an operator to mint another"
+        elif enforced and token_state == "not presented":
+            verdict = (
+                "no token presented, and this hub requires one for everything, "
+                "including joining — ask an operator to mint you one"
+            )
+        elif not claimed:
+            verdict = "you sent no name — join, and one will be issued to you"
+        elif known is None:
+            verdict = (
+                f"this hub has no actor named {claimed!r} — join to claim it. "
+                "Joining also writes your configuration; there is no second step."
+            )
+        elif token_state == "accepted":
+            verdict = "your token was accepted"
+        elif not checking:
+            verdict = "this hub does not authenticate; you are taken at your word"
+        else:
+            verdict = (
+                "no token presented. This hub does not require one yet, but it is "
+                "checking — you will be locked out when it starts enforcing"
+            )
+
+        return {
+            "hub": {
+                "name": house.mailbox.hub_name,
+                "version": __version__,
+                "authMode": auth_mode,
+                "credentialRequired": enforced,
+            },
+            "you": {
+                "claimed": claimed,
+                "known": known is not None,
+                "verified": verified,
+                "token": token_state,
+            },
+            # One sentence the client prints verbatim. The hub is the only party that
+            # knows all of the above, so it says what to do rather than leaving a client
+            # to infer it from a status code — which is how clients come to guess.
+            "verdict": verdict,
+        }
+
     @post("/actors", status_code=201, guards=[guard_enforce])
     async def join(data: dict[str, Any]) -> Actor:
         return await api.join(data)
@@ -669,6 +751,7 @@ def build_api(
     handlers = [
         hub,
         health,
+        doctor,
         join,
         directory,
         actor,
