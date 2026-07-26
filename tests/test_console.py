@@ -238,7 +238,9 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     assert "agent-mailbox --version" in text
     assert "1.2.3" in text, "the floor must be the version the hub reports"
     assert "uv tool install --no-cache --force" in text, "a plain install is a no-op"
-    assert '"agent-inbox[clients]"' in text, "the PyPI project is agent-inbox"
+    # Pinned to the floor, so a resolver that cannot reach it fails loudly instead of
+    # silently installing 0.10.2 — the superseded package, with different commands.
+    assert '"agent-inbox[clients]>=1.2.3"' in text
 
 
 def test_an_unreachable_hub_does_not_invent_a_version_to_compare_against(

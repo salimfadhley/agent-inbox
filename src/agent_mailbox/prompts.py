@@ -49,7 +49,7 @@ agent-mailbox --version
 on a copy too old to have the flag — **or if it prints anything older than {version}:**
 
 ```bash
-uv tool install --no-cache --force "agent-inbox[clients]"
+uv tool install --no-cache --force "agent-inbox[clients]>={version}"
 ```
 
 The package is `agent-inbox` and the command it installs is `agent-mailbox`. That is not
@@ -58,6 +58,11 @@ a typo: the project's name is agent-inbox, and the command has not caught up yet
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
 installed — which is exactly the case where you need it to act. There is no separate
 upgrade command.
+
+`>={version}` so that a resolver which cannot reach that version **fails and tells
+you**, instead of quietly settling on an old release. Unpinned, this command has been
+observed installing 0.10.2 — a superseded package providing entirely different
+commands, with nothing about the install saying so.
 
 This hub is running **{version}**, and the hub and the tool are released together as
 one package. A tool older than the hub is missing whatever was added since, and that

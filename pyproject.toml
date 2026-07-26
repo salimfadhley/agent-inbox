@@ -53,8 +53,8 @@ clients = [
     "httpx>=0.27",
     "click>=8.1",
 ]
-# The human operator console served at /ui (server-rendered HTML). Base install and
-# the MCP tools work without it; imported lazily only when the console is reached.
+# Vestigial. The console renders its own HTML and reaches the hub over urllib, so it
+# needs nothing here — which is why the image, which carries no extras, can run it.
 ui = [
     "jinja2>=3.1",
     "markdown>=3.6",

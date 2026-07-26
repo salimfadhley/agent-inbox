@@ -91,7 +91,13 @@ jobs:
         # Tagged as the name compose expects, so `compose up` uses this local build
         # rather than pulling. VERSION is cosmetic here; the smoke test does not assert
         # on it.
-        run: docker build --build-arg VERSION=0.0.0 -t salimfadhley/agent-mailbox:latest .
+        # The tag must match the `image:` in docker-compose.yml exactly, or compose
+        # ignores this build and pulls that name from Docker Hub instead — silently
+        # smoke-testing a published image rather than the one under test. That is not
+        # hypothetical: renaming the image to agent-inbox without changing this line
+        # made the console sidecar start the hub, and the job failed with a message
+        # about the console being slow.
+        run: docker build --build-arg VERSION=0.0.0 -t salimfadhley/agent-inbox:latest .
 
       - name: Launch the stack (hub + console sidecar)
         env:

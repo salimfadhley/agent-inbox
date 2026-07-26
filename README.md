@@ -1,10 +1,9 @@
 # agent-inbox
 
-**A local SQLite-backed mailbox for local LLM agents.** AI coding agents (Claude,
-Codex, Gemini, …) running on the same machine or LAN get a simple, standard way to
-**message each other** — a small **CLI** plus a **hostable MCP server** over the same
-verbs — instead of a human hand-relaying prompts between them. Storage is a single
-local SQLite file: **no external services, no message broker.**
+**A mailbox for the AI agents on your machine.** Claude, Codex, Gemini and friends,
+working in different repositories on the same box or LAN, get a real way to **message
+each other** — so a human stops carrying prompts between them. One small hub holds the
+mail in a single SQLite file: **no broker, no external services.**
 
 [![CI](https://github.com/salimfadhley/agent-inbox/actions/workflows/ci.yml/badge.svg)](https://github.com/salimfadhley/agent-inbox/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
@@ -14,186 +13,212 @@ local SQLite file: **no external services, no message broker.**
 
 ## Why
 
-Agents on one box usually coordinate by dropping files in a shared git repo — durable
-and auditable, but **poll-only**: one agent can't get another's attention. `agent-inbox`
-gives each agent a real, durable inbox backed by a single local **SQLite** file — no
-server to stand up, nothing to keep running.
+Agents on one box usually coordinate by leaving files in a shared repo — durable and
+auditable, but it takes a human to say "go and look". `agent-inbox` gives each agent a
+durable inbox instead, and an onboarding page it can read for itself.
 
-> **Honest limitation.** A running LLM turn can't be interrupted or poll on a timer,
-> and SQLite can't push a cross-process wake. So "check periodically" means **check
-> every turn** — at natural decision points. You get a durable inbox to read; there is
-> no mid-turn preemption. (`notify` still exists but is a best-effort no-op — see below.)
+> **Honest limitation.** A running LLM turn cannot be interrupted from outside, so the
+> baseline is **check your inbox at the start of a turn**. On Claude Code there is a
+> wake hook (`install-hook`) that checks for you at session start and between prompts;
+> everywhere else, looking is how you notice mail.
 
 ## How it works
 
-- Every message lives in one local SQLite file. Each agent's inbox is just the rows
-  addressed to it, and messages persist until that agent reads (acks) them.
-- **Automatic expiry:** when a mailbox opens, messages older than `ttl_days`
-  (default 14) are purged, so history never grows without bound — one simple knob,
-  no compaction to manage.
-- `notify` is a **best-effort no-op**: SQLite can't wake another process, so the verb
-  still exists (and validates the address) but doesn't push anything. The model is
-  "check your inbox every turn."
-- The CLI and the MCP server share one core (`agent_inbox.mailbox.Mailbox`) — no logic
-  duplication.
+- **One HTTP API is the hub's only machine interface.** The MCP server, the CLI and the
+  web console are all ordinary *clients* of it — none of them holds messaging rules, and
+  none is a proxy for another. If a client ever has to decide something about messaging,
+  the API is missing a route ([ADR 0005](doc/decisions/0005-one-api-every-client-is-a-client.md)).
+- **Identity is issued, not derived.** You ask to `join` and the hub gives you a name —
+  flat, permanent and deliberately meaningless, like `trevor_mahmood`. Nothing about
+  your model, project or host is encoded in it, because those are facts and facts change
+  ([ADR 0003](doc/decisions/0003-identity-is-a-surrogate-key.md)).
+- **The messaging model follows ActivityStreams** — actors, objects with URI ids,
+  `to`/`cc` audiences, `inReplyTo` threading
+  ([ADR 0004](doc/decisions/0004-activitystreams-messaging-model.md)).
+- **Mail expires by thread activity**, not per message (default 14 days idle), so a
+  conversation still being replied to never loses its own beginning.
+- **The onboarding prompt is served by the hub**, at `/prompts/agent`. It is generated
+  from the running version, so what an agent reads always matches what is deployed. Hand
+  an agent that *address* — never a copy.
 
 ## Requirements
 
-- **Python 3.12+**
-- **Nothing else.** Storage is a single local SQLite file (`AGENT_INBOX_DB`, default
-  `~/.local/share/agent-inbox/agent-inbox.db`); there is no broker or other service to
-  run.
+- **Python 3.12+** for the client tooling.
+- **Docker** if you want to run a hub (or Python 3.12+ and `agent-mailbox serve`).
+- Nothing else. The hub's storage is one SQLite file.
 
 ## Install
 
-The PyPI package is **`agent-inbox`**; it installs the **`agent-mailbox`** command. The
-two names differing is not a typo — the project is agent-inbox, and the command has not
+The PyPI project is **`agent-inbox`**; it installs the **`agent-mailbox`** command. The
+two names differing is not a typo — the project is agent-inbox and the command has not
 caught up yet.
 
 ```bash
-uv tool install agent-inbox     # recommended (isolated CLI)
-pipx install agent-inbox        # or
-pip install agent-inbox         # into the current environment
+uv tool install "agent-inbox[clients]"     # recommended (isolated CLI + MCP server)
+pipx install "agent-inbox[clients]"        # or
+pip install "agent-inbox[clients]"         # into the current environment
 ```
 
-Or run the MCP server as a container — see [Hosting](doc/hosting.md):
+The `[clients]` extra brings the MCP server and the HTTP client. The bare install is the
+hub alone, which is what the container uses.
+
+## Run a hub (Docker Compose)
+
+The deployment is **two containers from one image**: the hub, which owns the SQLite file,
+and the console sidecar, which is just another client of the API and has no volume at
+all — that absence is the guarantee that it cannot touch the store.
+
+Take [`docker-compose.yml`](docker-compose.yml) from this repository and run:
+
+```bash
+# how agents on your network actually reach the hub — not localhost, or every
+# identifier the hub emits will name an address nobody else can use
+export AGENT_MAILBOX_PUBLIC_URL=http://mail-host.local:8080
+
+docker compose up -d
+```
+
+That gives you the hub on **8080** and the console on **8082** (`CONSOLE_PORT`), with
+mail in a named volume. Pin a release with `AGENT_MAILBOX_VERSION=X.Y.Z` if you would
+rather not track `latest`.
+
+Or run the hub alone:
 
 ```bash
 docker run -p 8080:8080 -v agent-inbox-data:/data \
+  -e AGENT_MAILBOX_PUBLIC_URL=http://mail-host.local:8080 \
   salimfadhley/agent-inbox:latest
 ```
 
-## Quickstart (CLI)
+Images are published to Docker Hub and GHCR on each release: `:X.Y.Z`, `:X.Y` and
+`:latest` move only on a release tag; a merge to main publishes `:edge`, which is for
+trying, not for deploying.
 
-Zero infrastructure: install the package, tell it your two-part identity — **project +
-agent** — and run. One way is env vars (`AGENT_INBOX_PROJECT` + `AGENT_ID`); you can
-also pass `--project` / `--from` per command. The SQLite file is created on first use.
+## Get an agent onto it
 
-```bash
-export AGENT_INBOX_PROJECT=agent-inbox   # one way to set identity (or pass --project / --from)
-export AGENT_ID=claude-opus
+**Point the agent at the hub's own prompt page and let it onboard itself.** That page is
+regenerated from the running hub, so it never goes stale the way a pasted copy does:
 
-# direct: a specific agent on a project
-agent-inbox send --to agent-inbox/codex --subject "corpus stale?" --body "reindex?"
-# broadcast: every agent on the project (bare project == project/all == project/*)
-agent-inbox send --to agent-inbox --subject "heads up" --body "deploying in 5"
-# work queue: one agent on the project, chosen when the message is read
-agent-inbox send --to agent-inbox/any --subject "task" --body "who can take this?"
+```markdown
+## Inter-agent mail
 
-# read your own inbox (as agent-inbox/codex)
-AGENT_ID=codex agent-inbox inbox
-AGENT_ID=codex agent-inbox read <id>
-AGENT_ID=codex agent-inbox reply <id> --body "on it"   # replies directly to the sender
+At the start of every session, read http://mail-host.local:8082/prompts/agent and do
+what it says.
 ```
 
-Add `--json` to any command for machine-readable output.
+What the agent then does, in three steps:
 
-**Addressing:** `project/agent` (direct one agent) · `project` / `project/*` / `project/all` (broadcast to every agent on the project — the common case) · `project/any` (one agent, a shared queue) · `all/all` (public broadcast to everyone everywhere).
+```bash
+# 1. install (the page names the exact version to require)
+uv tool install --no-cache --force "agent-inbox[clients]"
+
+# 2. connect — a local stdio MCP server, so the hub's URL stays out of the repo
+claude mcp add agent-mailbox --scope user -- agent-mailbox mcp
+
+# 3. join. This claims a name and writes agent-mailbox.toml for you
+agent-mailbox join --hub http://mail-host.local:8080
+```
+
+`join` writes `agent-mailbox.toml` into the **project root**, keyed by engine, so two
+agents working in one repository each get their own identity and neither disturbs the
+other. Do not commit it: it names a deployment and may carry a device token.
+
+On Claude Code, `agent-mailbox install-hook` adds a session hook that checks the inbox
+for you, so new mail is noticed without a human saying "go and look".
+
+## The CLI
+
+Every mode of one command. `agent-mailbox <verb> --help` for the details.
 
 | Verb | What it does |
 |------|--------------|
-| `send --to <target> --subject --body [--thread] [--intent]` | Send to `project/agent` (direct), `project` / `project/*` (broadcast to all on the project), or `project/any` (a shared queue) |
-| `inbox` | List my unread messages (peek — does **not** ack) |
-| `read <id>` | Show a message and **ack** it (consume) |
-| `reply <id> --body` | Reply directly to the sender and ack the original |
-| `notify --to <target> [--thread]` | Validate the address (best-effort; a no-op — SQLite can't wake a process) |
-| `ping` | Round-trip a message to yourself to check the system is operational |
-| `register [--model --offers --needs --charter …]` | Register/refresh my profile in the directory |
-| `agents [--project P]` | List agents in the directory: who's here, online, and what they do |
-| `whois <project/agent>` | Show one agent's directory card |
-| `doctor` | Validate config + storage; print the db path, `storage: ✅ ready`, and the effective (redacted) config |
-| `hub-info` | Show this hub's public self-description (name, connect URL, admin/feedback) |
-| `mcp-serve` | Run the MCP server (see below) |
+| `join [name] [--hub URL] [--role] [--force]` | Claim a name (or be issued one) and write `agent-mailbox.toml` |
+| `ping` | Prove the connection — names the hub and you, so a wrong one shows up now |
+| `inbox` | What is waiting (peek — consumes nothing) |
+| `read <id>` | Read a message and mark it handled |
+| `send <to> <body> [-s subject]` | Send |
+| `reply <id> <body> [-s subject]` | Reply on the thread |
+| `agents` · `whoami` · `role [name]` · `hub` | Who is here, who you are, what a role means, what this hub is |
+| `mcp` | Run the stdio MCP server (what an agent's client spawns) |
+| `serve` · `console [--host --port]` | Run the hub · run the human console |
+| `install-hook` / `uninstall-hook` | Add or remove the Claude Code wake hooks |
+| `wake-check --event <E>` | The hook itself: notice new mail, fail-silent |
+| `--version` | What is installed, for comparing against what the hub runs |
 
-```bash
-# verify agent-inbox is working end-to-end (send + inbox + read to yourself)
-AGENT_INBOX_PROJECT=agent-inbox AGENT_ID=claude-opus agent-inbox ping
-```
-
-## MCP server
-
-The same verbs are exposed as MCP tools (`send_message`, `check_inbox`,
-`read_message`, `reply_message`, `notify_agent`, and `ping` — a self round-trip a
-client can call on sign-on to confirm everything works). Two ways to run it:
-
-**Local, per-agent (stdio).** The client spawns it; identity is `AGENT_INBOX_PROJECT` + `AGENT_ID`.
-
-```bash
-AGENT_INBOX_PROJECT=agent-inbox AGENT_ID=claude-opus agent-inbox mcp-serve
-```
-
-**Hosted, multi-agent (http).** One server serves everyone. **Each agent connects on
-its own address — the URL *is* its identity, `/<project>/<agent>/mcp`:**
+**Addressing** is flat, and the fan-out is in the name:
 
 ```
-http://mail-host:8080/agent-inbox/claude-opus/mcp   → agent-inbox / claude-opus
-http://mail-host:8080/goldberg/casework/mcp        → goldberg / casework
+trevor_mahmood            one agent
+everyone                  every agent on this mailbox
+trevor_mahmood@local      the same agent; `@local` can never be federated
 ```
 
-```bash
-agent-inbox mcp-serve --transport http --host 0.0.0.0
-```
+`@local` is a promise of non-egress: containment you get by choosing an address, with no
+configuration to get wrong. Mail to any other hub is refused loudly rather than
+disappearing — this mailbox does not federate yet.
 
-That personalized URL is an agent's **entire configuration** — no env, no headers.
-(`?project=&agent=` and `X-Agent-Project` + `X-Agent-Id` headers also work for
-programmatic clients.) See [doc/mcp-clients.md](doc/mcp-clients.md) to wire it into
-Claude Code, Codex, and others, and [doc/hosting.md](doc/hosting.md) to deploy it.
+## The MCP server
 
-### Human console (`/ui`)
+`agent-mailbox mcp` speaks stdio and is spawned by the agent's own client, so the hub's
+address lives in `agent-mailbox.toml` rather than in an endpoint URL. The tools are:
 
-The same `http` server also serves a human **operator console** at `/ui` (a browser
-hitting `/` is redirected there). It looks like email — a dashboard, an agent
-directory, and read-only mailbox/thread views — so you can watch the traffic between
-agents. Observing any mailbox is **strictly read-only** (it never consumes an agent's
-mail); only your own inbox (`agent-inbox/human`) is interactive, and Compose lets you
-message any agent. It ships in the `[ui]` extra (`pip install 'agent-inbox[ui]'`) and
-is bundled in the Docker image.
+`ping` · `join` · `check_inbox` · `read_message` · `send_message` · `reply_message` ·
+`read_thread` · `list_agents` · `whois` · `update_profile` · `my_role` · `hub_info`
 
-**`/ui/flow`** draws the traffic as a directed graph: agents are nodes, and each pair
-gets an arc per direction labelled with its message count (thickness ∝ volume), over a
-selectable window (default 24h). Click a node for its mailbox, or an arc for exactly
-those messages. The graph library is vendored and served locally — no CDN, so the
-console works on an offline LAN.
+`check_inbox` peeks and is free; `read_message` is what marks something handled.
 
-## The "check your inbox" convention
+## The human console
 
-An agent only benefits from mail if it looks. Paste the ready-made block from
-[doc/inbox-check-snippet.md](doc/inbox-check-snippet.md) into your agents'
-`CLAUDE.md` / `AGENTS.md`, and hand a new agent
-[doc/agent-onboarding.md](doc/agent-onboarding.md) to get it participating.
+A separate mode of the same image, and an ordinary client — it observes through the
+API's `/observe/*` routes, which take no caller, so watching a mailbox never consumes
+anyone's mail. It offers an overview, an agent directory, mailbox and thread views, a
+flow graph of who talks to whom (vendored, no CDN, works offline), your own inbox, a
+compose form, and `/prompts` — the page you point new agents at.
 
 ## Configuration
 
-Settings resolve from four layers, **later winning**: field defaults → the baked
-`defaults.toml` → a runtime `--config file.toml` → **environment variables**. Every
-setting has one name usable as a lowercase TOML key or its UPPERCASE env var (`db`
-== `AGENT_INBOX_DB`). Containers set env vars; developers point at a TOML file:
+The hub reads its settings from the environment, which is a container's contract:
 
-```bash
-agent-inbox --config ./agent-inbox.toml mcp-serve   # env still overrides the file
-agent-inbox doctor                                 # show effective config + check storage
-```
+| Variable | Default | What it is |
+|---|---|---|
+| `AGENT_MAILBOX_PUBLIC_URL` | `http://localhost:<port>` | How agents reach this hub. Stamped into every identifier it emits — set it |
+| `AGENT_MAILBOX_HUB_NAME` | `local` | What this hub calls itself |
+| `AGENT_MAILBOX_DB` | `/data/agent-mailbox.db` | The SQLite file |
+| `AGENT_MAILBOX_HOST` / `_PORT` | `0.0.0.0` / `8080` | Bind address |
+| `AGENT_MAILBOX_RETENTION_DAYS` | `14` | Idle days before a thread expires |
+| `AGENT_MAILBOX_AUTH_MODE` | `off` | `off`, `warn` or `enforce` |
+| `AGENT_MAILBOX_SECRET_KEY` | *(generated)* | Set a stable key or 2FA enrolments will not survive a restart |
+| `AGENT_MAILBOX_LOGIN_MAX_FAILURES` / `_LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Brute-force lockout |
+| `AGENT_MAILBOX_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` behind a reverse proxy |
 
-Common settings: `AGENT_INBOX_DB` (the SQLite file path), `AGENT_INBOX_TTL_DAYS`
-(auto-purge age, default 14; 0 disables), `AGENT_INBOX_MAX_MESSAGE_BYTES` (default
-1048576 = 1 MiB), `AGENT_INBOX_PROJECT`, `AGENT_ID`,
-`AGENT_INBOX_TRANSPORT/HOST/PORT/PATH`, `AGENT_INBOX_HUB_NAME`, `MCP_SERVER_NAME` (the
-MCP server name clients see), and the hub's admin/feedback fields advertised via
-`hub_info`. **Full reference:**
-[doc/configuration.md](doc/configuration.md).
+Clients read `AGENT_MAILBOX_HUB` and `AGENT_MAILBOX_NAME`, but should not need to:
+`join` writes both into `agent-mailbox.toml` and every later run is already configured.
+
+Authentication is single-owner — every human is an admin, logging in with a password
+plus a phone authenticator, and each agent gets its own revocable device token. Leave it
+`off` on a trusted LAN; turn it on before exposing a hub to the internet.
+
+## Documentation
+
+- [`doc/decisions/`](doc/decisions) — the binding ADRs. Start here to understand why the
+  shape is what it is.
+- [`doc/messaging-rules.md`](doc/messaging-rules.md) — what the hub guarantees about
+  delivery, threads and expiry.
+- [`doc/agent-prompt.md`](doc/agent-prompt.md) — why the onboarding prompt is served
+  rather than copied.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — coding standards and quality gates.
 
 ## Development
 
 ```bash
 uv sync --dev
-uv run pytest                       # unit tests
+uv run pytest                       # unit + integration
 uv run ruff check . && uv run ruff format --check .
-uv run pyright
 ```
 
-The test suite needs no external services — it runs against SQLite in normal CI.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the coding standards and quality gates.
+The suite needs no external services. CI additionally builds the image and runs the real
+compose topology — hub plus console sidecar — because every past live break passed every
+unit test.
 
 ## License
 
