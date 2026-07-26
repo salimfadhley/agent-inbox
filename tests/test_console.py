@@ -870,3 +870,30 @@ def test_a_signed_in_operator_reads_their_own_mailbox_not_the_console_s() -> Non
 def test_with_no_session_the_console_still_acts_as_itself(console: TestClient) -> None:
     """On an open hub nothing changes — it is an ordinary agent that joined."""
     assert console.get("/inbox").status_code == 200
+
+
+def test_the_page_says_what_application_it_is(console: TestClient) -> None:
+    """A self-hosted hub answers to whatever the box is called.
+
+    "halob" tells a browser tab, a history entry or a bookmark nothing about what the
+    site is, so the application's own name goes in the title and in the documented
+    `application-name` meta. Bitwarden will not read either — it names saved items
+    after the hostname — but everything else does.
+    """
+    page = console.get("/login").text
+    assert '<meta name="application-name" content="agent-inbox">' in page
+    assert "<title>Sign in — agent-inbox (testhub)</title>" in page
+
+
+def test_the_well_known_change_password_url_points_at_the_form(
+    console: TestClient,
+) -> None:
+    """The one piece of password-manager integration that is a real standard.
+
+    Safari since 2019 and Chrome since 86 probe for a 2xx/3xx here and offer to take
+    the user to the form. It must answer before anyone signs in, or the probe sees the
+    sign-in redirect instead of an answer.
+    """
+    got = console.get("/.well-known/change-password", follow_redirects=False)
+    assert got.status_code in (302, 303, 307)
+    assert got.headers["location"].endswith("/account")

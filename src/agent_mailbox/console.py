@@ -56,12 +56,29 @@ STATIC_DIR = Path(__file__).parent / "static"
 #: agent-inbox, which the console's own hostname will rarely tell them.
 PROJECT_URL = "https://github.com/salimfadhley/agent-inbox"
 
+#: What this application is called, for the page title and `application-name`. A
+#: self-hosted hub answers to whatever the homelab box is called — `halob`, `nas`,
+#: `vm3` — and that name says nothing about what the site is. Bitwarden itself will
+#: not read this (it names saved items after the hostname, full stop), but browser
+#: tabs, history and other managers do.
+APP_NAME = "agent-inbox"
+
 #: Reachable without signing in, once the hub authenticates. Each earns it by being
 #: needed *before* anyone can sign in: the way in, the way out, the container's health
 #: probe, and the onboarding prompt — which is how a new agent is set up in the first
 #: place and holds nothing secret. Everything else is behind the gate.
 #: `/prompts*` and `/static/*` are matched by prefix alongside this set.
-OPEN_PATHS = frozenset({"/login", "/login/submit", "/logout/submit", "/health"})
+OPEN_PATHS = frozenset(
+    {
+        "/login",
+        "/login/submit",
+        "/logout/submit",
+        "/health",
+        # Probed by password managers before anyone signs in; it only points at a page
+        # that is itself gated, so answering costs nothing.
+        "/.well-known/change-password",
+    }
+)
 
 #: A genuine Content-Security-Policy — stricter than the nothing that shipped before.
 #: Scripts may load only from this origin (the vendored lib + console.js) and never
@@ -182,8 +199,10 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="application-name" content="{APP_NAME}">
 <link rel="icon" href="/static/icon.svg">
-<title>{html.escape(title)} — {name}</title><style>{STYLE}</style></head>
+<title>{html.escape(title)} — {APP_NAME} ({name})</title>
+<style>{STYLE}</style></head>
 <body>
 <h1><a href="/">{name}</a></h1>
 <p class="sub">{html.escape(title)}{f" · v{version}" if version else ""}</p>
@@ -400,6 +419,17 @@ def build_console(client: HubClient) -> Litestar:
         except ClientError:
             # Already joined (the restart case) or hub unreachable (the pages will say).
             pass
+
+    @get("/.well-known/change-password", sync_to_thread=False)
+    def change_password_url() -> Redirect:
+        """The W3C well-known URL, so a password manager can offer "change password".
+
+        Safari has honoured it since 2019 and Chrome since 86: they probe for a 2xx/3xx
+        here and, if they find one, offer to take the user straight to the form. It is
+        two lines and it is the one piece of password-manager integration that is a
+        real standard rather than a heuristic.
+        """
+        return Redirect("/account")
 
     @get("/health", sync_to_thread=False)
     def health() -> dict[str, str]:
@@ -1316,6 +1346,7 @@ def build_console(client: HubClient) -> Litestar:
         after_request=_add_csp,
         route_handlers=[
             health,
+            change_password_url,
             overview,
             agents,
             graph,
