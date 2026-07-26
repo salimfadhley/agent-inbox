@@ -89,27 +89,58 @@ class AuthService:
     # -- bootstrap ---------------------------------------------------------
 
     async def bootstrap(self) -> str | None:
-        """Seed the first admin if there are none. Returns the password if seeded.
+        """Make sure someone can get in, and say how. Returns a password if it set one.
 
-        Jenkins-style: a random password is generated, returned to the caller to
-        log once, and only its hash is stored. The account must change its
-        password and enrol 2FA before it can do anything else.
+        Jenkins-style: a random password, only ever stored hashed, printed to the log
+        for the operator to use once.
+
+        **It keeps printing — a fresh password each boot — until that account has
+        actually been set up.** Printing only at the instant of seeding was a trap:
+        the password lives in one container's log, and a container is a thing that gets
+        replaced. On a hub deployed in July the admin account was seeded, the log was
+        rotated away with the container, and the only credential to a hub nobody could
+        log into was gone. Nothing could recover it; the hash is one-way by design.
+
+        So while the account is still `MUST_CHANGE_AND_ENROL` it has no powers worth
+        stealing — it can reach the enrolment endpoints and nothing else — and a
+        rotating password in the log is worth far more than a lost one. The moment a
+        real operator finishes enrolling, the account becomes ACTIVE and this goes
+        quiet for good.
         """
-        if await self._store.any_users():
+        existing = await self._store.get_user("admin")
+        if existing is None and await self._store.any_users():
+            # Someone renamed or replaced the seed account. Not ours to second-guess.
             return None
+
         password = secrets.generate_token()
-        await self._store.add_user(
-            User(
-                username="admin",
-                password_hash=secrets.hash_password(password),
-                enrolment_state=EnrolmentState.MUST_CHANGE_AND_ENROL,
-                created=self._now(),
+        if existing is None:
+            await self._store.add_user(
+                User(
+                    username="admin",
+                    password_hash=secrets.hash_password(password),
+                    enrolment_state=EnrolmentState.MUST_CHANGE_AND_ENROL,
+                    created=self._now(),
+                )
             )
-        )
-        logger.warning("no users found — created bootstrap admin")
-        logger.warning(
-            "initial admin password: %s (shown once; change it now)", password
-        )
+            logger.warning("no users found — created bootstrap admin")
+        elif existing.enrolment_state is EnrolmentState.MUST_CHANGE_AND_ENROL:
+            await self._store.put_user(
+                User(
+                    username=existing.username,
+                    password_hash=secrets.hash_password(password),
+                    enrolment_state=existing.enrolment_state,
+                    totp_secret_enc=existing.totp_secret_enc,
+                    created=existing.created,
+                    last_login=existing.last_login,
+                )
+            )
+            logger.warning(
+                "the admin account has never been set up — issuing a new password"
+            )
+        else:
+            return None  # set up properly; never print again
+
+        logger.warning("initial admin password: %s (change it now)", password)
         return password
 
     # -- login -------------------------------------------------------------

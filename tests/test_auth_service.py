@@ -7,6 +7,7 @@ codes, token resolution and revocation, and session expiry against an injected c
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -59,8 +60,11 @@ class TestBootstrap:
             pw = await svc.bootstrap()
         assert pw is not None
         assert any("initial admin password" in r.message for r in caplog.records)
-        # idempotent: a second call with a user present seeds nothing
-        assert await svc.bootstrap() is None
+        # It does NOT go quiet on the second call. That used to be the rule, and it
+        # cost a real hub its only credential when the container holding the log was
+        # replaced. It stays noisy until the account is genuinely set up — see
+        # TestBootstrapKeepsPrinting for the whole of that behaviour.
+        assert await svc.bootstrap() is not None
 
     async def test_bootstrap_account_must_enrol(self) -> None:
         svc = service()
@@ -165,3 +169,35 @@ class TestDeviceTokens:
         tokens = await svc.list_tokens("jed_smith")
         assert {t.label for t in tokens} == {"a", "b"}
         assert all(not hasattr(t, "secret") for t in tokens)
+
+
+class TestBootstrapKeepsPrinting:
+    """A password nobody can read is the same as no password at all."""
+
+    async def test_it_issues_a_new_password_while_the_admin_is_unset_up(self) -> None:
+        """The failure this exists for: the log was rotated away with the container.
+
+        A hub seeded its admin in July, the container was later replaced, and the only
+        credential to it went with the log. The hash is one-way, so nothing could get
+        it back. While the account is still un-onboarded it has no powers worth
+        stealing, so re-issuing beats being locked out.
+        """
+        store = InMemoryAuthStore()
+        svc = AuthService(store, secret_key=KEY)
+        first = await svc.bootstrap()
+        assert first
+        second = await svc.bootstrap()
+        assert second and second != first, "a fresh password each boot until set up"
+        # and the new one is the one that works
+        await svc.login("admin", second)
+
+    async def test_it_goes_quiet_once_the_admin_is_properly_set_up(self) -> None:
+        """Once a real operator finishes enrolling, printing stops for good."""
+        store = InMemoryAuthStore()
+        svc = AuthService(store, secret_key=KEY)
+        password = await svc.bootstrap()
+        assert password
+        user = await store.get_user("admin")
+        assert user is not None
+        await store.put_user(replace(user, enrolment_state=EnrolmentState.ACTIVE))
+        assert await svc.bootstrap() is None

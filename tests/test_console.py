@@ -660,3 +660,56 @@ def test_no_page_ships_an_inline_executable_script(console: TestClient) -> None:
         # allowed: <script src=...> and <script type="application/json">
         # forbidden: a bare <script> with code
         assert "<script>" not in body, f"{path} has an inline executable script"
+
+
+def test_tokens_are_reachable_from_the_navigation(console: TestClient) -> None:
+    """The capability existed twice over and could still not be found.
+
+    First only in the API, then only behind an unlabelled last column of the agent
+    directory. Something nobody can find is indistinguishable from something that was
+    never built, so the way in is now a nav entry like every other section.
+    """
+    assert "href='/tokens'" in console.get("/").text
+    index = console.get("/tokens")
+    assert index.status_code == 200
+    assert "/tokens/rosemary_nasrin" in index.text
+
+
+def test_the_agent_directory_labels_its_token_column(console: TestClient) -> None:
+    """A blank header is why the existing link went unnoticed."""
+    assert "Keys" in console.get("/agents").text
+
+
+def test_a_hub_that_wants_a_login_sends_you_to_the_login(console: TestClient) -> None:
+    """On an enforcing hub every page fails this way until someone signs in.
+
+    Meeting a first-time operator with a 502 about their own hub would be absurd, so
+    the one failure that means "who are you?" opens the door instead of reporting a
+    fault. Matched on the API's stable error code, not on prose.
+    """
+
+    class Refusing(StubHub):
+        def survey(self, since: str = "") -> dict[str, Any]:
+            raise ClientError("this hub requires authentication [not_authenticated]")
+
+    client, _ = make(Refusing())
+    with client as c:
+        got = c.get("/", follow_redirects=False)
+    assert got.status_code in (302, 303, 307)
+    assert got.headers["location"].endswith("/login")
+
+
+def test_a_hub_that_is_merely_broken_still_reports_the_fault(
+    console: TestClient,
+) -> None:
+    """The redirect must not swallow real failures — that would hide an outage."""
+
+    class Broken(StubHub):
+        def survey(self, since: str = "") -> dict[str, Any]:
+            raise ClientError("connection refused")
+
+    client, _ = make(Broken())
+    with client as c:
+        got = c.get("/", follow_redirects=False)
+    assert got.status_code == 502
+    assert "connection refused" in got.text

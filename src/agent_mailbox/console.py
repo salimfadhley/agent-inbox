@@ -50,6 +50,11 @@ Form = Annotated[dict[str, Any], Body(media_type=RequestEncodingType.URL_ENCODED
 #: script from any other origin is refused by the browser.
 STATIC_DIR = Path(__file__).parent / "static"
 
+#: Where this came from. In the footer because an operator looking at an unfamiliar
+#: hub should be one click from what it is — and because the project's true name is
+#: agent-inbox, which the console's own hostname will rarely tell them.
+PROJECT_URL = "https://github.com/salimfadhley/agent-inbox"
+
 #: A genuine Content-Security-Policy — stricter than the nothing that shipped before.
 #: Scripts may load only from this origin (the vendored lib + console.js) and never
 #: inline, so a reflected-script injection cannot execute. Inline *styles* and inline
@@ -134,7 +139,8 @@ def _footer(hub: dict[str, Any] | None) -> str:
     theirs = html.escape(str((hub or {}).get("version", "")) or "unreachable")
     return (
         f'<footer class="foot">console <code>{html.escape(__version__)}</code>'
-        f" · hub <code>{theirs}</code></footer>"
+        f" · hub <code>{theirs}</code> · "
+        f'<a href="{PROJECT_URL}">agent-inbox on GitHub</a></footer>'
     )
 
 
@@ -158,6 +164,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
         link("/", "Overview")
         + link("/agents", "Agents")
         + link("/graph", "Graph")
+        + link("/tokens", "Tokens")
         + link("/inbox", "Inbox")
         + link("/compose", "Compose")
         + link("/prompts", "Prompt")
@@ -276,12 +283,28 @@ def _subject(note: dict[str, Any]) -> str:
     return (body[:60] + "…") if len(body) > 60 else (body or "(no subject)")
 
 
+def _needs_login(exc: Exception) -> bool:
+    """Is this the hub saying "who are you?" rather than "something broke"?
+
+    Matched on the stable error code the API attaches to every failure, which exists
+    for exactly this: a caller switching on the cause without parsing prose.
+    """
+    return "not_authenticated" in str(exc) or "enrolment_required" in str(exc)
+
+
 def _err(exc: Exception, hub: dict[str, Any] | None, title: str) -> Response:
     """Every screen either renders or explains — never a blank page.
 
     An operator staring at nothing cannot tell "hub down" from "nothing here", so a
     failure says which it was rather than falling through to an empty table.
+
+    A hub that refuses for want of a credential is not a fault to report but a door to
+    open: on an enforcing hub *every* page fails this way until someone signs in, and
+    meeting a first-time operator with a 502 about their own hub would be absurd. So
+    that one case redirects to the sign-in page instead.
     """
+    if _needs_login(exc):
+        return Redirect("/login")
     body = (
         '<p class="warn">The hub did not answer this request: '
         f"{html.escape(str(exc))}</p>"
@@ -427,7 +450,7 @@ def build_console(client: HubClient) -> Litestar:
                     f'<a href="/tokens/{html.escape(name)}">Tokens</a>',
                 ]
             )
-        body = _table(["Who", "Type", "About", "Profile", ""], rows, "Nobody yet.")
+        body = _table(["Who", "Type", "About", "Profile", "Keys"], rows, "Nobody yet.")
         return Response(
             _page("Agents", body, hub, "/agents"), media_type=MediaType.HTML
         )
@@ -712,6 +735,51 @@ def build_console(client: HubClient) -> Litestar:
             _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
         )
 
+    @get("/tokens", media_type=MediaType.HTML, sync_to_thread=True)
+    def token_index() -> Response:
+        """Every agent, and the way in to minting one a key.
+
+        This exists because the per-agent page was reachable only from an unlabelled
+        column at the end of the directory table — which is to say, not reachable. A
+        capability nobody can find is the same as one that was never built, and this
+        one had already been built twice: the API could mint before any page could.
+        """
+        hub = hub_or_none()
+        try:
+            actors = client.list_agents().get("items", [])
+        except ClientError as exc:
+            return _err(exc, hub, "Tokens")
+        rows = [
+            [
+                _mbox_link(a.get("preferredUsername", "")),
+                '<span class="dim">'
+                f"{html.escape((a.get('summary') or '')[:60])}</span>",
+                f'<a href="/tokens/{html.escape(a.get("preferredUsername", ""))}">'
+                "Tokens</a>",
+            ]
+            for a in actors
+        ]
+        # The hub descriptor says whether tokens are *required*, not which mode is set —
+        # `authMode` lives on /doctor, and quoting a field that is not here would print
+        # a confident "auth off" at a hub that is merely warning.
+        note = (
+            '<p class="warn">This hub does not require a token yet, so mail works '
+            "without one. Minting now is still worth doing: an agent that already has "
+            "a token keeps working on the day enforcement is turned on, and one that "
+            "does not is locked out until someone is at a keyboard.</p>"
+            if (hub or {}).get("authenticated") is False
+            else ""
+        )
+        body = (
+            "<p>A device token is how an agent proves who it is once this hub "
+            "enforces authentication. Each is shown once, belongs to one agent, and "
+            "can be revoked on its own.</p>"
+            f"{note}" + _table(["Agent", "About", ""], rows, "Nobody has joined yet.")
+        )
+        return Response(
+            _page("Tokens", body, hub, "/tokens"), media_type=MediaType.HTML
+        )
+
     @get("/tokens/{name:str}", media_type=MediaType.HTML, sync_to_thread=True)
     def tokens(name: str, request: Request) -> Response:
         return _tokens_page(request, name)
@@ -952,8 +1020,10 @@ def build_console(client: HubClient) -> Litestar:
             '<input type="text" id="o" name="otp" inputmode="numeric">'
             '<p style="margin-top:.8rem"><button type="submit">Sign in</button></p>'
             "</form>"
-            "<p class='dim'>First run? The initial <code>admin</code> password is "
-            "printed once in the hub's boot log.</p>"
+            "<p class='dim'>First run? The <code>admin</code> password is printed in "
+            "the hub's log <strong>every time it starts</strong>, until the account "
+            "has been set up — so a lost one is only a restart away. Leave the code "
+            "blank on the first sign-in; you will be asked to enrol 2FA next.</p>"
         )
         return Response(
             _page("Sign in", body, hub, "/login"), media_type=MediaType.HTML
@@ -1127,6 +1197,7 @@ def build_console(client: HubClient) -> Litestar:
             do_read,
             compose_form,
             do_compose,
+            token_index,
             tokens,
             mint,
             revoke,
