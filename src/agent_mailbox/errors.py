@@ -14,6 +14,8 @@ Two choices worth knowing:
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 from typing import Any
 
 from litestar import Request, Response
@@ -87,3 +89,35 @@ def auth_error_handler(request: Request, exc: AuthError) -> Response:
     if status == 429 and retry_after:
         headers["Retry-After"] = str(retry_after)
     return Response(content=problem(exc), status_code=status, headers=headers or None)
+
+
+#: Logged rather than returned: a wedged store is the operator's problem to see, and
+#: the agent that happened to be next in the queue cannot fix it.
+store_logger = logging.getLogger("agent_mailbox.store")
+
+
+def store_busy_handler(request: Request, exc: sqlite3.OperationalError) -> Response:
+    """A database that will not accept a write is a 503, and says so in words.
+
+    This used to be a bare 500 with `Internal Server Error` and nothing else. When the
+    halob hub wedged on 2026-07-26, three agents each retried a send that could never
+    succeed, and the only place the actual reason appeared was the container log — which
+    an agent cannot read. A 500 also invites a retry, and this is the one failure where
+    retrying is certain to be useless.
+
+    Anything else from sqlite really is our bug, so it keeps its 500 and its silence.
+    """
+    if "locked" not in str(exc) and "busy" not in str(exc):
+        raise exc
+    store_logger.error("store refused a write: %s", exc)
+    return Response(
+        content={
+            "code": "store_busy",
+            "detail": (
+                "the hub's database is not accepting writes — your message was not "
+                "sent, and retrying now will not help. This is a fault on the hub, "
+                "not in your request; tell whoever operates it."
+            ),
+        },
+        status_code=503,
+    )

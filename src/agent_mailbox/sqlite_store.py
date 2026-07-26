@@ -168,8 +168,38 @@ class SqliteStore:
             )
         return self._conn
 
+    async def _execute(self, sql: str, parameters: Any = ()) -> aiosqlite.Cursor:
+        """Run one statement, and undo the open transaction if it fails.
+
+        Without this, a single failed write wedges the hub until someone restarts it.
+        sqlite3 opens a transaction on the first DML and holds it until commit; if a
+        statement raises anywhere before that commit, the transaction stays open, the
+        connection keeps the write lock, and every later write from the other
+        connection to this file fails with "database is locked" — indefinitely, not for
+        the five seconds `busy_timeout` covers.
+
+        Not hypothetical: this took the halob hub's mail down completely on 2026-07-26,
+        and what agents saw was a bare 500 on every send, for eleven minutes, until the
+        container was restarted.
+        """
+        try:
+            return await self._db.execute(sql, parameters)
+        except BaseException:
+            # Hand back the write lock before the exception leaves the store. Rolling
+            # back with no transaction open is harmless, so this is safe after a failed
+            # read too.
+            await self._db.rollback()
+            raise
+
+    async def _execute_many(self, sql: str, parameters: Any) -> aiosqlite.Cursor:
+        try:
+            return await self._db.executemany(sql, parameters)
+        except BaseException:
+            await self._db.rollback()
+            raise
+
     async def schema_version(self) -> int:
-        cursor = await self._db.execute("PRAGMA user_version")
+        cursor = await self._execute("PRAGMA user_version")
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
@@ -181,7 +211,7 @@ class SqliteStore:
         ``INSERT OR IGNORE`` against the primary key means the loser of a race changes
         nothing, so a second claimant can never overwrite the incumbent's profile.
         """
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "INSERT OR IGNORE INTO actors "
             "(name, actor_type, profile, created, last_seen) VALUES (?, ?, ?, ?, ?)",
             (
@@ -196,12 +226,12 @@ class SqliteStore:
         return cursor.rowcount == 1
 
     async def get_actor(self, name: str) -> ActorRecord | None:
-        cursor = await self._db.execute("SELECT * FROM actors WHERE name = ?", (name,))
+        cursor = await self._execute("SELECT * FROM actors WHERE name = ?", (name,))
         row = await cursor.fetchone()
         return _to_actor(row) if row else None
 
     async def put_actor(self, actor: ActorRecord) -> None:
-        await self._db.execute(
+        await self._execute(
             "INSERT INTO actors (name, actor_type, profile, created, last_seen) "
             "VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
@@ -218,13 +248,13 @@ class SqliteStore:
         await self._db.commit()
 
     async def actors(self) -> Iterable[ActorRecord]:
-        cursor = await self._db.execute("SELECT * FROM actors ORDER BY name")
+        cursor = await self._execute("SELECT * FROM actors ORDER BY name")
         return tuple(_to_actor(row) for row in await cursor.fetchall())
 
     # -- objects -----------------------------------------------------------
 
     async def add_object(self, obj: ObjectRecord) -> None:
-        await self._db.execute(
+        await self._execute(
             "INSERT OR REPLACE INTO objects (id, object_type, attributed_to, to_names, "
             "cc_names, in_reply_to, summary, content, published, document) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -244,14 +274,12 @@ class SqliteStore:
         await self._db.commit()
 
     async def get_object(self, object_id: str) -> ObjectRecord | None:
-        cursor = await self._db.execute(
-            "SELECT * FROM objects WHERE id = ?", (object_id,)
-        )
+        cursor = await self._execute("SELECT * FROM objects WHERE id = ?", (object_id,))
         row = await cursor.fetchone()
         return _to_object(row) if row else None
 
     async def objects(self) -> Iterable[ObjectRecord]:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "SELECT * FROM objects ORDER BY published ASC, id ASC"
         )
         return tuple(_to_object(row) for row in await cursor.fetchall())
@@ -263,10 +291,8 @@ class SqliteStore:
         marks = ",".join("?" * len(ids))
         # Read-state goes with the objects. Leaving it behind would accumulate rows
         # referring to messages that no longer exist, for ever.
-        await self._db.execute(f"DELETE FROM reads WHERE object_id IN ({marks})", ids)
-        cursor = await self._db.execute(
-            f"DELETE FROM objects WHERE id IN ({marks})", ids
-        )
+        await self._execute(f"DELETE FROM reads WHERE object_id IN ({marks})", ids)
+        cursor = await self._execute(f"DELETE FROM objects WHERE id IN ({marks})", ids)
         await self._db.commit()
         return cursor.rowcount
 
@@ -274,7 +300,7 @@ class SqliteStore:
 
     async def mark_read(self, read: ReadRecord) -> bool:
         """Record a consumption, once. ``False`` if this reader already consumed it."""
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "INSERT OR IGNORE INTO reads (object_id, reader, at) VALUES (?, ?, ?)",
             (read.object_id, read.reader, read.at),
         )
@@ -288,7 +314,7 @@ class SqliteStore:
         if not ids:
             return {}
         marks = ",".join("?" * len(ids))
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             f"SELECT * FROM reads WHERE object_id IN ({marks})", ids
         )
         found: dict[str, list[ReadRecord]] = {object_id: [] for object_id in ids}

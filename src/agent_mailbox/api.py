@@ -20,6 +20,7 @@ visibility rules hold however the caller was identified.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Any
 
 import msgspec
@@ -35,7 +36,11 @@ from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAt
 from agent_mailbox.auth.records import SHARED_ACTOR
 from agent_mailbox.auth.service import AuthService
 from agent_mailbox.auth.throttle import LoginThrottle
-from agent_mailbox.errors import auth_error_handler, mailbox_error_handler
+from agent_mailbox.errors import (
+    auth_error_handler,
+    mailbox_error_handler,
+    store_busy_handler,
+)
 from agent_mailbox.exceptions import MailboxError
 from agent_mailbox.house import House
 from agent_mailbox.wire import (
@@ -980,6 +985,7 @@ def build_api(
         exception_handlers={
             MailboxError: mailbox_error_handler,
             AuthError: auth_error_handler,
+            sqlite3.OperationalError: store_busy_handler,
         },
         debug=debug,
     )

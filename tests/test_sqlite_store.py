@@ -172,3 +172,65 @@ class TestRobustness:
         async with SqliteStore(tmp_path / "mail.db") as store:
             assert await store.remove_objects([]) == 0
             assert await store.reads_of([]) == {}
+
+
+class TestAFailedWriteDoesNotWedgeTheHub:
+    """One bad statement used to take the whole hub's mail down until a restart.
+
+    Observed on the halob hub, 2026-07-26: every send returned a bare 500 for eleven
+    minutes while the log said only `database is locked`. sqlite3 opens a transaction on
+    the first DML and holds it until commit, so a statement that raised *after* that
+    first write left the transaction open and the write lock held — and the hub keeps a
+    second connection to the same file for the auth tables, whose every write then
+    failed. `busy_timeout` does not help here: the lock is not busy, it is abandoned.
+
+    The order matters in these tests. A statement that fails before any write (a bad
+    parameter count, say) never opens a transaction and never held a lock — a test
+    written that way passes with the fix removed, which is how the first draft of this
+    one was wrong.
+    """
+
+    ACTOR_INSERT = (
+        "INSERT INTO actors (name, actor_type, profile, created, last_seen) "
+        "VALUES (?, ?, ?, ?, ?)"
+    )
+
+    async def _wedge(self, store: SqliteStore) -> None:
+        """Open a write transaction, then fail inside it, exactly as production did."""
+        await store._execute(
+            self.ACTOR_INSERT, ("uncommitted", "Service", "{}", "now", "now")
+        )
+        with pytest.raises(Exception):  # noqa: B017 — any failure must be survived
+            await store._execute("INSERT INTO actors (name) VALUES (?, ?)", ("x", "y"))
+
+    async def test_another_connection_can_still_write(self, tmp_path: Path) -> None:
+        db = tmp_path / "mail.db"
+        async with SqliteStore(db) as store, SqliteStore(db) as other:
+            await store.claim_name(ActorRecord(name="rosemary_nasrin"))
+            await self._wedge(store)
+
+            # Before the fix this waited out busy_timeout and raised
+            # "database is locked" — and did so for every write, until a restart.
+            await asyncio.wait_for(
+                other.claim_name(ActorRecord(name="trevor_mahmood")), timeout=10
+            )
+            assert {a.name for a in await other.actors()} == {
+                "rosemary_nasrin",
+                "trevor_mahmood",
+            }
+
+    async def test_the_failed_transaction_left_nothing_behind(
+        self, tmp_path: Path
+    ) -> None:
+        """Rollback undoes the whole transaction, not merely the statement that raised."""
+        db = tmp_path / "mail.db"
+        async with SqliteStore(db) as store:
+            await store.claim_name(ActorRecord(name="rosemary_nasrin"))
+            await self._wedge(store)
+            await store.claim_name(ActorRecord(name="trevor_mahmood"))
+
+        async with SqliteStore(db) as reopened:
+            names = {a.name for a in await reopened.actors()}
+        assert names == {"rosemary_nasrin", "trevor_mahmood"}, (
+            "the half-finished write survived its own rollback"
+        )

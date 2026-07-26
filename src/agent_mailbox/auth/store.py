@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import TracebackType
-from typing import Protocol, Self, runtime_checkable
+from typing import Any, Protocol, Self, runtime_checkable
 
 import aiosqlite
 
@@ -272,7 +272,7 @@ class SqliteAuthStore:
     async def create_schema(self) -> None:
         """Create the ``auth_*`` tables idempotently, even on a shared connection."""
         for statement in _SCHEMA:
-            await self._db.execute(statement)
+            await self._execute(statement)
         await self._db.commit()
 
     @property
@@ -281,17 +281,47 @@ class SqliteAuthStore:
             raise RuntimeError("SqliteAuthStore is not open")
         return self._conn
 
+    async def _execute(self, sql: str, parameters: Any = ()) -> aiosqlite.Cursor:
+        """Run one statement, and undo the open transaction if it fails.
+
+        Without this, a single failed write wedges the hub until someone restarts it.
+        sqlite3 opens a transaction on the first DML and holds it until commit; if a
+        statement raises anywhere before that commit, the transaction stays open, the
+        connection keeps the write lock, and every later write from the other
+        connection to this file fails with "database is locked" — indefinitely, not for
+        the five seconds `busy_timeout` covers.
+
+        Not hypothetical: this took the halob hub's mail down completely on 2026-07-26,
+        and what agents saw was a bare 500 on every send, for eleven minutes, until the
+        container was restarted.
+        """
+        try:
+            return await self._db.execute(sql, parameters)
+        except BaseException:
+            # Hand back the write lock before the exception leaves the store. Rolling
+            # back with no transaction open is harmless, so this is safe after a failed
+            # read too.
+            await self._db.rollback()
+            raise
+
+    async def _execute_many(self, sql: str, parameters: Any) -> aiosqlite.Cursor:
+        try:
+            return await self._db.executemany(sql, parameters)
+        except BaseException:
+            await self._db.rollback()
+            raise
+
     async def any_users(self) -> bool:
-        cursor = await self._db.execute("SELECT 1 FROM auth_users LIMIT 1")
+        cursor = await self._execute("SELECT 1 FROM auth_users LIMIT 1")
         return await cursor.fetchone() is not None
 
     async def reset_users(self) -> None:
         for table in ("auth_users", "auth_recovery_codes", "auth_sessions"):
-            await self._db.execute(f"DELETE FROM {table}")  # noqa: S608
+            await self._execute(f"DELETE FROM {table}")  # noqa: S608
         await self._db.commit()
 
     async def add_user(self, user: User) -> None:
-        await self._db.execute(
+        await self._execute(
             "INSERT INTO auth_users "
             "(username, password_hash, enrolment_state, totp_secret_enc, created, "
             "last_login) VALUES (?, ?, ?, ?, ?, ?)",
@@ -307,14 +337,14 @@ class SqliteAuthStore:
         await self._db.commit()
 
     async def get_user(self, username: str) -> User | None:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "SELECT * FROM auth_users WHERE username = ?", (username,)
         )
         row = await cursor.fetchone()
         return _to_user(row) if row else None
 
     async def put_user(self, user: User) -> None:
-        await self._db.execute(
+        await self._execute(
             "UPDATE auth_users SET password_hash=?, enrolment_state=?, "
             "totp_secret_enc=?, last_login=? WHERE username=?",
             (
@@ -328,10 +358,10 @@ class SqliteAuthStore:
         await self._db.commit()
 
     async def add_recovery_codes(self, username: str, code_hashes: list[str]) -> None:
-        await self._db.execute(
+        await self._execute(
             "DELETE FROM auth_recovery_codes WHERE username = ?", (username,)
         )
-        await self._db.executemany(
+        await self._execute_many(
             "INSERT INTO auth_recovery_codes (username, code_hash, used) "
             "VALUES (?, ?, 0)",
             [(username, h) for h in code_hashes],
@@ -339,7 +369,7 @@ class SqliteAuthStore:
         await self._db.commit()
 
     async def spend_recovery_code(self, username: str, code_hash: str) -> bool:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "UPDATE auth_recovery_codes SET used=1 "
             "WHERE username=? AND code_hash=? AND used=0",
             (username, code_hash),
@@ -348,7 +378,7 @@ class SqliteAuthStore:
         return cursor.rowcount == 1
 
     async def add_token(self, token: DeviceToken) -> None:
-        await self._db.execute(
+        await self._execute(
             "INSERT INTO auth_device_tokens "
             "(id, actor, token_hash, label, created, last_used, revoked) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -365,27 +395,27 @@ class SqliteAuthStore:
         await self._db.commit()
 
     async def get_token_by_hash(self, token_hash: str) -> DeviceToken | None:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "SELECT * FROM auth_device_tokens WHERE token_hash = ?", (token_hash,)
         )
         row = await cursor.fetchone()
         return _to_token(row) if row else None
 
     async def tokens_for(self, actor: str) -> tuple[DeviceToken, ...]:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "SELECT * FROM auth_device_tokens WHERE actor = ? ORDER BY created",
             (actor,),
         )
         return tuple(_to_token(row) for row in await cursor.fetchall())
 
     async def touch_token(self, token_id: str, when: str) -> None:
-        await self._db.execute(
+        await self._execute(
             "UPDATE auth_device_tokens SET last_used=? WHERE id=?", (when, token_id)
         )
         await self._db.commit()
 
     async def revoke_token(self, token_id: str) -> bool:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "UPDATE auth_device_tokens SET revoked=1 WHERE id=? AND revoked=0",
             (token_id,),
         )
@@ -393,7 +423,7 @@ class SqliteAuthStore:
         return cursor.rowcount == 1
 
     async def add_session(self, session: Session) -> None:
-        await self._db.execute(
+        await self._execute(
             "INSERT INTO auth_sessions (id, username, created, expires, limited) "
             "VALUES (?, ?, ?, ?, ?)",
             (
@@ -407,7 +437,7 @@ class SqliteAuthStore:
         await self._db.commit()
 
     async def get_session(self, session_id: str) -> Session | None:
-        cursor = await self._db.execute(
+        cursor = await self._execute(
             "SELECT * FROM auth_sessions WHERE id = ?", (session_id,)
         )
         row = await cursor.fetchone()
@@ -422,5 +452,5 @@ class SqliteAuthStore:
         )
 
     async def delete_session(self, session_id: str) -> None:
-        await self._db.execute("DELETE FROM auth_sessions WHERE id = ?", (session_id,))
+        await self._execute("DELETE FROM auth_sessions WHERE id = ?", (session_id,))
         await self._db.commit()
