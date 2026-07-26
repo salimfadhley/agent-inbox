@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -36,7 +37,7 @@ from litestar.params import Body
 from litestar.response import Redirect, Response
 
 from agent_mailbox.client import SESSION_COOKIE, ClientError, HubClient
-from agent_mailbox.prompts import onboarding, role_note
+from agent_mailbox.prompts import bootstrap, onboarding, role_note
 
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
 #: three POST handlers from each repeating the annotation.
@@ -201,6 +202,29 @@ def _advertised(hub: dict[str, Any], fallback: str) -> str:
     differ, and only one of them is any use to an agent on the network.
     """
     return str(hub.get("id") or "").rstrip("/") or fallback
+
+
+def _console_base(request: Request) -> str:
+    """Where *this console* is reachable, for putting inside the pasted prompt.
+
+    The hub is told its own address (``AGENT_MAILBOX_PUBLIC_URL``) because it stamps
+    it into every identifier it emits. A console sidecar is never told, and it cannot
+    use the hub's answer: they are different services on different ports. It needs
+    the address for one link, and the best evidence available is the address the
+    human is looking at right now — if the page reached them here, an agent they
+    paste it to can reach it here too.
+
+    ``AGENT_MAILBOX_CONSOLE_URL`` overrides that, for a proxy that rewrites the host
+    without setting the forwarded headers.
+    """
+    if override := os.environ.get("AGENT_MAILBOX_CONSOLE_URL", "").strip():
+        return override.rstrip("/")
+    headers = request.headers
+    scheme = headers.get("x-forwarded-proto") or request.url.scheme
+    host = headers.get("x-forwarded-host") or headers.get("host") or ""
+    if host:
+        return f"{scheme}://{host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
 
 
 def _shortdate(value: str) -> str:
@@ -546,30 +570,37 @@ def build_console(client: HubClient) -> Litestar:
     # -- the prompt --------------------------------------------------------
 
     @get("/prompts", media_type=MediaType.HTML, sync_to_thread=True)
-    def prompts() -> Response:
-        """The one onboarding prompt, ready to paste.
+    def prompts(request: Request) -> Response:
+        """The onboarding prompt, and the short note that fetches it.
 
-        One page, because there used to be three and they drifted. Which role an agent
-        holds is configuration, not a different prompt. The hub's own `id` is filled in
-        (not the route this console uses to reach it), so the commands can be pasted as
-        they stand.
+        What is offered for copying is **not** the full prompt but a few lines telling
+        the agent to read it from here at the start of every session. Pasting the
+        whole thing into a `CLAUDE.md` freezes it at the version it was copied on, and
+        this prompt changes with almost every release. The full text is shown below
+        so a human can read what they are pointing an agent at.
         """
         hub = hub_or_none() or {}
         address = _advertised(hub, client.config.base)
+        prompt_url = f"{_console_base(request)}/prompts/agent"
         note = "".join(
             f"<p>{html.escape(para)}</p>"
             for para in role_note().replace("**", "").split("\n\n")
         )
         body = (
             f"{note}"
-            "<p>Paste the whole of this to an agent.</p>"
+            "<p>Paste this to an agent. It is short on purpose: it tells the agent "
+            "to fetch the full prompt from this console every time it starts, so an "
+            "agent onboarded months ago still follows current instructions.</p>"
             "<p><button id='copy' type='button'>Copy the prompt</button> "
             "<span id='said' class='dim'></span></p>"
-            "<textarea id='prompt' readonly rows='28'>"
-            f"{html.escape(onboarding(address))}</textarea>"
-            f"<p class='dim'>Written for <code>{html.escape(address)}</code>. "
-            "Also served as plain text at <a href='/prompts.txt'>/prompts.txt</a>, "
-            "for when the console is not where you are.</p>"
+            "<textarea id='prompt' readonly rows='16'>"
+            f"{html.escape(bootstrap(prompt_url))}</textarea>"
+            f"<p class='dim'>It points at <a href='/prompts/agent'><code>"
+            f"{html.escape(prompt_url)}</code></a> — the full prompt below, served as "
+            "plain text. Written for <code>"
+            f"{html.escape(address)}</code>.</p>"
+            "<h2>The full prompt</h2>"
+            f"<pre>{html.escape(onboarding(address))}</pre>"
             # The copy behaviour lives in /static/console.js (same-origin), so the CSP
             # can forbid inline scripts. It selects the textarea first, so a browser
             # that withholds the clipboard still leaves the text selected to copy.
@@ -578,9 +609,21 @@ def build_console(client: HubClient) -> Litestar:
             _page("Prompt", body, hub, "/prompts"), media_type=MediaType.HTML
         )
 
+    @get("/prompts/{role:str}", media_type=MediaType.TEXT, sync_to_thread=True)
+    def prompt_for_role(role: str) -> str:
+        """The whole prompt as plain text — the address agents are pointed at.
+
+        Any role name serves the same text, and that is the point rather than an
+        oversight: `/prompts/agent`, `/prompts/host` and `/prompts/admin` are one
+        document. Roles are configuration and what a role *means* is fetched from the
+        hub, so there is nothing per-role to say here. Accepting the names keeps old
+        bookmarks working without reviving three pages to drift apart.
+        """
+        return onboarding(_advertised(hub_or_none() or {}, client.config.base))
+
     @get("/prompts.txt", media_type=MediaType.TEXT, sync_to_thread=True)
     def prompt_text() -> str:
-        """The same prompt as plain text, for `curl` and for pasting."""
+        """The same prompt again, at the name `curl` users already have."""
         return onboarding(_advertised(hub_or_none() or {}, client.config.base))
 
     # -- static assets and the flow graph ----------------------------------
@@ -877,6 +920,7 @@ def build_console(client: HubClient) -> Litestar:
             compose_form,
             do_compose,
             prompts,
+            prompt_for_role,
             prompt_text,
             login_form,
             login_submit,

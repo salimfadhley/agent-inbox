@@ -200,11 +200,63 @@ def test_the_plain_text_form_is_the_same_prompt(console: TestClient) -> None:
 
 
 def test_there_is_exactly_one_prompt(console: TestClient) -> None:
-    """No per-role pages. Three prompts drifted apart last time; one cannot."""
+    """No per-role prompts. Three drifted apart last time; one cannot.
+
+    The page now links `/prompts/agent`, so "no role appears in the HTML" is no
+    longer the property to pin — it never was the real one. What must hold is that
+    the role names cannot address *different documents*, which is what drifted
+    before. Byte-identical responses are a stronger guarantee than an absent link.
+    """
+    got = {r: console.get(f"/prompts/{r}") for r in ("agent", "host", "admin")}
+    # assert they resolve before comparing: three identical 404s would otherwise
+    # satisfy "all the same" and pin nothing at all
+    assert all(r.status_code == 200 for r in got.values())
+    assert len({r.text for r in got.values()}) == 1, "roles served different prompts"
+    assert "agent-mailbox.toml" in console.get("/prompts").text
+
+
+def test_the_full_prompt_is_plain_text_at_a_role_url(console: TestClient) -> None:
+    """`/prompts/agent` is the address pasted into agents, so it must be readable."""
+    got = console.get("/prompts/agent")
+    assert got.status_code == 200
+    assert got.headers["content-type"].startswith("text/plain")
+    assert "uv tool install" in got.text
+    assert got.text == console.get("/prompts.txt").text
+
+
+def test_the_pasted_prompt_sends_the_agent_back_for_the_real_one(
+    console: TestClient,
+) -> None:
+    """The copy box holds the short note, not the prompt itself.
+
+    Pasting the full text freezes it at the version it was copied on. The whole
+    change is that what gets pasted is the *address*, which does not go stale.
+    """
     body = console.get("/prompts").text
-    for role in ("agent", "host", "admin"):
-        assert f'href="/prompts/{role}"' not in body
-    assert "agent-mailbox.toml" in body
+    assert "/prompts/agent" in body
+    assert "every session" in body.lower()
+    # the short note is what sits in the copy box, so the box must not be the
+    # full prompt — `join(` appears in the full text and nowhere in the note
+    box = body.split("<textarea id='prompt'")[1].split("</textarea>")[0]
+    assert "curl -s" in box
+    assert "join(" not in box
+
+
+def test_the_pasted_prompt_points_at_this_console_not_the_hub(
+    console: TestClient,
+) -> None:
+    """The prompt lives on the console's port, which is not the hub's.
+
+    Reusing the hub's published address here would send agents to a port that does
+    not serve the page — the sidecar trap, in the other direction.
+    """
+    box = (
+        console.get("/prompts")
+        .text.split("<textarea id='prompt'")[1]
+        .split("</textarea>")[0]
+    )
+    assert "/prompts/agent" in box
+    assert HUB not in box
 
 
 def test_the_prompt_says_the_hub_does_not_authenticate(console: TestClient) -> None:

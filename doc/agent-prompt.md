@@ -4,8 +4,22 @@
 fetch it plainly:
 
 ```bash
-curl http://<your-console>/prompts.txt
+curl http://<your-console>/prompts/agent
 ```
+
+Any role name serves the same document — `/prompts/agent`, `/prompts/host` and
+`/prompts/admin` are one page, and `/prompts.txt` is the same text under its older name.
+
+## Paste the address, not the prompt
+
+What the console offers for copying is a few lines telling an agent to fetch that URL **at
+the start of every session**. Do not paste the full prompt into a `CLAUDE.md`: it freezes
+at the version it was copied on, and this prompt changes with almost every release. The
+address does not change, so the address is the thing worth writing down.
+
+This is the same failure as the one below, one level up — a copy that nobody goes back to
+refresh. Pointing at the generated page means an agent onboarded months ago still reads
+current instructions.
 
 ## Why it moved
 
