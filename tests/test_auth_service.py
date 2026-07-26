@@ -201,3 +201,59 @@ class TestBootstrapKeepsPrinting:
         assert user is not None
         await store.put_user(replace(user, enrolment_state=EnrolmentState.ACTIVE))
         assert await svc.bootstrap() is None
+
+
+class TestResetUser:
+    """The way back in for an operator locked out of their own hub."""
+
+    async def test_it_restores_first_run_and_clears_the_authenticator(self) -> None:
+        """A lost phone must not leave the account permanently unreachable.
+
+        So the old TOTP secret goes: keeping it would mean the reset let you past the
+        password and then stopped you at a device you no longer have.
+        """
+        svc = service()
+        await _enrol_admin(svc, password="theirs")
+        fresh = await svc.reset_user()
+        user = await svc._store.get_user("admin")
+        assert user is not None
+        assert user.enrolment_state is EnrolmentState.MUST_CHANGE_AND_ENROL
+        assert user.totp_secret_enc is None
+        # the new password works, with no second factor, and asks for enrolment
+        result = await svc.login("admin", fresh)
+        assert result.enrolment_required is True
+
+    async def test_the_old_password_stops_working(self) -> None:
+        svc = service()
+        await _enrol_admin(svc, password="theirs")
+        await svc.reset_user()
+        with pytest.raises(BadCredentials):
+            await svc.login("admin", "theirs")
+
+
+class TestLoginFailuresAreExplainedInTheLog:
+    """The browser is told nothing; the operator is told which factor failed."""
+
+    async def test_a_wrong_password_says_so_in_the_log_only(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        svc = service()
+        await _enrol_admin(svc, password="right")
+        with caplog.at_level("WARNING"), pytest.raises(BadCredentials) as exc:
+            await svc.login("admin", "wrong", "000000")
+        assert "incorrect username or password" in str(exc.value)
+        assert any("wrong password" in r.getMessage() for r in caplog.records)
+
+    async def test_a_missing_second_factor_is_distinguished_from_a_bad_one(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No code typed, and a code rejected, call for different fixes."""
+        svc = service()
+        await _enrol_admin(svc, password="right")
+        with caplog.at_level("WARNING"), pytest.raises(BadCredentials):
+            await svc.login("admin", "right")
+        assert any("not supplied" in r.getMessage() for r in caplog.records)
+        caplog.clear()
+        with caplog.at_level("WARNING"), pytest.raises(BadCredentials):
+            await svc.login("admin", "right", "000000")
+        assert any("did not match" in r.getMessage() for r in caplog.records)

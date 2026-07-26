@@ -143,6 +143,37 @@ class AuthService:
         logger.warning("initial admin password: %s (change it now)", password)
         return password
 
+    async def reset_user(self, username: str = "admin") -> str:
+        """Put an account back to first-run: new password, no authenticator.
+
+        The escape hatch for the operator locked out of their own hub — a wrong
+        password, a lost phone, an authenticator enrolled against a secret nobody
+        kept. Without it the only route back is deleting rows from the database by
+        hand, which is how this was recovered the first time and is not a procedure
+        anyone should be asked to follow.
+
+        It grants nothing that possession of the server does not already grant: this
+        runs on the box, against the hub's own storage, and whoever can run it can
+        read the database anyway. The password is returned for the caller to print,
+        and the account must set a real one and enrol again before it can act.
+        """
+        user = await self._require(username)
+        password = secrets.generate_token()
+        await self._store.put_user(
+            User(
+                username=user.username,
+                password_hash=secrets.hash_password(password),
+                enrolment_state=EnrolmentState.MUST_CHANGE_AND_ENROL,
+                totp_secret_enc=None,  # the old authenticator stops working, by design
+                created=user.created,
+                last_login=user.last_login,
+            )
+        )
+        logger.warning(
+            "reset %r to first-run state; 2FA must be enrolled again", username
+        )
+        return password
+
     # -- login -------------------------------------------------------------
 
     async def login(
@@ -153,12 +184,20 @@ class AuthService:
         A wrong username and a wrong password are indistinguishable and take the
         same time (FR-017). An account still in first-run state gets a *limited*
         session that may only reach the enrolment endpoints.
+
+        **The log says which factor failed; the caller is never told.** Those are
+        different audiences: telling the browser would hand an attacker a password
+        oracle, while telling the operator nothing leaves them staring at "incorrect
+        username or password" with no way to know whether to retype their password or
+        their phone. Whoever reads the log already controls the deployment.
         """
         user = await self._store.get_user(username)
         if user is None:
             secrets.verify_password(_DUMMY_HASH, password)  # equalise timing
+            logger.warning("login failed for %r: no such user", username)
             raise BadCredentials("incorrect username or password")
         if not secrets.verify_password(user.password_hash, password):
+            logger.warning("login failed for %r: wrong password", username)
             raise BadCredentials("incorrect username or password")
 
         if user.enrolment_state is EnrolmentState.MUST_CHANGE_AND_ENROL:
@@ -166,7 +205,13 @@ class AuthService:
             return LoginResult(session=session, enrolment_required=True)
 
         if not await self._second_factor_ok(user, otp):
+            logger.warning(
+                "login failed for %r: password correct, second factor %s",
+                username,
+                "not supplied" if not otp else "did not match",
+            )
             raise BadCredentials("incorrect username or password")
+        logger.info("login succeeded for %r", username)
 
         await self._store.put_user(
             User(

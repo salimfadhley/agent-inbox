@@ -77,6 +77,54 @@ def cmd_console(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reset_admin(args: argparse.Namespace) -> int:
+    """Put an operator account back to first-run, and print its new password.
+
+    Runs **on the hub**, against its own storage — so it is for whoever deploys the
+    thing, not for anyone who can reach it over the network. That is the whole security
+    argument: this grants nothing that possession of the server does not already grant.
+
+    It exists because the alternative, on a hub whose only operator is locked out, is
+    editing the auth tables by hand.
+    """
+    try:
+        import anyio
+
+        from agent_mailbox.auth.service import AuthService
+        from agent_mailbox.auth.store import SqliteAuthStore
+        from agent_mailbox.serve import Settings
+    except ImportError as exc:  # pragma: no cover - only without server extras
+        print(
+            f"this runs on the hub and needs its dependencies: {exc}", file=sys.stderr
+        )
+        return 1
+
+    config = Settings.from_env()
+    if not config.secret_key:
+        print(
+            "AGENT_MAILBOX_SECRET_KEY is unset. Set the same key the hub runs with, "
+            "or the reset writes an account the hub cannot read.",
+            file=sys.stderr,
+        )
+        return 1
+
+    async def go() -> str:
+        store = SqliteAuthStore(config.db)
+        async with store:
+            return await AuthService(store, secret_key=config.secret_key).reset_user(
+                args.username
+            )
+
+    try:
+        password = anyio.run(go)
+    except Exception as exc:  # noqa: BLE001 - the message is the whole output
+        print(f"could not reset {args.username!r}: {exc}", file=sys.stderr)
+        return 1
+    print(f"{args.username} password: {password}")
+    print("Sign in with it, leaving the 6-digit code blank, and enrol 2FA again.")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Run the hub itself. Needs the server dependencies."""
     try:
@@ -427,6 +475,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     hub = subs.add_parser("serve", help="run the hub")
     hub.set_defaults(func=cmd_serve)
+
+    # Runs on the hub, against its storage — an operator's escape hatch, not a route.
+    reset = subs.add_parser(
+        "reset-admin", help="put an operator account back to first-run (run on the hub)"
+    )
+    reset.add_argument("--username", default="admin", help="which account")
+    reset.set_defaults(func=cmd_reset_admin)
 
     con = subs.add_parser("console", help="serve the human console in a browser")
     con.add_argument("--host", default="127.0.0.1", help="bind address")

@@ -121,6 +121,18 @@ def build_app(settings: Settings | None = None) -> Litestar:
                 "key. Set a stable key or 2FA enrolments will not survive a "
                 "restart."
             )
+        else:
+            # Checked here, at startup, because the key is not used until someone
+            # enrols — and a bad one then surfaces as a bare 500 on `GET /auth/enrol`,
+            # at the worst possible moment: a new operator's first attempt to secure
+            # the hub. Refusing to start says what is wrong while it can still be fixed.
+            try:
+                auth_secrets.encrypt_secret("startup check", key)
+            except ValueError as exc:
+                raise SystemExit(
+                    f"{exc}\nThe hub will not start with an unusable key: 2FA "
+                    "enrolment would fail later with an unexplained error."
+                ) from exc
         auth_store = SqliteAuthStore(config.db)
         auth = AuthService(auth_store, secret_key=key)
 
