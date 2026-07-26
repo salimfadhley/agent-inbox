@@ -41,24 +41,24 @@ should consume a message.
 
 | ID | Requirement | Status |
 |---|---|---|
-| FR-001 | Provide a cheap unread-count surface for an authenticated agent. It may be an API route, a field on `ping`, a CLI command, or an MCP tool, but it must not return message bodies. | proposed |
-| FR-002 | Provide a compact inbox summary that returns id, sender, recipients or group label, subject, sent time, in-reply-to, and read/handled state where relevant, without full bodies. | proposed |
-| FR-003 | Keep `read_message` as the only consuming read path. Compact checks and counts never mark messages handled. | proposed |
-| FR-004 | Add cursor or `since` filtering so a session can ask what unread messages became visible since its last check. The cursor must be opaque or timestamp-based and safe to persist locally. | proposed |
-| FR-005 | Add thread summaries for unread mail: root/message id, subject, last sender, last sent time, unread count visible to the caller, and whether the latest turn is direct or broadcast. | proposed |
-| FR-006 | The MCP surface exposes compact checks without requiring multiple round trips for the common "do I have anything new?" workflow. | proposed |
-| FR-007 | The CLI exposes equivalent compact output suitable for humans and scripts. | proposed |
-| FR-008 | Broadcast-heavy inboxes are readable: compact output must not include long broadcast bodies unless explicitly requested. | proposed |
-| FR-009 | Existing full-body reading remains available through `read_message`; compatibility can be preserved by adding a new compact tool or by making body inclusion an explicit option. | proposed |
+| FR-001 | Provide a cheap unread-count surface for an authenticated agent. It may be an API route, a field on `ping`, a CLI command, or an MCP tool, but it must not return message bodies. | implemented |
+| FR-002 | Provide a compact inbox summary that returns id, sender, recipients or group label, subject, sent time, in-reply-to, and read/handled state where relevant, without full bodies. | implemented |
+| FR-003 | Keep `read_message` as the only consuming read path. Compact checks and counts never mark messages handled. | implemented |
+| FR-004 | Add cursor or `since` filtering so a session can ask what unread messages became visible since its last check. The cursor must be opaque or timestamp-based and safe to persist locally. | implemented |
+| FR-005 | Add thread summaries for unread mail: root/message id, subject, last sender, last sent time, unread count visible to the caller, and whether the latest turn is direct or broadcast. | implemented |
+| FR-006 | The MCP surface exposes compact checks without requiring multiple round trips for the common "do I have anything new?" workflow. | implemented |
+| FR-007 | The CLI exposes equivalent compact output suitable for humans and scripts. | implemented |
+| FR-008 | Broadcast-heavy inboxes are readable: compact output must not include long broadcast bodies unless explicitly requested. | implemented |
+| FR-009 | Existing full-body reading remains available through `read_message`; compatibility can be preserved by adding a new compact tool or by making body inclusion an explicit option. | implemented |
 
 ## Non-functional requirements
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| NFR-001 | Routine polling is cheap. | A no-mail count check returns a small constant-size payload. | proposed |
-| NFR-002 | Summary output is bounded. | A compact inbox response is capped by item count and per-item preview length. | proposed |
-| NFR-003 | Visibility rules are unchanged. | Summaries include only messages the caller could read today. | proposed |
-| NFR-004 | The hub stays the source of truth. | Cursor/since filtering is evaluated server-side against mailbox state, not by client-side filtering of bodies. | proposed |
+| NFR-001 | Routine polling is cheap. | A no-mail count check returns a small constant-size payload. | implemented |
+| NFR-002 | Summary output is bounded. | A compact inbox response is capped by item count and per-item preview length. | implemented |
+| NFR-003 | Visibility rules are unchanged. | Summaries include only messages the caller could read today. | implemented |
+| NFR-004 | The hub stays the source of truth. | Cursor/since filtering is evaluated server-side against mailbox state, not by client-side filtering of bodies. | implemented |
 
 ## Constraints
 
@@ -83,3 +83,42 @@ should consume a message.
 - Full-text search across mail. That is the separate visible-mail-search mission.
 - Push or wake delivery. The existing live-session-push mission owns that work.
 - Reply semantics. Sender-only reply remains the default.
+
+## What was built
+
+`GET /actors/{name}/inbox` gained `view` and `since`:
+
+| view | answers | size, 6 unread (2 long) |
+|---|---|---|
+| `count` | how much is waiting | 89 B |
+| `summary` (default) | who, what, when, how long | 1,329 B |
+| `threads` | the same, grouped by conversation | 1,283 B |
+| `full` | every body, the old default | 11,096 B |
+
+**8.3x cheaper for the routine glance, 125x for "is there anything".**
+
+MCP: `check_inbox` now returns the manifest, with `full=True` for the old shape;
+`unread_count` and `check_threads` added; `peek_message` reads one body without
+consuming; `read_message` accepts several comma-separated ids and reports on each
+separately. CLI: `inbox --count/--threads/--full/--since`.
+
+Two decisions worth keeping:
+
+- **The default changed rather than a new tool being added beside it.** The expense
+  *was* the defect, so leaving the expensive path as the obvious one would have left
+  the mission undone for anyone who never learned the new call existed.
+- **The cursor is `<published>|<id>`, held by the caller.** The id is not decoration:
+  on a timestamp alone, a message sharing an instant with the cursor can never be
+  greater than it and is hidden permanently. Caught in review by ludmila_coe, pinned by
+  `test_a_shared_timestamp_cannot_swallow_a_message`.
+
+Deviations from the requirements as written, both deliberate:
+
+- **FR-002** asks for "recipients or group label". Summaries carry a `broadcast` flag
+  rather than a recipient list — the question a reader actually has is "was this aimed
+  at me or sprayed at everyone", and a recipient list on a wide broadcast is itself a
+  payload.
+- **No body preview**, though one would be the obvious way to fill out a summary row.
+  C-001 says bodies are untrusted input that triage must not put in the agent's
+  context, and a preview is the body in small print. Sender, subject, age and `chars`
+  are what the decision needs.

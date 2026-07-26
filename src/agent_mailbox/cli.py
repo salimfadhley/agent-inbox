@@ -884,17 +884,64 @@ def ping(ctx: click.Context) -> int:
 
 
 @cli.command()
+@click.option("--full", is_flag=True, help="Include message bodies (expensive).")
+@click.option(
+    "--count", is_flag=True, help="Print the number waiting and nothing else."
+)
+@click.option("--threads", is_flag=True, help="Group waiting mail by conversation.")
+@click.option(
+    "--since",
+    metavar="CURSOR",
+    help="Only mail newer than this cursor, as printed by a previous run.",
+)
 @click.pass_context
-def inbox(ctx: click.Context) -> int:
-    """What is waiting."""
-    items = _client(ctx).check_inbox().get("items", [])
+def inbox(
+    ctx: click.Context, full: bool, count: bool, threads: bool, since: str | None
+) -> int:
+    """What is waiting. Consumes nothing — `read` is what marks mail handled."""
+    client = _client(ctx)
+
+    if count:
+        click.echo(client.check_inbox(view="count", since=since).get("unread", 0))
+        return 0
+
+    if threads:
+        page = client.check_inbox(view="threads", since=since)
+        groups = page.get("threads", [])
+        if not groups:
+            click.echo("nothing waiting")
+            return 0
+        for group in groups:
+            kind = "broadcast" if group.get("broadcast") else "direct"
+            click.echo(
+                f"{group.get('unread'):>3} unread  {group.get('lastFrom') or '?':20}"
+                f" {group.get('subject')}  ({kind}, last {group.get('lastPublished')})"
+            )
+        return 0
+
+    if full:
+        for note in client.check_inbox(view="full").get("items", []):
+            sender = (note.get("attributedTo") or "").rsplit("/", 1)[-1]
+            ident = (note.get("id") or "").rsplit("/", 1)[-1]
+            click.echo(f"{ident}  {sender:20} {note.get('summary') or '(no subject)'}")
+            click.echo(f"    {note.get('content') or ''}\n")
+        return 0
+
+    page = client.check_inbox(view="summary", since=since)
+    items = page.get("items", [])
     if not items:
         click.echo("nothing waiting")
         return 0
-    for note in items:
-        sender = (note.get("attributedTo") or "").rsplit("/", 1)[-1]
-        ident = (note.get("id") or "").rsplit("/", 1)[-1]
-        click.echo(f"{ident}  {sender:20} {note.get('summary') or '(no subject)'}")
+    for row in items:
+        ident = (row.get("id") or "").rsplit("/", 1)[-1]
+        mark = "*" if row.get("broadcast") else " "
+        click.echo(
+            f"{ident}  {mark}{row.get('from') or '?':20} "
+            f"{row.get('subject')}  ({row.get('chars')} chars)"
+        )
+    # The cursor is the caller's to keep — printed so a script can hold it and a human
+    # can see there is nothing hidden about it.
+    click.echo(f"\ncursor: {page.get('cursor')}   (* = broadcast)")
     return 0
 
 

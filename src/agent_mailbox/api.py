@@ -95,6 +95,32 @@ def owns(name: str, caller: str, wire: Renderer) -> str:
     return caller
 
 
+#: How many messages one compact response may describe. Not a limit on what you may
+#: read — the cursor carries you to the rest — but a ceiling on what a single glance
+#: costs, so that ignoring your mail for a week cannot produce one unpayable reply.
+PAGE = 50
+
+
+def _cursor_key(record: Any) -> tuple[str, str]:
+    """A message's place in the order a cursor walks: when it was sent, then its id."""
+    return (record.published or "", str(record.id))
+
+
+def _cursor_text(key: tuple[str, ...]) -> str:
+    return "|".join(key) if key else ""
+
+
+def _cursor_parts(cursor: str) -> tuple[str, str]:
+    """A cursor back into its parts, tolerating one written by an older client.
+
+    A bare timestamp (no ``|``) is read as "that instant, before any id", which includes
+    anything sent in that same instant rather than swallowing it. Erring towards showing
+    a message twice is recoverable; erring towards never showing it is not.
+    """
+    published, _, ident = cursor.partition("|")
+    return (published, ident)
+
+
 class Api:
     """Routes over a house. Holds the house and the renderer; decides nothing."""
 
@@ -200,10 +226,130 @@ class Api:
         )
         return self.wire.note(sent)
 
-    async def inbox(self, name: str, caller: str) -> Collection:
+    async def inbox(
+        self,
+        name: str,
+        caller: str,
+        view: str = "summary",
+        since: str | None = None,
+    ) -> Collection | dict[str, Any]:
+        """What is waiting, in one of three weights. Consumes nothing, always.
+
+        The default used to be every waiting message in full, which meant the cheapest
+        thing an agent can do — glance at its inbox — was also the most expensive call
+        in the API. An agent then paid for bodies it had not chosen to open, on every
+        poll, including ones it had already seen and left. `summary` is the honest
+        default: enough to decide from, which is exactly what the tool documentation
+        already told recipients they should be doing.
+
+        `since` is a filter, never a bookmark. The caller keeps the cursor and passes
+        it back, so this call still mutates nothing — a server-side "last seen" marker
+        would break the moment two sessions share an identity, and the mail that
+        vanished would be indistinguishable from mail that never arrived.
+        """
         owns(name, caller, self.wire)
         waiting = await self.house.peek(caller)
-        return self.wire.collection([self.wire.note(m) for m in waiting])
+        if since:
+            after = _cursor_parts(since)
+            waiting = tuple(m for m in waiting if _cursor_key(m) > after)
+
+        total = len(waiting)
+        if view != "count":
+            # Bounded, oldest first, and the cursor makes the bound safe: what is cut
+            # off is not lost, it is *next*. An unbounded manifest would put a mailbox
+            # that has been ignored for a week into one response, which is the same
+            # unpayable bill in a smaller font.
+            waiting = tuple(sorted(waiting, key=_cursor_key))[:PAGE]
+
+        # The newest thing this caller has been shown, as `<published>|<id>`.
+        #
+        # The id is not decoration. On a timestamp alone, two messages sent in the same
+        # instant collapse: the cursor takes that instant, and the second one can never
+        # be greater than it, so it is hidden **for ever** — mail that vanished, which
+        # is the failure this whole design exists to avoid. The pair is unique, so it
+        # both never hides and never repeats. Still readable, still safe to persist.
+        cursor = _cursor_text(max((_cursor_key(m) for m in waiting), default=()))
+        if not cursor:
+            cursor = since or ""
+
+        # `unread` is always the true total, never the size of this page. A count that
+        # silently meant "up to fifty" would let a backlog look handled.
+        if view == "count":
+            return {"unread": total, "cursor": cursor}
+        if view == "full":
+            return self.wire.collection([self.wire.note(m) for m in waiting])
+
+        page: dict[str, Any] = {"unread": total, "cursor": cursor}
+        if total > len(waiting):
+            page["more"] = total - len(waiting)
+        if view == "threads":
+            page["threads"] = self._threads(waiting)
+        else:
+            page["items"] = [self._summary(m) for m in waiting]
+        return page
+
+    def _threads(self, waiting: tuple[Any, ...]) -> list[dict[str, Any]]:
+        """Unread mail gathered into conversations, newest conversation first.
+
+        Grouped *within the unread set only*. A reply whose parent the caller has
+        already read, or never received, starts its own group rather than being filed
+        under a turn they cannot see — C-003 keeps thread membership per turn, and a
+        root id the caller has no right to would leak the existence of a private turn
+        while pretending to be a convenience. The cost is that a conversation can appear
+        as two groups; that is the safe direction to be wrong in.
+        """
+        by_id = {m.id: m for m in waiting}
+
+        def root_of(record: Any) -> str:
+            seen: set[str] = set()
+            current = record
+            while current.in_reply_to and current.in_reply_to in by_id:
+                if current.id in seen:  # a cycle can only be corrupt data; stop.
+                    break
+                seen.add(current.id)
+                current = by_id[current.in_reply_to]
+            return str(current.id)
+
+        groups: dict[str, list[Any]] = {}
+        for record in waiting:
+            groups.setdefault(root_of(record), []).append(record)
+
+        summaries = []
+        for root_id, turns in groups.items():
+            ordered = sorted(turns, key=lambda m: m.published or "")
+            latest, first = ordered[-1], ordered[0]
+            summaries.append(
+                {
+                    "root": self.wire.object_uri(root_id),
+                    "subject": first.summary or latest.summary or "(no subject)",
+                    "unread": len(ordered),
+                    "lastFrom": latest.attributed_to,
+                    "lastPublished": latest.published,
+                    "broadcast": len(latest.to) + len(latest.cc) > 1,
+                }
+            )
+        summaries.sort(key=lambda t: t["lastPublished"] or "", reverse=True)
+        return summaries
+
+    def _summary(self, record: Any) -> dict[str, Any]:
+        """One message, described rather than delivered.
+
+        Everything a recipient decides from — who, what, when, is it a reply, how big —
+        and nothing they would have to read. `chars` is there so "a broadcast I can
+        safely leave" and "something long addressed to me" look different at a glance.
+        """
+        body = record.content or ""
+        return {
+            "id": self.wire.object_uri(record.id),
+            "from": record.attributed_to,
+            "subject": record.summary or "(no subject)",
+            "published": record.published,
+            "inReplyTo": (
+                self.wire.object_uri(record.in_reply_to) if record.in_reply_to else None
+            ),
+            "broadcast": len(record.to) + len(record.cc) > 1,
+            "chars": len(body),
+        }
 
     async def read_object(self, object_id: str, caller: str) -> Note:
         got = await self.house.read(caller, self.wire.object_id_from(object_id))
@@ -558,8 +704,13 @@ def build_api(
         return await api.update_profile(name, data, caller)
 
     @get("/actors/{name:str}/inbox", dependencies={"caller": Provide(provide_caller)})
-    async def inbox(name: str, caller: str) -> Collection:
-        return await api.inbox(name, caller)
+    async def inbox(
+        name: str,
+        caller: str,
+        view: str = "summary",
+        since: str | None = None,
+    ) -> Collection | dict[str, Any]:
+        return await api.inbox(name, caller, view=view, since=since)
 
     @post("/actors/{name:str}/inbox")
     async def federation_inbox(name: str) -> Response:

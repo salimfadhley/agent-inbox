@@ -8,6 +8,7 @@ decision has quietly migrated up into this layer.
 from __future__ import annotations
 
 import ast
+import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -133,12 +134,14 @@ class TestMail:
         assert posted["to"] == [f"{HUB}/actors/{TREVOR}"]
         assert posted["summary"] == "flaky tests"
 
-        waiting = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
-            "items"
-        ]
+        waiting = client.get(
+            f"/actors/{TREVOR}/inbox?view=full", headers=as_(TREVOR)
+        ).json()["items"]
         assert [n["summary"] for n in waiting] == ["flaky tests"]
 
-        again = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        again = client.get(
+            f"/actors/{TREVOR}/inbox?view=full", headers=as_(TREVOR)
+        ).json()
         assert again["totalItems"] == 1, "peeking must not consume"
 
         object_id = posted["id"]
@@ -147,7 +150,7 @@ class TestMail:
         )
         assert read.status_code == 200
         assert (
-            client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            client.get(f"/actors/{TREVOR}/inbox?view=full", headers=as_(TREVOR)).json()[
                 "totalItems"
             ]
             == 0
@@ -177,7 +180,7 @@ class TestMail:
         )
         assert r.status_code == 201, r.text
         assert (
-            client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            client.get(f"/actors/{TREVOR}/inbox?view=full", headers=as_(TREVOR)).json()[
                 "totalItems"
             ]
             == 1
@@ -280,7 +283,7 @@ class TestObservation:
         self._send(client, ROSEMARY, [TREVOR], summary="untouched")
         client.get(f"/observe/mailbox/{TREVOR}")
         still = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
-        assert still["totalItems"] == 1, "observing stole the agent's mail"
+        assert still["unread"] == 1, "observing stole the agent's mail"
 
     def test_observe_sees_a_whole_thread_no_participant_can(
         self, client: TestClient
@@ -444,7 +447,7 @@ class TestReviewFindings:
         assert r.status_code == 422
         assert r.json()["code"] == "remote_mailbox"
         assert (
-            client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            client.get(f"/actors/{TREVOR}/inbox?view=full", headers=as_(TREVOR)).json()[
                 "totalItems"
             ]
             == 0
@@ -496,7 +499,7 @@ class TestReviewFindings:
         assert reply["summary"] == "Re: flaky"
         assert (
             client.get(f"/actors/{ROSEMARY}/inbox", headers=as_(ROSEMARY)).json()[
-                "totalItems"
+                "unread"
             ]
             == 1
         )
@@ -601,3 +604,226 @@ class TestSecondReviewFindings:
 
             assert c.get(f"/objects/{ident}", headers=as_(YITZHAK)).status_code == 404
             assert detector.refusals_for(YITZHAK) == 1, "a refused view must be seen"
+
+
+class TestCompactInbox:
+    """Triage without paying for the mail — mission compact-inbox-and-unread-triage.
+
+    The old inbox returned every waiting message in full, so the cheapest thing an
+    agent does — glance at its mailbox — was the most expensive call in the API, and it
+    charged again for the same unread broadcast on every poll.
+    """
+
+    def _seed(self, client: TestClient, count: int = 3, body: str = "x" * 4000) -> None:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        for n in range(count):
+            r = client.post(
+                f"/actors/{ROSEMARY}/outbox",
+                json=note([TREVOR], body, summary=f"subject {n}"),
+                headers=as_(ROSEMARY),
+            )
+            assert r.status_code == 201, r.text
+
+    def test_a_count_carries_no_mail_at_all(self, client: TestClient) -> None:
+        """SC-001: learn the unread count without receiving any message body."""
+        self._seed(client)
+        body = client.get(
+            f"/actors/{TREVOR}/inbox?view=count", headers=as_(TREVOR)
+        ).json()
+
+        assert body["unread"] == 3
+        assert "items" not in body
+        assert "x" * 100 not in repr(body), "a count leaked message content"
+
+    def test_a_summary_says_who_and_what_but_never_the_words(
+        self, client: TestClient
+    ) -> None:
+        """SC-002: sender, subject, id and time — enough to choose from, no bodies."""
+        self._seed(client)
+        body = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+
+        assert body["unread"] == 3
+        row = body["items"][0]
+        assert row["from"] == ROSEMARY
+        assert row["subject"] == "subject 0"
+        assert row["published"] and row["id"]
+        assert row["chars"] == 4000, "the size hint should describe the body"
+        assert "content" not in row and "x" * 100 not in repr(body)
+
+    def test_the_default_is_dramatically_cheaper(self, client: TestClient) -> None:
+        """The point of the mission, stated as a number rather than a hope."""
+        self._seed(client, count=5)
+        summary = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).content
+        full = client.get(
+            f"/actors/{TREVOR}/inbox?view=full", headers=as_(TREVOR)
+        ).content
+
+        assert len(summary) * 10 < len(full), (
+            f"summary {len(summary)}B vs full {len(full)}B — "
+            "the compact path is not compact"
+        )
+
+    def test_a_cursor_hides_what_you_have_already_seen(
+        self, client: TestClient
+    ) -> None:
+        """SC-003: ask for what is new and do not re-read old unread broadcasts."""
+        self._seed(client, count=2)
+        first = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        cursor = first["cursor"]
+
+        again = client.get(
+            f"/actors/{TREVOR}/inbox?since={_q(cursor)}", headers=as_(TREVOR)
+        ).json()
+        assert again["unread"] == 0, "the cursor did not filter what was already seen"
+
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "new", summary="after the cursor"),
+            headers=as_(ROSEMARY),
+        )
+        fresh = client.get(
+            f"/actors/{TREVOR}/inbox?since={_q(cursor)}", headers=as_(TREVOR)
+        ).json()
+        assert [r["subject"] for r in fresh["items"]] == ["after the cursor"]
+
+    def test_a_shared_timestamp_cannot_swallow_a_message(
+        self, client: TestClient
+    ) -> None:
+        """Two messages in the same instant: neither may be hidden.
+
+        Raised by ludmila_coe in review. On a timestamp-only cursor the second message
+        of a tie is never greater than the cursor, so it is hidden permanently — and
+        mail that vanished is indistinguishable from mail that never arrived. The cursor
+        carries the message id for exactly this case.
+        """
+        self._seed(client, count=2, body="short")
+        page = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        stamps = [row["published"] for row in page["items"]]
+
+        # Walk the inbox one message at a time, as a session resuming from its cursor
+        # does. Every message must be seen exactly once, ties or no ties.
+        seen: list[str] = []
+        cursor = ""
+        for _ in range(5):  # bounded: a cursor that never advances must fail, not hang
+            query = f"?since={_q(cursor)}" if cursor else ""
+            step = client.get(
+                f"/actors/{TREVOR}/inbox{query}", headers=as_(TREVOR)
+            ).json()
+            if not step["items"]:
+                break
+            seen.append(step["items"][0]["id"])
+            cursor = _cursor_through(step["items"][0])
+
+        assert len(seen) == len(set(seen)) == 2, (
+            f"walked {seen} for stamps {stamps} — a message was hidden or repeated"
+        )
+
+    def test_threads_group_unread_without_revealing_hidden_turns(
+        self, client: TestClient
+    ) -> None:
+        """SC-004: thread-level summaries, built only from what the caller can see."""
+        self._seed(client, count=1, body="opening")
+        opening = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            "items"
+        ][0]["id"]
+        # Addressed *and* in-reply-to: a second turn of the same conversation landing
+        # in Trevor's mailbox. A bare inReplyTo would go back to the original sender —
+        # who here is Rosemary herself — and never reach him.
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note(
+                [TREVOR],
+                "and another thing",
+                summary="Re: subject 0",
+                inReplyTo=opening,
+            ),
+            headers=as_(ROSEMARY),
+        )
+
+        body = client.get(
+            f"/actors/{TREVOR}/inbox?view=threads", headers=as_(TREVOR)
+        ).json()
+
+        assert len(body["threads"]) == 1, "two turns of one thread listed separately"
+        group = body["threads"][0]
+        assert group["unread"] == 2
+        assert group["lastFrom"] == ROSEMARY
+        assert group["subject"] == "subject 0"
+        assert group["broadcast"] is False
+        assert "opening" not in repr(body), "a thread summary carried a body"
+
+    def test_nothing_compact_consumes_and_full_bodies_need_an_explicit_read(
+        self, client: TestClient
+    ) -> None:
+        """SC-003/SC-005: triage is free; only `read` marks mail handled."""
+        self._seed(client, count=1, body="the actual words")
+        for query in ("", "?view=count", "?view=threads", "?view=full"):
+            client.get(f"/actors/{TREVOR}/inbox{query}", headers=as_(TREVOR))
+
+        page = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        assert page["unread"] == 1, "looking consumed the message"
+        ident = page["items"][0]["id"].rsplit("/", 1)[-1]
+
+        peeked = client.get(f"/objects/{ident}", headers=as_(TREVOR)).json()
+        assert peeked["content"] == "the actual words"
+        assert (
+            client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()["unread"]
+            == 1
+        ), "peeking consumed the message"
+
+        read = client.post(f"/objects/{ident}/read", headers=as_(TREVOR)).json()
+        assert read["content"] == "the actual words"
+        assert (
+            client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()["unread"]
+            == 0
+        ), "reading did not consume the message"
+
+
+def _cursor_through(row: dict) -> str:
+    """The cursor a caller holds after being shown exactly this row."""
+    return f"{row['published']}|{row['id'].rsplit('/', 1)[-1]}"
+
+
+def _q(cursor: str) -> str:
+    """A cursor, safe in a query string.
+
+    Timestamps carry `+00:00`, and a raw `+` in a query string decodes to a space — so
+    an unquoted cursor silently compares as a different, earlier instant. HubClient
+    quotes it; a test that does not would be testing something the product never does.
+    """
+    return urllib.parse.quote(cursor, safe="")
+
+
+class TestCompactInboxPaging:
+    def test_a_neglected_mailbox_answers_in_one_bounded_page(
+        self, client: TestClient
+    ) -> None:
+        """NFR-002: a glance costs a bounded amount however long you have ignored it.
+
+        The cap is only safe because the cursor exists: what is left out is next, not
+        lost. `unread` still reports the true backlog, because a count that quietly
+        meant "up to fifty" would let a pile-up look handled.
+        """
+        from agent_mailbox.api import PAGE
+
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        for n in range(PAGE + 7):
+            client.post(
+                f"/actors/{ROSEMARY}/outbox",
+                json=note([TREVOR], "hello", summary=f"subject {n}"),
+                headers=as_(ROSEMARY),
+            )
+
+        first = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        assert first["unread"] == PAGE + 7, "the backlog was under-reported"
+        assert len(first["items"]) == PAGE
+        assert first["more"] == 7
+
+        rest = client.get(
+            f"/actors/{TREVOR}/inbox?since={_q(first['cursor'])}", headers=as_(TREVOR)
+        ).json()
+        assert len(rest["items"]) == 7, "the cursor did not reach the rest"
+        assert "more" not in rest
+        assert not {r["id"] for r in first["items"]} & {r["id"] for r in rest["items"]}

@@ -752,8 +752,16 @@ class HubClient:
     def update_profile(self, profile: dict[str, Any]) -> Any:
         return self._call("PUT", f"/actors/{self.config.name}", {"profile": profile})
 
-    def check_inbox(self) -> Any:
-        return self._call("GET", f"/actors/{self.config.name}/inbox")
+    def check_inbox(self, view: str = "summary", since: str | None = None) -> Any:
+        """What is waiting. ``view`` picks the weight; nothing here consumes.
+
+        ``since`` is a cursor the *caller* holds — the hub keeps no last-seen mark, so
+        two sessions sharing one identity cannot hide mail from each other.
+        """
+        query = f"?view={urllib.parse.quote(view)}"
+        if since:
+            query += f"&since={urllib.parse.quote(since)}"
+        return self._call("GET", f"/actors/{self.config.name}/inbox{query}")
 
     def send_message(
         self,
@@ -783,6 +791,10 @@ class HubClient:
 
     def read_message(self, object_id: str) -> Any:
         return self._call("POST", f"/objects/{_leaf(object_id)}/read")
+
+    def peek_message(self, object_id: str) -> Any:
+        """One body, without marking it handled. The counterpart of a manifest row."""
+        return self._call("GET", f"/objects/{_leaf(object_id)}")
 
     def reply_message(
         self, object_id: str, body: str, subject: str | None = None

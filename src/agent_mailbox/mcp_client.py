@@ -479,7 +479,7 @@ async def join(
 
 
 @mcp.tool()
-async def check_inbox() -> dict[str, Any]:
+async def check_inbox(since: str | None = None, full: bool = False) -> dict[str, Any]:
     """What is waiting for you right now. Free, and consumes nothing.
 
     A snapshot at the moment you ask. **Nothing arrives while you sit and think** — the
@@ -487,17 +487,58 @@ async def check_inbox() -> dict[str, Any]:
     Checking once at the start of a turn is the whole habit; polling in a loop wastes
     your turn and finds nothing that waiting for the next turn would not.
 
-    Returns summaries. `read_message` is what actually opens one and marks it handled.
+    You get a **manifest, not the mail**: for each waiting message, who sent it, its
+    subject, when, whether it is a broadcast, and how many characters long it is. That
+    is what you decide from. `read_message` opens one and marks it handled;
+    `peek_message` opens one without.
+
+    `cursor` in the reply is a bookmark **you** keep — pass it back as `since` next time
+    and you will see only what has arrived since. It is a filter, not server state: the
+    hub remembers nothing, so losing it costs you nothing but a longer list, and two
+    sessions sharing your name cannot hide mail from each other.
+
+    `full=True` returns every waiting body instead. It is the expensive call — a single
+    unread broadcast can cost more than the rest of your turn — so use it only when you
+    already know you want everything.
     """
 
     def go() -> dict[str, Any]:
-        page = _client().check_inbox()
+        if full:
+            page = _client().check_inbox(view="full")
+            return {
+                "waiting": page.get("totalItems", 0),
+                "messages": [_summarise(n) for n in page.get("items", [])],
+            }
+        page = _client().check_inbox(view="summary", since=since)
         return {
-            "waiting": page.get("totalItems", 0),
-            "messages": [_summarise(n) for n in page.get("items", [])],
+            "waiting": page.get("unread", 0),
+            "cursor": page.get("cursor", ""),
+            "messages": page.get("items", []),
         }
 
     return await _guard(go)
+
+
+@mcp.tool()
+async def unread_count(since: str | None = None) -> dict[str, Any]:
+    """How much is waiting, and nothing else. The cheapest question you can ask.
+
+    Use this when all you need is whether to bother — it returns a count and a cursor,
+    never a sender, subject or body, whatever is waiting. `check_inbox` is the next step
+    once the answer is not zero.
+    """
+    return await _guard(lambda: _client().check_inbox(view="count", since=since))
+
+
+@mcp.tool()
+async def check_threads(since: str | None = None) -> dict[str, Any]:
+    """Waiting mail gathered into conversations rather than listed message by message.
+
+    Useful when several unread turns belong together: you get the subject, how many
+    unread turns it holds, who spoke last and when. Conversations are grouped only from
+    what you can see — you never learn that a turn you were not sent exists.
+    """
+    return await _guard(lambda: _client().check_inbox(view="threads", since=since))
 
 
 @mcp.tool()
@@ -534,8 +575,48 @@ async def read_message(message_id: str) -> dict[str, Any]:
     addressed keeps their own copy, unread. Once you have read it, it leaves your inbox:
     if you will need the content later in this turn, keep it, because a second
     `check_inbox` will not show it again.
+
+    Pass several ids separated by commas to read them in one call. Each is reported on
+    separately, so one bad id does not cost you the others.
     """
-    return await _guard(lambda: _summarise(_client().read_message(message_id)))
+
+    def go() -> dict[str, Any]:
+        wanted = [part.strip() for part in message_id.split(",") if part.strip()]
+        if len(wanted) <= 1:
+            return _summarise(_client().read_message(message_id))
+        client = _client()
+        results = []
+        for one in wanted:
+            # Per-id, never all-or-nothing: a batch that fails whole would either lose
+            # the reads that did succeed or repeat them, and repeating a *consuming*
+            # call is not safe. Report each and let the caller act on the difference.
+            try:
+                results.append(
+                    {
+                        "id": one,
+                        "status": "read",
+                        **_summarise(client.read_message(one)),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 — the failure is the answer here
+                results.append({"id": one, "status": "failed", "error": str(exc)})
+        return {
+            "read": sum(r["status"] == "read" for r in results),
+            "messages": results,
+        }
+
+    return await _guard(go)
+
+
+@mcp.tool()
+async def peek_message(message_id: str) -> dict[str, Any]:
+    """Read one message in full **without** marking it handled.
+
+    For when you need the content to decide something but are not ready to take the
+    message on — it stays in your inbox and keeps showing up in `check_inbox`, with its
+    age visible, until you `read_message` it. Reading is the commitment; this is not it.
+    """
+    return await _guard(lambda: _summarise(_client().peek_message(message_id)))
 
 
 @mcp.tool()
