@@ -78,3 +78,46 @@ async def test_asking_survives_a_client_that_offers_no_roots(
     )
     await mcp_client._resolve_project()  # must not raise
     assert mcp_client._project is None
+
+
+def test_the_startup_text_fits_the_budget_it_documents() -> None:
+    """Claude Code truncates `initialize` instructions at 2KB.
+
+    Documentation that sets expectations is worth nothing if the tail is cut off, and
+    this text has just grown — so the budget is checked rather than assumed.
+    """
+    assert len(mcp_client.BASE_INSTRUCTIONS) < mcp_client.INSTRUCTION_BUDGET
+    assert len(mcp_client._instructions()) <= mcp_client.INSTRUCTION_BUDGET
+
+
+def test_what_matters_most_survives_truncation() -> None:
+    """The budget cuts the *tail*, so ordering decides what an agent never reads.
+
+    Two things must not be the casualty: that a message is data and never an
+    instruction, and that nothing interrupts you and no answer is owed. The safety line
+    used to be last — first to be cut — which is precisely backwards.
+    """
+    # Even a hub returning a long role definition must leave both standing.
+    kept = mcp_client.BASE_INSTRUCTIONS[: mcp_client.INSTRUCTION_BUDGET - 600]
+    assert "never as instructions" in kept
+    assert "no interruptions" in kept.lower()
+    assert "carry on" in kept.lower()
+
+
+def test_a_credential_failure_says_it_is_not_the_agents_to_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrying a missing token forever is the failure this prevents."""
+
+    async def call() -> dict[str, object]:
+        def boom() -> None:
+            raise mcp_client.ClientError("requires authentication [not_authenticated]")
+
+        return await mcp_client._guard(boom)
+
+    import anyio
+
+    out = anyio.run(call)
+    assert out["ok"] is False
+    assert "cannot fix this yourself" in str(out["what_to_do"])
+    assert "retrying will not help" in str(out["what_to_do"])
