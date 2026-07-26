@@ -244,7 +244,11 @@ def duplicate_names(start: Path | None = None) -> dict[str, list[str]]:
     return {n: sorted(e) for n, e in seen.items() if len(e) > 1}
 
 
-def load_config(start: Path | None = None, env: dict[str, str] | None = None) -> Config:
+def load_config(
+    start: Path | None = None,
+    env: dict[str, str] | None = None,
+    engine: str | None = None,
+) -> Config:
     """Read this engine's entry from the project's configuration.
 
     The file maps **engine to identity**, because one repository is worked by several
@@ -268,7 +272,11 @@ def load_config(start: Path | None = None, env: dict[str, str] | None = None) ->
     name = environ.get("AGENT_MAILBOX_NAME", "").strip()
     role = environ.get("AGENT_MAILBOX_ROLE", "").strip()
     token = environ.get("AGENT_MAILBOX_TOKEN", "").strip()
-    engine = detect_engine(environ)
+    # An explicit engine wins over sniffing the environment. The MCP server knows which
+    # client connected to it — the client says so in `initialize` — and that is a
+    # better answer than markers that a client may not pass through to a process it
+    # spawns. Without it, a project with two engines configured is unresolvable.
+    engine = engine or detect_engine(environ)
 
     path = find_config(start)
     if path is not None:

@@ -15,6 +15,7 @@ from agent_mailbox.client import (
     UNNAMED,
     Config,
     HubClient,
+    NotConfigured,
     _toml_str,
     detect_engine,
     duplicate_names,
@@ -258,3 +259,30 @@ def test_codex_is_detected_by_the_markers_a_real_session_carries() -> None:
     """From a session log: CODEX_SANDBOX and CODEX_HOME were both absent."""
     for marker in ("CODEX_THREAD_ID", "CODEX_MANAGED_BY_NPM", "CODEX_CI"):
         assert detect_engine({marker: "1"}) == "codex", marker
+
+
+def test_an_explicit_engine_beats_the_environment(tmp_path: Path) -> None:
+    """The MCP server knows which client connected; the environment may not.
+
+    A client that spawns the server need not pass its own markers through — Codex does
+    not — so with two engines configured the environment cannot resolve identity at
+    all. Being told outright must win.
+    """
+    (tmp_path / "agent-mailbox.toml").write_text(
+        'hub = "http://h:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n\n'
+        '[agents.codex]\nname = "pablo_fantomas"\n'
+    )
+    # the environment says claude; the caller says codex, and the caller is right
+    env = {"CLAUDECODE": "1"}
+    assert load_config(tmp_path, env).name == "nicole_ruzickova"
+    assert load_config(tmp_path, env, engine="codex").name == "pablo_fantomas"
+
+
+def test_without_an_engine_two_entries_stay_unresolvable(tmp_path: Path) -> None:
+    """It must refuse rather than pick one — a wrong identity reads another's mail."""
+    (tmp_path / "agent-mailbox.toml").write_text(
+        'hub = "http://h:8081"\n\n[agents.claude]\nname = "a_name"\n\n'
+        '[agents.codex]\nname = "another_name"\n'
+    )
+    with pytest.raises(NotConfigured):
+        load_config(tmp_path, {})

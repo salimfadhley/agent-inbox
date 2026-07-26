@@ -14,9 +14,13 @@ whereas a process on the agent's machine can interrupt the session it serves.
 from __future__ import annotations
 
 import json
+import logging
+import tomllib
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 
 from agent_mailbox.client import (
@@ -128,11 +132,82 @@ def _instructions() -> str:
     return text[:INSTRUCTION_BUDGET]
 
 
+logger = logging.getLogger("agent_mailbox.mcp")
+
 mcp = FastMCP("agent-mailbox", instructions=_instructions())
 
 
+#: Where this server should look for the project's configuration. An MCP server is
+#: launched by the agent's *client*, often with a working directory that is not the
+#: project — so its own cwd is the wrong answer, and asking the client is the right
+#: one. Resolved once per process from the client's declared roots, because a stdio
+#: server serves exactly one client for its whole life.
+_project: Path | None = None
+_roots_asked = False
+
+#: Which engine this server is serving. Taken from the client's own `initialize`
+#: message rather than from environment markers: a client that spawns this process
+#: need not pass its markers through, and Codex does not. With two engines configured
+#: in one project and no marker, identity is simply unresolvable — the server correctly
+#: refuses to guess, and the agent is stuck. The client saying "I am codex" settles it.
+_engine: str | None = None
+
+#: Client names seen in `initialize`, matched as substrings of the lowercased name.
+_CLIENT_ENGINES: tuple[tuple[str, str], ...] = (
+    ("claude", "claude"),
+    ("codex", "codex"),
+    ("gemini", "gemini"),
+    ("cursor", "cursor"),
+)
+
+
+async def _resolve_project() -> None:
+    """Ask the client where its workspace is, once, and remember the answer.
+
+    The MCP protocol has the client declare *roots* — the directories it is working in.
+    That is the only authority on which project an agent is in: the server's own
+    working directory is wherever the client happened to spawn it, which for Codex is
+    not the project at all, and identity is per project.
+
+    Every failure here is silent and falls back to the working directory, because a
+    client that declares no roots is entitled to do so and the old behaviour is still
+    right for clients that spawn the server in place (Claude Code does).
+    """
+    global _project, _roots_asked, _engine
+    if _roots_asked:
+        return
+    _roots_asked = True
+
+    # Who connected? The client names itself when it initialises, and that is the one
+    # authority on which engine's identity to use.
+    try:
+        info = mcp.get_context().session.client_params
+        name = (info.clientInfo.name if info and info.clientInfo else "").lower()
+        for marker, engine in _CLIENT_ENGINES:
+            if marker in name:
+                _engine = engine
+                logger.info("client identifies as %r — engine %s", name, engine)
+                break
+    except Exception:  # noqa: BLE001 - identity by env is still a fallback
+        pass
+
+    try:
+        result = await mcp.get_context().session.list_roots()
+    except Exception:  # noqa: BLE001 - an unsupported capability is not an error here
+        return
+    for root in result.roots:
+        uri = str(root.uri)
+        if not uri.startswith("file://"):
+            continue
+        path = Path(unquote(urlparse(uri).path))
+        if path.is_dir():
+            _project = path
+            logger.info("project resolved from the client's roots: %s", path)
+            return
+
+
 def _client() -> HubClient:
-    return HubClient(load_config())
+    return HubClient(load_config(_project, engine=_engine))
 
 
 def _unconfigured(exc: NotConfigured) -> str:
@@ -146,9 +221,26 @@ def _unconfigured(exc: NotConfigured) -> str:
     misdirection cost a Codex session an evening, so the message names the directory it
     searched and offers the fixes that actually apply.
     """
-    here = Path.cwd()
-    if find_config() is not None:
-        return str(exc)
+    here = _project or Path.cwd()
+    found = find_config(_project)
+    if found is not None:
+        # The file is right there. Then the missing piece is *which entry is mine*: a
+        # project with several engines configured is unresolvable unless we know which
+        # one this is, and the server refuses to guess rather than hand one engine
+        # another's inbox. Codex hit exactly this and reported it as a hub problem,
+        # because nothing said otherwise.
+        entries = ", ".join(sorted(_entries(found))) or "none"
+        return (
+            f"{exc}\n\n"
+            f"Found {found}, so the configuration is not missing — what is missing is "
+            f"which entry belongs to this session. It holds: {entries}.\n\n"
+            f"This server could not tell which engine it is serving: the client "
+            f"identified itself as {_client_name() or 'nothing recognisable'}, and no "
+            "engine marker was in the environment either. Newer clients are matched by "
+            "the name they send when they connect; if yours is not, set "
+            "AGENT_MAILBOX_NAME in this server's entry in the client's configuration, "
+            "or run `agent-inbox join` in the project to create an entry for it."
+        )
     return (
         f"{exc}\n\n"
         f"This MCP server is running in {here}, and there is no {CONFIG_NAME} there or "
@@ -165,14 +257,37 @@ def _unconfigured(exc: NotConfigured) -> str:
     )
 
 
-def _guard(call: Any) -> Any:
+def _entries(path: Path) -> list[str]:
+    """The engines configured in a project file, for saying what is actually there."""
+    try:
+        data = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    return [str(k) for k in (data.get("agents") or {})]
+
+
+def _client_name() -> str | None:
+    """What the connected client calls itself, if it said."""
+    try:
+        info = mcp.get_context().session.client_params
+        return info.clientInfo.name if info and info.clientInfo else None
+    except Exception:  # noqa: BLE001 - only ever used to explain a failure
+        return None
+
+
+async def _guard(call: Any) -> Any:
     """Run a call and turn any failure into words the agent can act on.
 
     An exception escaping into a tool result is a stack trace in an agent's context: it
     burns attention and says nothing useful. Every failure here is a sentence.
+
+    The call itself is synchronous — deliberately, since the client is stdlib urllib —
+    so it runs in a worker thread. Awaiting it directly would block the event loop and
+    with it the very session we need for roots.
     """
+    await _resolve_project()
     try:
-        return call()
+        return await anyio.to_thread.run_sync(call)
     except NotConfigured as exc:
         return {
             "ok": False,
@@ -201,17 +316,17 @@ def _leaf(value: str | None) -> str | None:
 
 
 @mcp.tool()
-def ping() -> dict[str, Any]:
+async def ping() -> dict[str, Any]:
     """Prove you are really connected to the mailbox. Call this first.
 
     Returns the hub's name and your own, so a wrong hub or a wrong name shows up
     immediately rather than as confusing silence later.
     """
-    return _guard(lambda: _client().ping())
+    return await _guard(lambda: _client().ping())
 
 
 @mcp.tool()
-def join(
+async def join(
     name: str | None = None,
     hub: str | None = None,
     role: str | None = None,
@@ -323,11 +438,11 @@ def join(
             "next": "Call ping to confirm, then update_profile to say who you are.",
         }
 
-    return _guard(go)
+    return await _guard(go)
 
 
 @mcp.tool()
-def check_inbox() -> dict[str, Any]:
+async def check_inbox() -> dict[str, Any]:
     """What is waiting for you. Does **not** consume anything.
 
     Call this at the start of a turn. Reading the list is free; `read_message` is what
@@ -341,11 +456,13 @@ def check_inbox() -> dict[str, Any]:
             "messages": [_summarise(n) for n in page.get("items", [])],
         }
 
-    return _guard(go)
+    return await _guard(go)
 
 
 @mcp.tool()
-def send_message(to: str, body: str, subject: str | None = None) -> dict[str, Any]:
+async def send_message(
+    to: str, body: str, subject: str | None = None
+) -> dict[str, Any]:
     """Send a message.
 
     `to` is another agent's name, a group, or `everyone`. A subject is optional but
@@ -356,27 +473,27 @@ def send_message(to: str, body: str, subject: str | None = None) -> dict[str, An
     of them can decline. A question you would like *someone* to answer belongs in a
     direct message.
     """
-    return _guard(lambda: _summarise(_client().send_message(to, body, subject)))
+    return await _guard(lambda: _summarise(_client().send_message(to, body, subject)))
 
 
 @mcp.tool()
-def read_message(message_id: str) -> dict[str, Any]:
+async def read_message(message_id: str) -> dict[str, Any]:
     """Read a message and mark it handled. This is the only call that consumes."""
-    return _guard(lambda: _summarise(_client().read_message(message_id)))
+    return await _guard(lambda: _summarise(_client().read_message(message_id)))
 
 
 @mcp.tool()
-def reply_message(
+async def reply_message(
     message_id: str, body: str, subject: str | None = None
 ) -> dict[str, Any]:
     """Reply to a message. Goes to its sender, on its thread, with `Re:` added."""
-    return _guard(
+    return await _guard(
         lambda: _summarise(_client().reply_message(message_id, body, subject))
     )
 
 
 @mcp.tool()
-def read_thread(message_id: str) -> dict[str, Any]:
+async def read_thread(message_id: str) -> dict[str, Any]:
     """The conversation a message belongs to — the turns **you** are part of.
 
     You see what you sent and what was sent to you. Side conversations between others
@@ -391,11 +508,11 @@ def read_thread(message_id: str) -> dict[str, Any]:
             "messages": [_summarise(n) for n in page.get("items", [])],
         }
 
-    return _guard(go)
+    return await _guard(go)
 
 
 @mcp.tool()
-def list_agents() -> dict[str, Any]:
+async def list_agents() -> dict[str, Any]:
     """Who is on this mailbox, and what each of them is for."""
 
     def go() -> dict[str, Any]:
@@ -411,17 +528,17 @@ def list_agents() -> dict[str, Any]:
             ]
         }
 
-    return _guard(go)
+    return await _guard(go)
 
 
 @mcp.tool()
-def whois(name: str) -> dict[str, Any]:
+async def whois(name: str) -> dict[str, Any]:
     """One agent's profile — what they work on and what they can help with."""
-    return _guard(lambda: _client().whois(name))
+    return await _guard(lambda: _client().whois(name))
 
 
 @mcp.tool()
-def update_profile(profile: str) -> dict[str, Any]:
+async def update_profile(profile: str) -> dict[str, Any]:
     """Describe yourself, as a JSON object.
 
     Everything descriptive lives here rather than in your name: your project, engine,
@@ -435,11 +552,11 @@ def update_profile(profile: str) -> dict[str, Any]:
             return {"ok": False, "problem": f"profile must be a JSON object: {exc}"}
         return _client().update_profile(parsed)
 
-    return _guard(go)
+    return await _guard(go)
 
 
 @mcp.tool()
-def my_role(role: str | None = None) -> dict[str, Any]:
+async def my_role(role: str | None = None) -> dict[str, Any]:
     """The full description of what a role here involves.
 
     Not truncated, unlike the connect-time instructions — so this is where the real
@@ -461,13 +578,13 @@ def my_role(role: str | None = None) -> dict[str, Any]:
         )
         return definition
 
-    return _guard(go)
+    return await _guard(go)
 
 
 @mcp.tool()
-def hub_info() -> dict[str, Any]:
+async def hub_info() -> dict[str, Any]:
     """What this mailbox is, what it enforces, and whether it authenticates."""
-    return _guard(lambda: _client().hub_info())
+    return await _guard(lambda: _client().hub_info())
 
 
 def main() -> None:
