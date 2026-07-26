@@ -10,6 +10,7 @@ because that atomicity is the whole reason they are single statements.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -141,3 +142,36 @@ class TestSessions:
             )
         )
         assert await store.get_session("s2") is not None
+
+
+class TestResetUsers:
+    """The escape hatch's storage half."""
+
+    async def test_it_clears_operators_but_never_the_agents_tokens(
+        self, store: Any
+    ) -> None:
+        """The distinction is the whole point of the name.
+
+        "I cannot log in" must not become "every agent on the hub is locked out too" —
+        device tokens belong to agents and have nothing to do with an operator who
+        mistyped a password.
+        """
+        await store.add_user(User(username="admin", password_hash="h"))
+        await store.add_recovery_codes("admin", ["a", "b"])
+        await store.add_session(
+            Session(
+                id="s1", username="admin", created="", expires="2099-01-01T00:00:00"
+            )
+        )
+        token = DeviceToken(
+            id="t1", actor="rosemary_nasrin", token_hash="th", created="", label="x"
+        )
+        await store.add_token(token)
+
+        await store.reset_users()
+
+        assert await store.any_users() is False
+        assert await store.get_session("s1") is None
+        assert await store.spend_recovery_code("admin", "a") is False
+        # the agent's credential survives
+        assert await store.get_token_by_hash("th") is not None

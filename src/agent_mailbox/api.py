@@ -413,7 +413,25 @@ def build_api(
 
     @get("/", media_type=MediaType.JSON)
     async def hub() -> dict[str, Any]:
-        return await api.hub()
+        descriptor = await api.hub()
+        # Whether anyone has actually finished setting this hub up. The console shows
+        # its first-run instructions from this, and must stop showing them once the
+        # admin is enrolled — an operator who has been using a hub for months should
+        # not still be told where to find a password they set long ago.
+        #
+        # It discloses nothing that was not already public: the login page has always
+        # said a fresh hub prints its password, and this only says whether that is
+        # still true here.
+        setup_required = False
+        # `off` means there is nothing to set up, whether or not a service was built —
+        # so it must not ask an operator to go and find a password they will never need.
+        if auth is not None and auth_mode != "off":
+            admin = await auth.pending_setup()
+            setup_required = admin is not None
+            if admin:
+                descriptor["setupUser"] = admin
+        descriptor["setupRequired"] = setup_required
+        return descriptor
 
     @get("/health")
     async def health() -> dict[str, str]:

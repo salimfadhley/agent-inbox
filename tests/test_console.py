@@ -757,3 +757,28 @@ def test_the_way_in_and_the_prompt_stay_open() -> None:
 def test_a_trusted_lan_is_not_asked_to_sign_in(console: TestClient) -> None:
     """Off and warn unchanged: the gate closes only when the hub enforces."""
     assert console.get("/", follow_redirects=False).status_code == 200
+
+
+def test_the_first_run_hint_is_shown_only_while_setup_is_pending() -> None:
+    """A hub in use for months should not still explain where its first password was.
+
+    Beyond being noise, it reads as though the hub were less configured than it is —
+    and it points at a log line that no longer exists.
+    """
+
+    class Fresh(StubHub):
+        def hub_info(self) -> dict[str, Any]:
+            return {**super().hub_info(), "setupRequired": True, "setupUser": "admin"}
+
+    class SetUp(StubHub):
+        def hub_info(self) -> dict[str, Any]:
+            return {**super().hub_info(), "setupRequired": False}
+
+    fresh, _ = make(Fresh())
+    with fresh as c:
+        assert "First run?" in c.get("/login").text
+    done, _ = make(SetUp())
+    with done as c:
+        page = c.get("/login").text
+        assert "First run?" not in page
+        assert "start-up log" not in page

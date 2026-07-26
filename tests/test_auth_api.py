@@ -344,3 +344,19 @@ class TestDirectoryIsNotPublicUnderEnforce:
         client, _ = _build("off")
         with client as c:
             assert c.get("/actors").status_code == 200
+
+
+class TestSetupRequired:
+    """The hub says whether anyone has finished setting it up."""
+
+    def test_it_is_true_on_a_fresh_hub_and_false_once_enrolled(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            assert c.get("/").json()["setupRequired"] is True
+            assert c.get("/").json()["setupUser"] == "admin"
+
+    def test_a_hub_without_auth_never_asks_for_setup(self) -> None:
+        """With auth off there is no account to set up, so there is nothing to say."""
+        client, _ = _build("off")
+        with client as c:
+            assert c.get("/").json()["setupRequired"] is False

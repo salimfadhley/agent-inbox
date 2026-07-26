@@ -33,6 +33,15 @@ class AuthStore(Protocol):
     """The persistence port for authentication. Pure storage; makes no decisions."""
 
     async def any_users(self) -> bool: ...
+    async def reset_users(self) -> None:
+        """Delete every operator account, their recovery codes and sessions.
+
+        Device tokens are deliberately untouched: they belong to agents, not to
+        operators, and taking them out would turn "I cannot log in" into "every
+        agent on the hub is locked out too".
+        """
+        ...
+
     async def add_user(self, user: User) -> None: ...
     async def get_user(self, username: str) -> User | None: ...
     async def put_user(self, user: User) -> None: ...
@@ -69,6 +78,11 @@ class InMemoryAuthStore:
 
     async def any_users(self) -> bool:
         return bool(self._users)
+
+    async def reset_users(self) -> None:
+        self._users.clear()
+        self._recovery.clear()
+        self._sessions.clear()
 
     async def add_user(self, user: User) -> None:
         self._users[user.username] = user
@@ -270,6 +284,11 @@ class SqliteAuthStore:
     async def any_users(self) -> bool:
         cursor = await self._db.execute("SELECT 1 FROM auth_users LIMIT 1")
         return await cursor.fetchone() is not None
+
+    async def reset_users(self) -> None:
+        for table in ("auth_users", "auth_recovery_codes", "auth_sessions"):
+            await self._db.execute(f"DELETE FROM {table}")  # noqa: S608
+        await self._db.commit()
 
     async def add_user(self, user: User) -> None:
         await self._db.execute(

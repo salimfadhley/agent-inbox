@@ -146,6 +146,19 @@ class AuthService:
         logger.warning("initial admin password: %s (change it now)", password)
         return password
 
+    async def pending_setup(self) -> str | None:
+        """The account still waiting to be set up, or ``None`` if none is.
+
+        Drives the console's first-run instructions, which have to disappear once
+        somebody has actually enrolled: an operator six months in should not still be
+        told where to find a password they replaced long ago, and — worse — being told
+        so suggests the hub is less set up than it is.
+        """
+        user = await self._store.get_user("admin")
+        if user is None or user.enrolment_state is EnrolmentState.MUST_CHANGE_AND_ENROL:
+            return "admin"
+        return None
+
     async def reset_user(self, username: str = "admin") -> str:
         """Put an account back to first-run: new password, no authenticator.
 

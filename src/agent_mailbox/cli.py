@@ -132,7 +132,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except ImportError as exc:  # pragma: no cover - only without server extras
         print(f"the hub needs the server dependencies: {exc}", file=sys.stderr)
         return 1
-    run_hub()
+    run_hub(reset_user_table=args.reset_user_table)
     return 0
 
 
@@ -474,6 +474,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.set_defaults(func=cmd_mcp)
 
     hub = subs.add_parser("serve", help="run the hub")
+    # A one-shot, and the help says so: left in place it empties the table on every
+    # start, so an operator would enrol, restart for some unrelated reason, and find
+    # themselves a stranger to their own hub.
+    hub.add_argument(
+        "--reset-user-table",
+        action="store_true",
+        help="on this start only: delete all operator accounts and seed a new admin, "
+        "printing its password. Agents' device tokens and all mail are untouched. "
+        "Start once with it, take the password from the log, then remove it.",
+    )
     hub.set_defaults(func=cmd_serve)
 
     # Runs on the hub, against its storage — an operator's escape hatch, not a route.

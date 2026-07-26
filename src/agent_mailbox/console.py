@@ -1015,6 +1015,18 @@ def build_console(client: HubClient) -> Litestar:
     @get("/login", media_type=MediaType.HTML, sync_to_thread=True)
     def login_form() -> Response:
         hub = hub_or_none()
+        # Shown only while the hub says nobody has finished setting it up. An operator
+        # months in should not still be told where to find a password they replaced —
+        # it reads as though the hub were less configured than it is.
+        first_run = (
+            "<p class='dim'>First run? The password for the account "
+            f'"<code>{html.escape(str((hub or {}).get("setupUser", "admin")))}</code>" '
+            "has been randomly generated and is visible in the application's start-up "
+            "log. You will be asked to set up a password and 2FA after your first "
+            "login.</p>"
+            if (hub or {}).get("setupRequired") is True
+            else ""
+        )
         body = (
             "<h2>Sign in</h2>"
             '<form method="post" action="/login/submit">'
@@ -1026,11 +1038,7 @@ def build_console(client: HubClient) -> Litestar:
             '<label for="o">6-digit code (blank on first login)</label>'
             '<input type="text" id="o" name="otp" inputmode="numeric">'
             '<p style="margin-top:.8rem"><button type="submit">Sign in</button></p>'
-            "</form>"
-            "<p class='dim'>First run? The password for the account "
-            '"<code>admin</code>" has been randomly generated and is visible in the '
-            "application's start-up log. You will be asked to set up a password and "
-            "2FA after your first login.</p>"
+            "</form>" + first_run
         )
         return Response(
             _page("Sign in", body, hub, "/login"), media_type=MediaType.HTML

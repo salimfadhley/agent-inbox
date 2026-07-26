@@ -93,11 +93,16 @@ class Settings:
         )
 
 
-def build_app(settings: Settings | None = None) -> Litestar:
+def build_app(
+    settings: Settings | None = None, *, reset_user_table: bool = False
+) -> Litestar:
     """Build the hub, opening its store for the life of the application.
 
     The store is opened in a Litestar startup hook rather than here, so that building
     the app is cheap and testable and nothing touches the disk at import time.
+
+    *reset_user_table* wipes the operator accounts on the way up — see
+    :func:`main` for what that is for and why it is a one-shot.
     """
     config = settings or Settings.from_env()
     logging.basicConfig(level=config.log_level)
@@ -163,8 +168,21 @@ def build_app(settings: Settings | None = None) -> Litestar:
         )
 
     async def bootstrap_admin(_: Litestar) -> None:
-        if auth is not None:
-            await auth.bootstrap()  # logs the initial password once, if it seeds
+        if auth is None:
+            return
+        if reset_user_table:
+            # Before bootstrap, so the seeding below is what refills the table. Said
+            # loudly because leaving the flag on would empty it again on every restart
+            # — an operator would enrol, restart for an unrelated reason, and be a
+            # stranger to their own hub with no idea why.
+            assert auth_store is not None
+            await auth_store.reset_users()
+            logger.warning(
+                "--reset-user-table: deleted every operator account, recovery code "
+                "and session. Device tokens and mail are untouched. REMOVE THE FLAG "
+                "NOW — with it set, this happens on every start."
+            )
+        await auth.bootstrap()  # logs a password when the table is empty or unused
 
     async def close_store(_: Litestar) -> None:
         if auth_store is not None:
@@ -179,13 +197,20 @@ def build_app(settings: Settings | None = None) -> Litestar:
     return app
 
 
-def main() -> None:
-    """Entry point for `agent-mailbox-serve` and for the container."""
+def main(*, reset_user_table: bool = False) -> None:
+    """Entry point for the container and for `agent-mailbox serve`.
+
+    *reset_user_table* is the way back into a hub whose operator cannot log in: start
+    once with it, read the fresh password out of the log, then **take it off**. It is a
+    startup option rather than a route because the person entitled to do this is the
+    one who can change how the hub is started — which is precisely the distinction
+    authentication exists to draw.
+    """
     import uvicorn
 
     config = Settings.from_env()
     uvicorn.run(
-        build_app(config),
+        build_app(config, reset_user_table=reset_user_table),
         host=config.host,
         port=config.port,
         log_level=config.log_level.lower(),
