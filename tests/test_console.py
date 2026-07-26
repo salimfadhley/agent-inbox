@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from litestar.testing import TestClient
 
+from agent_mailbox import __version__
 from agent_mailbox.client import SESSION_COOKIE, ClientError, Config, HubClient
 from agent_mailbox.console import build_console
 
@@ -199,6 +200,35 @@ def test_the_plain_text_form_is_the_same_prompt(console: TestClient) -> None:
     assert "uv tool install" in page.text
 
 
+def test_every_page_footer_names_both_versions(console: TestClient) -> None:
+    """Console and hub are separate deployments and can differ — say which is which.
+
+    "What are we actually running?" gets asked when something looks wrong, which is
+    the worst moment to go and inspect containers. The console's own version is its
+    `__version__`; the hub's is what the hub reports, so a rolling upgrade that has
+    moved one and not the other is visible on the page.
+    """
+    body = console.get("/").text
+    assert f"console <code>{__version__}</code>" in body
+    assert "hub <code>1.2.3</code>" in body
+
+
+def test_the_footer_does_not_pass_our_version_off_as_the_hubs(
+    console: TestClient,
+) -> None:
+    """An unreachable hub says so. Showing our number for both would be a lie."""
+
+    class DeadHub(StubHub):
+        def hub_info(self) -> dict[str, Any]:
+            raise ClientError("hub is down")
+
+    client, _ = make(DeadHub())
+    with client as c:
+        body = c.get("/").text
+    assert "hub <code>unreachable</code>" in body
+    assert f"console <code>{__version__}</code>" in body
+
+
 def test_the_console_reports_its_own_health_without_asking_the_hub(
     console: TestClient,
 ) -> None:
@@ -237,7 +267,10 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     text = console.get("/prompts/agent").text
     assert "agent-mailbox --version" in text
     assert "1.2.3" in text, "the floor must be the version the hub reports"
-    assert "uv tool install --no-cache --force" in text, "a plain install is a no-op"
+    # --force because a plain install is a no-op when the tool is there; --refresh
+    # because a hub is upgraded before its agents, so this is usually run in the window
+    # where a cached index still lists only the previous release.
+    assert "uv tool install --refresh --no-cache --force" in text
     # Pinned to the floor, so a resolver that cannot reach it fails loudly instead of
     # silently installing 0.10.2 — the superseded package, with different commands.
     assert '"agent-inbox[clients]>=1.2.3"' in text

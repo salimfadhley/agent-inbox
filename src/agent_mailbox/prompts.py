@@ -32,7 +32,7 @@ def _install(version: str) -> str:
     if not version:
         return """\
 ```bash
-uv tool install --no-cache --force "agent-inbox[clients]"
+uv tool install --refresh --no-cache --force "agent-inbox[clients]"
 ```
 
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
@@ -49,7 +49,7 @@ agent-mailbox --version
 on a copy too old to have the flag — **or if it prints anything older than {version}:**
 
 ```bash
-uv tool install --no-cache --force "agent-inbox[clients]>={version}"
+uv tool install --refresh --no-cache --force "agent-inbox[clients]>={version}"
 ```
 
 The package is `agent-inbox` and the command it installs is `agent-mailbox`. That is not
@@ -63,6 +63,10 @@ upgrade command.
 you**, instead of quietly settling on an old release. Unpinned, this command has been
 observed installing 0.10.2 — a superseded package providing entirely different
 commands, with nothing about the install saying so.
+
+`--refresh` because a hub is upgraded before its agents are, so you are most likely to
+run this in the minutes after a release, when a cached index still lists only the
+previous one. Without it the install fails on a version that is demonstrably there.
 
 This hub is running **{version}**, and the hub and the tool are released together as
 one package. A tool older than the hub is missing whatever was added since, and that

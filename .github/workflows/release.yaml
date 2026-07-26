@@ -20,16 +20,29 @@ name: Release
 # workflow artifacts, so a release is always downloadable — it just is not pushed to
 # PyPI.
 
+# Gated on CI, exactly as docker.yml is. This used to trigger straight off the tag, so
+# PyPI published whether or not the code worked: 0.13.3 went out that way while CI was
+# red, and shipped no images at all — a version that exists on PyPI and nowhere else.
+# One release now means one gate, and the same gate.
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 jobs:
   build:
+    # Only a v* tag whose CI passed. `workflow_run` carries the original event, and for
+    # a tag push `head_branch` is the tag name.
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && startsWith(github.event.workflow_run.head_branch, 'v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          # The exact commit CI validated, not whatever the branch is now.
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0  # full history + tags for hatch-vcs version
 
       - name: Install uv

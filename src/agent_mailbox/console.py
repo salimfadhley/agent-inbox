@@ -36,6 +36,7 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Body
 from litestar.response import Redirect, Response
 
+from agent_mailbox import __version__
 from agent_mailbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_mailbox.prompts import bootstrap, onboarding, role_note
 
@@ -89,6 +90,8 @@ code { font: 13px ui-monospace, monospace; }
 .warn { border: 1px solid var(--line); border-left-width: 4px; padding: .75rem 1rem;
         margin: 0 0 1.5rem; font-size: .9rem; }
 .empty { opacity: .6; font-style: italic; }
+.foot { margin: 2.5rem 0 0; padding-top: .75rem; border-top: 1px solid var(--line);
+        font-size: .8rem; opacity: .6; }
 .wrap { overflow-x: auto; }
 .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0 0 1rem; }
 .card { border: 1px solid var(--line); border-radius: 6px; padding: .75rem 1rem;
@@ -115,6 +118,24 @@ button:hover { border-color: currentColor; }
 .msg .b { white-space: pre-wrap; }
 .mine { border-left: 3px solid var(--accent); }
 """
+
+
+def _footer(hub: dict[str, Any] | None) -> str:
+    """Both versions, on every page.
+
+    The console and the hub are separate deployments of one package and can be on
+    different versions — during a rolling upgrade they always are, and the whole
+    question "what am I actually running?" is asked precisely when something looks
+    wrong. Reading it off a page beats going to find the container.
+
+    The console's version is its own `__version__`; the hub's is whatever it reports
+    now, so a hub that cannot be reached says so rather than inheriting ours.
+    """
+    theirs = html.escape(str((hub or {}).get("version", "")) or "unreachable")
+    return (
+        f'<footer class="foot">console <code>{html.escape(__version__)}</code>'
+        f" · hub <code>{theirs}</code></footer>"
+    )
 
 
 def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> str:
@@ -152,6 +173,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
 <nav>{nav}</nav>
 {warning}
 {body}
+{_footer(hub)}
 <script src="/static/console.js" defer></script>
 </body></html>"""
 
