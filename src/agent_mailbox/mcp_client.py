@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-import anyio
+from anyio.to_thread import run_sync
 from mcp.server.fastmcp import FastMCP
 
 from agent_mailbox.client import (
@@ -287,7 +287,10 @@ async def _guard(call: Any) -> Any:
     """
     await _resolve_project()
     try:
-        return await anyio.to_thread.run_sync(call)
+        # Imported by name: `import anyio` does not bind the submodule, and it only
+        # resolved before because mcp happens to import it. Relying on another
+        # package's import side effect is a break waiting for a refactor.
+        return await run_sync(call)
     except NotConfigured as exc:
         return {
             "ok": False,
