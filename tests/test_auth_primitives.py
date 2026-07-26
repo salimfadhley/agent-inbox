@@ -102,7 +102,8 @@ class TestTotp:
     def test_provisioning_uri_is_otpauth(self) -> None:
         uri = totp.provisioning_uri(totp.new_secret(), "rosemary_nasrin")
         assert uri.startswith("otpauth://totp/")
-        assert "issuer=agent-mailbox" in uri
+        # The project is agent-inbox; the issuer a phone shows should say so.
+        assert "issuer=agent-inbox" in uri
 
     def test_qr_is_self_contained_svg(self) -> None:
         svg = totp.qr_svg(totp.provisioning_uri(totp.new_secret(), "trevor_mahmood"))

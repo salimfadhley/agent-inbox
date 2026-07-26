@@ -134,7 +134,7 @@ def build_app(settings: Settings | None = None) -> Litestar:
                     "enrolment would fail later with an unexplained error."
                 ) from exc
         auth_store = SqliteAuthStore(config.db)
-        auth = AuthService(auth_store, secret_key=key)
+        auth = AuthService(auth_store, secret_key=key, hub_name=config.hub_name)
 
     throttle = LoginThrottle(
         max_failures=config.login_max_failures,

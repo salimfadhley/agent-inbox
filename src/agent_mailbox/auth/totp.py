@@ -32,9 +32,19 @@ def new_secret() -> str:
     return pyotp.random_base32()
 
 
-def provisioning_uri(secret: str, username: str, issuer: str = "agent-mailbox") -> str:
-    """The ``otpauth://`` URI an authenticator app imports."""
-    return pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer)
+def provisioning_uri(
+    secret: str, username: str, hub: str = "", issuer: str = "agent-inbox"
+) -> str:
+    """The ``otpauth://`` URI an authenticator app imports.
+
+    The entry reads ``agent-inbox: <hub>/<username>``. A phone accumulates dozens of
+    these, and ``agent-inbox: admin`` is useless the moment someone runs a second hub —
+    two entries, same label, and no way to tell which is the staging one. The hub's own
+    name is the thing that distinguishes them, so it goes in the account part where the
+    app shows it.
+    """
+    account = f"{hub}/{username}" if hub else username
+    return pyotp.TOTP(secret).provisioning_uri(name=account, issuer_name=issuer)
 
 
 def qr_svg(uri: str) -> str:

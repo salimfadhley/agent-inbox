@@ -77,11 +77,14 @@ class AuthService:
         secret_key: str,
         session_ttl: timedelta = timedelta(hours=12),
         clock: Callable[[], datetime] = _utcnow,
+        hub_name: str = "",
     ) -> None:
         self._store = store
         self._key = secret_key
         self._ttl = session_ttl
         self._clock = clock
+        #: Shown in the authenticator entry, so one phone can hold several hubs.
+        self._hub_name = hub_name
 
     def _now(self) -> str:
         return self._clock().isoformat()
@@ -287,9 +290,10 @@ class AuthService:
         await self._store.add_recovery_codes(
             username, [secrets.hash_token(c) for c in codes]
         )
+        uri = totp.provisioning_uri(secret, username, self._hub_name)
         return EnrolmentOffer(
-            provisioning_uri=totp.provisioning_uri(secret, username),
-            qr_svg=totp.qr_svg(totp.provisioning_uri(secret, username)),
+            provisioning_uri=uri,
+            qr_svg=totp.qr_svg(uri),
             recovery_codes=codes,
         )
 

@@ -257,3 +257,36 @@ class TestLoginFailuresAreExplainedInTheLog:
         with caplog.at_level("WARNING"), pytest.raises(BadCredentials):
             await svc.login("admin", "right", "000000")
         assert any("did not match" in r.getMessage() for r in caplog.records)
+
+
+class TestEnrolmentProvesTheAuthenticatorWorks:
+    """Enrolment must not complete on an unproven authenticator."""
+
+    async def test_a_wrong_code_does_not_enrol(self) -> None:
+        """Otherwise an operator locks themselves out at the moment they think they
+        are securing the hub: password changed, 2FA required, and a phone that was
+        never actually verified against the secret.
+        """
+        svc = service()
+        await svc.bootstrap()
+        await svc.begin_enrolment("admin")
+        with pytest.raises(BadCredentials):
+            await svc.complete_enrolment("admin", "newpassword", "000000")
+        user = await svc._store.get_user("admin")
+        assert user is not None
+        # nothing moved: still first-run, and the new password was not adopted
+        assert user.enrolment_state is EnrolmentState.MUST_CHANGE_AND_ENROL
+        with pytest.raises(BadCredentials):
+            await svc.login("admin", "newpassword")
+
+    async def test_the_authenticator_entry_names_the_hub(self) -> None:
+        """A phone accumulates these. `agent-inbox: admin` is ambiguous the moment
+        someone runs a second hub; the hub's name is what tells them apart.
+        """
+        svc = AuthService(InMemoryAuthStore(), secret_key=KEY, hub_name="halob")
+        await svc.bootstrap()
+        offer = await svc.begin_enrolment("admin")
+        assert "issuer=agent-inbox" in offer.provisioning_uri
+        # pyotp leaves the slash literal (it double-encodes a pre-encoded
+        # name), which is what authenticator apps display as the account.
+        assert "agent-inbox:halob/admin" in offer.provisioning_uri
