@@ -323,6 +323,19 @@ def _err(exc: Exception, hub: dict[str, Any] | None, title: str) -> Response:
 def build_console(client: HubClient) -> Litestar:
     """A window onto one hub: watch anyone, act as yourself."""
 
+    def seen_by(request: Request) -> HubClient:
+        """The hub client to use for one request, carrying the operator's session.
+
+        Observation is done *on behalf of* whoever is signed in. The console holds no
+        credential of its own under enforce — and must not, or anyone who reached it
+        would see every mailbox without logging in — so it borrows the human's session
+        and lets the hub decide. Without this the overview called `/observe/stats` as
+        nobody, got a 401, and the "not authenticated" redirect sent the operator back
+        to the login form they had just successfully used: a loop that looked exactly
+        like a rejected password.
+        """
+        return client.with_session(request.cookies.get(SESSION_COOKIE))
+
     def hub_or_none() -> dict[str, Any] | None:
         """The hub descriptor, or ``None`` if it cannot be reached.
 
@@ -365,11 +378,11 @@ def build_console(client: HubClient) -> Litestar:
     # -- observing (no caller; consumes nothing) ---------------------------
 
     @get("/", media_type=MediaType.HTML, sync_to_thread=True)
-    def overview() -> Response:
+    def overview(request: Request) -> Response:
         hub = hub_or_none()
         try:
-            stats = client.survey()
-            actors = client.list_agents().get("items", [])
+            stats = seen_by(request).survey()
+            actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
             return _err(exc, hub, "Overview")
 
@@ -434,10 +447,10 @@ def build_console(client: HubClient) -> Litestar:
         return rows
 
     @get("/agents", media_type=MediaType.HTML, sync_to_thread=True)
-    def agents() -> Response:
+    def agents(request: Request) -> Response:
         hub = hub_or_none()
         try:
-            actors = client.list_agents().get("items", [])
+            actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
             return _err(exc, hub, "Agents")
         rows = []
@@ -464,7 +477,7 @@ def build_console(client: HubClient) -> Litestar:
         )
 
     @get("/mailbox/{name:str}", media_type=MediaType.HTML, sync_to_thread=True)
-    def mailbox(name: str) -> Response:
+    def mailbox(name: str, request: Request) -> Response:
         """Everything addressed to one agent — read or not, **without consuming it**.
 
         Reads `/observe/mailbox/{name}`, which takes no caller. The operator looks; the
@@ -472,8 +485,8 @@ def build_console(client: HubClient) -> Litestar:
         """
         hub = hub_or_none()
         try:
-            items = client.observe_mailbox(name).get("items", [])
-            info = client.whois(name)
+            items = seen_by(request).observe_mailbox(name).get("items", [])
+            info = seen_by(request).whois(name)
         except ClientError as exc:
             return _err(exc, hub, name)
 
@@ -499,7 +512,7 @@ def build_console(client: HubClient) -> Litestar:
         return Response(_page(f"{name}", body, hub, ""), media_type=MediaType.HTML)
 
     @get("/message/{object_id:str}", media_type=MediaType.HTML, sync_to_thread=True)
-    def message(object_id: str) -> Response:
+    def message(object_id: str, request: Request) -> Response:
         """One message and the **whole** thread it belongs to.
 
         Uses `/observe/objects/{id}/thread`, so it shows the conversation entire —
@@ -508,8 +521,8 @@ def build_console(client: HubClient) -> Litestar:
         """
         hub = hub_or_none()
         try:
-            turns = client.observe_thread(object_id).get("items", [])
-            detail = client.observe_object(object_id)
+            turns = seen_by(request).observe_thread(object_id).get("items", [])
+            detail = seen_by(request).observe_object(object_id)
         except ClientError as exc:
             return _err(exc, hub, "Message")
 
@@ -754,7 +767,7 @@ def build_console(client: HubClient) -> Litestar:
         )
 
     @get("/tokens", media_type=MediaType.HTML, sync_to_thread=True)
-    def token_index() -> Response:
+    def token_index(request: Request) -> Response:
         """Every agent, and the way in to minting one a key.
 
         This exists because the per-agent page was reachable only from an unlabelled
@@ -764,7 +777,7 @@ def build_console(client: HubClient) -> Litestar:
         """
         hub = hub_or_none()
         try:
-            actors = client.list_agents().get("items", [])
+            actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
             return _err(exc, hub, "Tokens")
         rows = [
@@ -959,7 +972,7 @@ def build_console(client: HubClient) -> Litestar:
         )
 
     @get("/graph", media_type=MediaType.HTML, sync_to_thread=True)
-    def graph() -> Response:
+    def graph(request: Request) -> Response:
         """The message-flow network graph — who talks to whom, as a live diagram.
 
         The same data as the dashboard's flow table, drawn with the vendored vis-network
@@ -969,8 +982,8 @@ def build_console(client: HubClient) -> Litestar:
         """
         hub = hub_or_none()
         try:
-            stats = client.survey()
-            actors = client.list_agents().get("items", [])
+            stats = seen_by(request).survey()
+            actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
             return _err(exc, hub, "Graph")
 

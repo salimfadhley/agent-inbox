@@ -343,9 +343,29 @@ class HubClient:
     drag a dependency tree behind it, and this is a dozen requests with no streaming.
     """
 
-    def __init__(self, config: Config, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        config: Config,
+        timeout: float = DEFAULT_TIMEOUT,
+        session: str | None = None,
+    ) -> None:
         self.config = config
         self.timeout = timeout
+        #: A human operator's session, borrowed for the length of one request.
+        self.session = session
+
+    def with_session(self, session: str | None) -> HubClient:
+        """The same client, acting with a human's session attached.
+
+        The console needs this because it observes *on behalf of* whoever is signed in.
+        Under enforce it has no credential of its own — nor should it, or anyone
+        reaching the console would see every mailbox without logging in — so it carries
+        the operator's session inward and the hub decides. Authority stays with the
+        human; the console only passes it along.
+        """
+        if not session:
+            return self
+        return HubClient(self.config, self.timeout, session=session)
 
     # -- plumbing ----------------------------------------------------------
 
@@ -360,6 +380,8 @@ class HubClient:
         # enforced. The identity header stays too, and is simply ignored under enforce.
         if self.config.token:
             request.add_header("Authorization", f"Bearer {self.config.token}")
+        if self.session:
+            request.add_header("Cookie", f"{SESSION_COOKIE}={self.session}")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read()

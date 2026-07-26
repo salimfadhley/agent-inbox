@@ -782,3 +782,29 @@ def test_the_first_run_hint_is_shown_only_while_setup_is_pending() -> None:
         page = c.get("/login").text
         assert "First run?" not in page
         assert "start-up log" not in page
+
+
+def test_a_signed_in_operator_observes_with_their_own_session() -> None:
+    """The bug that read as "my login is rejected".
+
+    Login succeeded, the console redirected to the overview, and the overview asked the
+    hub for `/observe/stats` **as the console** — which under enforce holds no
+    credential of its own. The hub said 401, the not-authenticated redirect sent the
+    operator back to the login form they had just used successfully, and round it went.
+
+    So the session must travel inward on observation calls. The console still holds no
+    authority: it borrows the human's and the hub decides.
+    """
+    seen: list[str | None] = []
+
+    class Watching(StubHub):
+        def with_session(self, session: str | None) -> HubClient:
+            # Record and stay ourselves, so the stubbed answers are still used.
+            seen.append(session)
+            return self
+
+    client, _ = make(Watching())
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        assert c.get("/").status_code == 200
+    assert "sess-xyz" in seen, "the overview observed as nobody"
