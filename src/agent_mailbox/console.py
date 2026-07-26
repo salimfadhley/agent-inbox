@@ -1027,10 +1027,10 @@ def build_console(client: HubClient) -> Litestar:
             '<input type="text" id="o" name="otp" inputmode="numeric">'
             '<p style="margin-top:.8rem"><button type="submit">Sign in</button></p>'
             "</form>"
-            "<p class='dim'>First run? The <code>admin</code> password is printed in "
-            "the hub's log <strong>every time it starts</strong>, until the account "
-            "has been set up — so a lost one is only a restart away. Leave the code "
-            "blank on the first sign-in; you will be asked to enrol 2FA next.</p>"
+            "<p class='dim'>First run? The password for the account "
+            '"<code>admin</code>" has been randomly generated and is visible in the '
+            "application's start-up log. You will be asked to set up a password and "
+            "2FA after your first login.</p>"
         )
         return Response(
             _page("Sign in", body, hub, "/login"), media_type=MediaType.HTML
