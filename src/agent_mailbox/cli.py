@@ -590,8 +590,18 @@ def doctor(hub: str | None) -> int:
         click.echo(f"{ok} unique names    one name per engine")
 
     # Without an identity there is still a hub to talk to, and reaching it is the
-    # question that matters. UNNAMED never goes over the wire as a claim.
-    client = HubClient(config or Config(hub=hub_url, name=UNNAMED))
+    # question that matters. A shared token still has to ride along: `load_config`
+    # may have found one before raising because the *name* was missing, and dropping
+    # it here turns "not joined yet" into a false credential failure.
+    token = ""
+    if config is not None:
+        token = config.token or ""
+    if not token:
+        token = os.environ.get("AGENT_MAILBOX_TOKEN", "").strip()
+    if not token:
+        token = str(load_global().get("token", "")).strip()
+    diagnostic = config or Config(hub=hub_url, name=UNNAMED, token=token or None)
+    client = HubClient(diagnostic)
 
     # 2. Reachability, the network alone — no identity, no credential. A failure here is
     #    a wrong url or a hub that is down, and saying which later checks were never
@@ -620,7 +630,7 @@ def doctor(hub: str | None) -> int:
     you = remote.get("you") or {}
     token_state = str(you.get("token", ""))
     authenticated = info.get("authenticated") is True
-    has_token = bool(config.token) if config else False
+    has_token = bool(diagnostic.token)
 
     if token_state in ("rejected", "revoked") or (authenticated and not has_token):
         # Reported before the API call rather than after: that call is about to fail,
@@ -638,10 +648,10 @@ def doctor(hub: str | None) -> int:
     # invisible from inside the project, so "token present" alone leaves someone hunting
     # through a config that does not contain it.
     source = ""
-    if has_token and config is not None:
+    if has_token:
         if os.environ.get("AGENT_MAILBOX_TOKEN", "").strip():
             source = " (from AGENT_MAILBOX_TOKEN)"
-        elif config.token == str(load_global().get("token", "")).strip():
+        elif diagnostic.token == str(load_global().get("token", "")).strip():
             source = f" (shared, from {global_config_path()})"
         else:
             source = f" (from {where})"

@@ -9,11 +9,13 @@ harmless the first time, wrong as a diagnosis, and invisible without this test.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agent_mailbox import __version__
 from agent_mailbox.cli import main
+from agent_mailbox.client import Config
 
 
 def test_version_is_asked_for_without_a_subcommand(
@@ -66,6 +68,64 @@ def test_doctor_says_what_to_do_when_there_is_no_configuration(
     err = capsys.readouterr().err
     assert "configuration" in err
     assert "join" in err or "agent-mailbox.toml" in err
+
+
+def test_doctor_keeps_the_global_token_when_identity_is_unresolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A human shell has no engine marker, but the shared token still applies."""
+
+    class FakeHubClient:
+        configs: list[Config] = []
+
+        def __init__(self, config: Config) -> None:
+            self.config = config
+            self.configs.append(config)
+
+        def hub_info(self) -> dict[str, Any]:
+            return {"name": "hub", "version": "test", "authenticated": True}
+
+        def remote_doctor(self) -> dict[str, Any]:
+            if self.config.token:
+                return {
+                    "you": {"token": "accepted"},
+                    "verdict": "your token was accepted",
+                }
+            return {
+                "you": {"token": "not presented"},
+                "verdict": "no token presented",
+            }
+
+    xdg = tmp_path / "xdg"
+    (xdg / "agent-inbox").mkdir(parents=True)
+    (xdg / "agent-inbox" / "config.toml").write_text('token = "shared-secret"\n')
+    (tmp_path / "agent-mailbox.toml").write_text(
+        'hub = "http://hub:8081"\n\n'
+        "[agents.claude]\n"
+        'name = "nicole_ruzickova"\n\n'
+        "[agents.codex]\n"
+        'name = "pablo_fantomas"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+    monkeypatch.delenv("CODEX_SANDBOX", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("CODEX_MANAGED_BY_NPM", raising=False)
+    monkeypatch.delenv("CODEX_CI", raising=False)
+    monkeypatch.delenv("AGENT_MAILBOX_TOKEN", raising=False)
+    monkeypatch.setattr("agent_mailbox.cli.HubClient", FakeHubClient)
+
+    assert main(["doctor"]) == 2
+
+    out = capsys.readouterr().out
+    assert FakeHubClient.configs[0].token == "shared-secret"
+    assert "no entry for this engine yet" in out
+    assert "device token accepted by the hub" in out
+    assert "shared, from" in out
+    assert "api             not joined yet" in out
 
 
 class TestConfigure:
