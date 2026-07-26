@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from agent_mailbox.client import (
     detect_engine,
     find_config,
     load_config,
+    load_global,
     load_hub,
     project_root,
     write_config,
@@ -157,12 +159,33 @@ def cmd_join(args: argparse.Namespace) -> int:
         )
         return 1
 
-    client = HubClient(Config(hub=hub, name=args.name or UNNAMED, role=args.role))
+    # Joining an enforcing hub needs a credential *before* there is a project config to
+    # hold one, so the shared machine-wide token counts here too. Explicit beats
+    # environment beats machine-wide; whichever it is, it authenticates this call.
+    token = (args.token or "").strip() or os.environ.get(
+        "AGENT_MAILBOX_TOKEN", ""
+    ).strip()
+    shared = str(load_global().get("token", "")).strip()
+    client = HubClient(
+        Config(
+            hub=hub, name=args.name or UNNAMED, role=args.role, token=token or shared
+        )
+    )
     # Claim first, record second: a config asserting a refused name would be a file
     # claiming an identity that is not ours.
     claimed = client.join(args.name)
     granted = claimed.get("preferredUsername", args.name)
-    path = write_config(hub, granted, engine=engine, role=args.role, force=args.force)
+    # Only a token given *to this agent* is written into the project. Copying the
+    # shared one in would defeat the point of having it in one place — and would
+    # scatter a machine-wide secret through every repository it ever joins.
+    path = write_config(
+        hub,
+        granted,
+        engine=engine,
+        role=args.role,
+        force=args.force,
+        token=token or None,
+    )
     _print({"name": granted, "role": args.role, "engine": engine, "config": str(path)})
     return 0
 
@@ -315,15 +338,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # Say *where* the token came from. A shared token in the machine-wide file is
+    # invisible from inside the project, so "token present" alone leaves someone
+    # hunting through a config that does not contain it.
+    source = ""
+    if has_token and config is not None:
+        from agent_mailbox.client import global_config_path, load_global
+
+        if os.environ.get("AGENT_MAILBOX_TOKEN", "").strip():
+            source = " (from AGENT_MAILBOX_TOKEN)"
+        elif config.token == str(load_global().get("token", "")).strip():
+            source = f" (shared, from {global_config_path()})"
+        else:
+            source = f" (from {where})"
     print(
         f"{ok} credentials     "
         + (
-            "device token accepted by the hub"
+            f"device token accepted by the hub{source}"
             if token_state == "accepted"
-            else "device token present"
+            else f"device token present{source}"
             if has_token
             else "none needed — this hub does not authenticate"
-        )
+        ),
+        flush=True,
     )
     if verdict := remote.get("verdict"):
         print(f"{ok} hub check       {verdict}", flush=True)
@@ -506,6 +543,11 @@ def build_parser() -> argparse.ArgumentParser:
     join.add_argument("--role", default="agent", help="what this engine does here")
     join.add_argument("--engine", help="override engine detection")
     join.add_argument("--force", action="store_true", help="replace an existing entry")
+    join.add_argument(
+        "--token",
+        help="a device token minted for this agent; saved to its entry. Not needed "
+        "when a shared token is in the machine-wide config.",
+    )
     join.set_defaults(func=cmd_join)
 
     who = subs.add_parser("whoami", help="who this engine is here")

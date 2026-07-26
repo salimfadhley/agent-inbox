@@ -32,6 +32,7 @@ from litestar.handlers.base import BaseRouteHandler
 
 from agent_mailbox import __version__
 from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
+from agent_mailbox.auth.records import SHARED_ACTOR
 from agent_mailbox.auth.service import AuthService
 from agent_mailbox.auth.throttle import LoginThrottle
 from agent_mailbox.errors import auth_error_handler, mailbox_error_handler
@@ -365,6 +366,12 @@ def build_api(
         if auth is None or auth_mode == "off":
             return caller_name(request)
         caller = await resolve_verified_caller(request)
+        if caller == SHARED_ACTOR:
+            # A shared token admits the machine, not a person: it proves the caller is
+            # allowed here and says nothing about which agent they are, so the name
+            # comes from the header as it does on an open hub. One laptop running four
+            # coding agents holds one token, and they keep their separate identities.
+            return caller_name(request)
         if caller:
             return caller
         if auth_mode == "enforce":
@@ -489,6 +496,11 @@ def build_api(
             verdict = (
                 f"this hub has no actor named {claimed!r} — join to claim it. "
                 "Joining also writes your configuration; there is no second step."
+            )
+        elif token_state == "accepted" and verified == SHARED_ACTOR:
+            verdict = (
+                "your token was accepted — it is a shared token, so it admits this "
+                "machine and your name is taken from the header as usual"
             )
         elif token_state == "accepted":
             verdict = "your token was accepted"

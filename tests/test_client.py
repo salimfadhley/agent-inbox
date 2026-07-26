@@ -151,3 +151,50 @@ class TestAuthCallShape:
 
 
 pytestmark = pytest.mark.filterwarnings("ignore")
+
+
+class TestGlobalConfig:
+    """A credential is not an identity, so it need not be per project."""
+
+    def test_a_shared_token_is_found_machine_wide(self, tmp_path: Path) -> None:
+        """One token in one file admits every agent on the box.
+
+        Minting one apiece is correct for a shared server and pure friction on a
+        laptop running four coding agents — and friction is what gets abandoned.
+        """
+        home = tmp_path / "xdg"
+        (home / "agent-inbox").mkdir(parents=True)
+        (home / "agent-inbox" / "config.toml").write_text('token = "shared-secret"\n')
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "agent-mailbox.toml").write_text(
+            'hub = "http://hub:8081"\n\n[agents.claude]\nname = "jed_smith"\n'
+        )
+        env = {"XDG_CONFIG_HOME": str(home), "CLAUDECODE": "1"}
+        config = load_config(project, env)
+        assert config.name == "jed_smith", "identity still comes from the project"
+        assert config.token == "shared-secret"
+
+    def test_a_project_token_still_wins(self, tmp_path: Path) -> None:
+        """The specific beats the general — one agent can be given its own."""
+        home = tmp_path / "xdg"
+        (home / "agent-inbox").mkdir(parents=True)
+        (home / "agent-inbox" / "config.toml").write_text('token = "shared"\n')
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "agent-mailbox.toml").write_text(
+            'hub = "http://hub:8081"\n\n[agents.claude]\n'
+            'name = "jed_smith"\ntoken = "mine"\n'
+        )
+        env = {"XDG_CONFIG_HOME": str(home), "CLAUDECODE": "1"}
+        assert load_config(project, env).token == "mine"
+
+    def test_no_global_file_is_not_an_error(self, tmp_path: Path) -> None:
+        """The common case is that it does not exist at all."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "agent-mailbox.toml").write_text(
+            'hub = "http://hub:8081"\n\n[agents.claude]\nname = "jed_smith"\n'
+        )
+        env = {"XDG_CONFIG_HOME": str(tmp_path / "nothing"), "CLAUDECODE": "1"}
+        assert load_config(project, env).token is None

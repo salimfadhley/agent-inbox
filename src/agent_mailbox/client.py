@@ -28,6 +28,32 @@ from typing import Any
 CONFIG_NAME = "agent-mailbox.toml"
 IDENTITY_HEADER = "X-Agent-Name"
 
+#: A machine-wide fallback, under the project's true name. Identity stays per project —
+#: the same engine in two repositories is two correspondents — but a *credential* is
+#: not an identity: it says the machine is allowed on the hub. Putting one shared token
+#: here means a laptop is admitted once rather than in every repository it works in,
+#: which is the difference between a thing an operator does and a chore they abandon.
+GLOBAL_CONFIG_DIR = "agent-inbox"
+GLOBAL_CONFIG_NAME = "config.toml"
+
+
+def global_config_path(env: dict[str, str] | None = None) -> Path:
+    """Where the machine-wide configuration lives (XDG, or ``~/.config``)."""
+    environ = env if env is not None else dict(os.environ)
+    base = environ.get("XDG_CONFIG_HOME", "").strip()
+    root = Path(base) if base else Path.home() / ".config"
+    return root / GLOBAL_CONFIG_DIR / GLOBAL_CONFIG_NAME
+
+
+def load_global(env: dict[str, str] | None = None) -> dict[str, Any]:
+    """The machine-wide file, or an empty mapping. Never raises for absence."""
+    path = global_config_path(env)
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
 #: What a config holds before this engine has a name — the CLI and the MCP client both
 #: need *something* in the identity header to make their very first call. It is a
 #: placeholder, never a claim: `join` translates it back to "issue me one" so the first
@@ -124,8 +150,9 @@ def load_hub(start: Path | None = None, env: dict[str, str] | None = None) -> st
         return from_env
     path = find_config(start)
     if path is not None:
-        return str(tomllib.loads(path.read_text()).get("hub", "")).strip()
-    return ""
+        if hub := str(tomllib.loads(path.read_text()).get("hub", "")).strip():
+            return hub
+    return str(load_global(environ).get("hub", "")).strip()
 
 
 def load_config(start: Path | None = None, env: dict[str, str] | None = None) -> Config:
@@ -172,6 +199,14 @@ def load_config(start: Path | None = None, env: dict[str, str] | None = None) ->
             name = name or str(data.get("name", "")).strip()
             role = role or str(data.get("role", "")).strip()
             token = token or str(data.get("token", "")).strip()
+
+    # A credential, unlike an identity, is not per project: one shared token in the
+    # machine-wide file admits this box for every repository on it. The project file
+    # still wins, so a per-agent token continues to override the shared one.
+    if not token or not hub:
+        shared = load_global(environ)
+        token = token or str(shared.get("token", "")).strip()
+        hub = hub or str(shared.get("hub", "")).strip()
 
     if not hub or not name:
         missing = " and ".join(

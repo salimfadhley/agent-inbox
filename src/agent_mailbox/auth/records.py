@@ -34,9 +34,24 @@ class User:
     last_login: str | None = None
 
 
+#: An ``actor`` of ``*`` means the token names nobody: it admits the *machine*, and
+#: whoever presents it says which agent they are in the usual way. Safe as a sentinel
+#: because name validation refuses ``*``, so no real actor can ever collide with it.
+#:
+#: This is the difference between "prove you are rosemary_nasrin" and "prove you are
+#: allowed in here" — and both are wanted. A per-agent token binds a credential to one
+#: identity; a shared one lets a trusted machine hold a single token for every agent on
+#: it, which is what a laptop running four coding agents actually needs.
+SHARED_ACTOR = "*"
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceToken:
-    """A bearer credential for one agent actor. Holds only the secret's hash."""
+    """A bearer credential. Holds only the secret's hash.
+
+    ``actor`` is one agent's name, or :data:`SHARED_ACTOR` for a token that admits any
+    agent and leaves identity to the caller.
+    """
 
     id: str
     actor: str

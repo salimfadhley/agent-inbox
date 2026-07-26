@@ -37,6 +37,7 @@ from litestar.params import Body
 from litestar.response import Redirect, Response
 
 from agent_mailbox import __version__
+from agent_mailbox.auth.records import SHARED_ACTOR
 from agent_mailbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_mailbox.prompts import bootstrap, onboarding, role_note
 
@@ -658,13 +659,23 @@ def build_console(client: HubClient) -> Litestar:
             "hash, so this is the only time it can be read. If it is lost, mint "
             "another and revoke this one.</p>"
             f"<p><code>{html.escape(secret)}</code></p></div>"
-            "<p>Give it to the agent and have it run:</p>"
-            f"<pre>agent-mailbox join {html.escape(name)} --token {html.escape(secret)}"
-            "</pre>"
-            "<p>That writes the token into <code>agent-mailbox.toml</code> in the "
-            "agent's project root, under its own engine's entry, and it is sent "
-            "automatically from then on. <code>agent-mailbox doctor</code> confirms "
-            "it works.</p>"
+            + (
+                "<p>Put it in <code>~/.config/agent-inbox/config.toml</code> on the "
+                "machine it is for. Every agent there is then admitted, whatever name "
+                "each of them uses — there is nothing to do per agent and nothing to "
+                "repeat per project:</p>"
+                f'<pre>token = "{html.escape(secret)}"</pre>'
+                "<p>Any agent on that machine can confirm it with "
+                "<code>agent-mailbox doctor</code>.</p>"
+                if name == SHARED_ACTOR
+                else "<p>Give it to the agent and have it run:</p>"
+                f"<pre>agent-mailbox join {html.escape(name)} "
+                f"--token {html.escape(secret)}</pre>"
+                "<p>That writes the token into <code>agent-mailbox.toml</code> in the "
+                "agent's project root, under its own engine's entry, and it is sent "
+                "automatically from then on. <code>agent-mailbox doctor</code> "
+                "confirms it works.</p>"
+            )
         )
 
     def _tokens_page(request: Request, name: str, extra: str = "") -> Response:
@@ -778,10 +789,26 @@ def build_console(client: HubClient) -> Litestar:
             else ""
         )
         body = (
-            "<p>A device token is how an agent proves who it is once this hub "
-            "enforces authentication. Each is shown once, belongs to one agent, and "
-            "can be revoked on its own.</p>"
-            f"{note}" + _table(["Agent", "About", ""], rows, "Nobody has joined yet.")
+            "<p>A device token is how an agent proves it may use this hub once "
+            "authentication is enforced. Each is shown once and can be revoked "
+            "on its own.</p>"
+            f"{note}"
+            "<h2>One token for a whole machine</h2>"
+            "<p>A <strong>shared</strong> token names no agent: it admits whoever "
+            "holds it, and each agent still says which name it is using. Put one in "
+            "<code>~/.config/agent-inbox/config.toml</code> and every agent on that "
+            "machine is admitted, without minting one apiece.</p>"
+            '<pre>token = "…"</pre>'
+            "<p class='dim'>The trade is real: anyone who can read that file can act "
+            "as any agent here. That is the right trade for your own laptop and the "
+            "wrong one for a machine you share — mint per-agent tokens there.</p>"
+            f'<form method="post" action="/tokens/{SHARED_ACTOR}/mint">'
+            "<label>Label (which machine is this for?)</label>"
+            '<input type="text" name="label" placeholder="workshop laptop">'
+            "<p style='margin-top:.6rem'>"
+            "<button type='submit'>Mint a shared token</button></p></form>"
+            "<h2>Per-agent tokens</h2>"
+            + _table(["Agent", "About", ""], rows, "Nobody has joined yet.")
         )
         return Response(
             _page("Tokens", body, hub, "/tokens"), media_type=MediaType.HTML

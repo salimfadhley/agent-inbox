@@ -21,6 +21,7 @@ from litestar.testing import TestClient
 from agent_mailbox import api as api_module
 from agent_mailbox.api import IDENTITY_HEADER, SESSION_COOKIE, build_api
 from agent_mailbox.auth import secrets, totp
+from agent_mailbox.auth.records import SHARED_ACTOR
 from agent_mailbox.auth.service import AuthService
 from agent_mailbox.auth.store import InMemoryAuthStore
 from agent_mailbox.house import House
@@ -360,3 +361,57 @@ class TestSetupRequired:
         client, _ = _build("off")
         with client as c:
             assert c.get("/").json()["setupRequired"] is False
+
+
+class TestSharedToken:
+    """One token for a machine, with each agent keeping its own name."""
+
+    async def test_a_shared_token_admits_any_name(self) -> None:
+        """The point of the whole feature: no token per agent.
+
+        The credential proves the caller may use this hub; the header still says which
+        agent they are, exactly as on an open hub. Two agents on one laptop share the
+        token and keep separate inboxes.
+        """
+        client, auth = _build("enforce")
+        with client as c:
+            minted = await auth.mint_token(SHARED_ACTOR, label="laptop")
+            bearer = {"Authorization": f"Bearer {minted.secret}"}
+            for name in ("rosemary_nasrin", "trevor_mahmood"):
+                assert (
+                    c.post(
+                        "/actors", json={"preferredUsername": name}, headers=bearer
+                    ).status_code
+                    == 201
+                )
+            # each acts as itself, not as the other
+            got = c.get(
+                "/actors/rosemary_nasrin/inbox",
+                headers=bearer | {IDENTITY_HEADER: "rosemary_nasrin"},
+            )
+            assert got.status_code == 200
+            denied = c.get(
+                "/actors/rosemary_nasrin/inbox",
+                headers=bearer | {IDENTITY_HEADER: "trevor_mahmood"},
+            )
+            assert denied.status_code == 403, "a shared token is not a licence to read"
+
+    async def test_a_per_agent_token_still_names_its_agent(self) -> None:
+        """The old behaviour must survive: a bound token is not weakened by this."""
+        client, auth = _build("enforce")
+        with client as c:
+            minted = await auth.mint_token(ROSEMARY, label="bound")
+            c.post(
+                "/actors",
+                json={"preferredUsername": ROSEMARY},
+                headers={"Authorization": f"Bearer {minted.secret}"},
+            )
+            # the header claims someone else; the token's own actor is what counts
+            got = c.get(
+                f"/actors/{ROSEMARY}/inbox",
+                headers={
+                    "Authorization": f"Bearer {minted.secret}",
+                    IDENTITY_HEADER: "somebody_else",
+                },
+            )
+            assert got.status_code == 200
