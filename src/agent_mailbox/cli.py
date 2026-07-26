@@ -901,8 +901,21 @@ def inbox(
     """What is waiting. Consumes nothing — `read` is what marks mail handled."""
     client = _client(ctx)
 
+    def _warn_if_old(page: dict[str, Any]) -> None:
+        """Say when the hub is too old to answer properly, rather than showing zeros."""
+        if not page.get("hubTooOld"):
+            return
+        _err(
+            "note: this hub predates compact inbox views, so it sent every waiting "
+            "message and the summary above was worked out here."
+        )
+        if page.get("sinceIgnored"):
+            _err("      --since was ignored: only the hub can filter. Upgrade it.")
+
     if count:
-        click.echo(client.check_inbox(view="count", since=since).get("unread", 0))
+        page = client.check_inbox(view="count", since=since)
+        click.echo(page.get("unread", 0))
+        _warn_if_old(page)
         return 0
 
     if threads:
@@ -911,6 +924,7 @@ def inbox(
         if not groups:
             click.echo("nothing waiting")
             return 0
+        _warn_if_old(page)
         for group in groups:
             kind = "broadcast" if group.get("broadcast") else "direct"
             click.echo(
@@ -932,6 +946,7 @@ def inbox(
     if not items:
         click.echo("nothing waiting")
         return 0
+    _warn_if_old(page)
     for row in items:
         ident = (row.get("id") or "").rsplit("/", 1)[-1]
         mark = "*" if row.get("broadcast") else " "

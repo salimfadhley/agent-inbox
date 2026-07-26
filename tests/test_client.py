@@ -16,6 +16,7 @@ from agent_mailbox.client import (
     Config,
     HubClient,
     NotConfigured,
+    _from_older_hub,
     _toml_str,
     detect_engine,
     duplicate_names,
@@ -286,3 +287,67 @@ def test_without_an_engine_two_entries_stay_unresolvable(tmp_path: Path) -> None
     )
     with pytest.raises(NotConfigured):
         load_config(tmp_path, {})
+
+
+class TestAnOlderHub:
+    """A current client against a hub that predates compact views.
+
+    Reported by pablo_fantomas against a 0.16.1 hub: `inbox --count` printed `0` while
+    `inbox` printed rows of `?` and `(None chars)`. An empty mailbox and a corrupt one,
+    neither true, with nothing to suggest the hub was the reason. Clients and hubs are
+    upgraded separately, so this is a normal state, not an exotic one.
+    """
+
+    LEGACY = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Collection",
+        "totalItems": 2,
+        "items": [
+            {
+                "id": "http://hub.invalid/objects/aaa",
+                "attributedTo": "http://hub.invalid/actors/rosemary_nasrin",
+                "summary": "flaky tests",
+                "content": "a long body",
+                "published": "2026-07-26T10:00:00+00:00",
+                "to": ["http://hub.invalid/actors/trevor_mahmood"],
+            },
+            {
+                "id": "http://hub.invalid/objects/bbb",
+                "attributedTo": "http://hub.invalid/actors/rosemary_nasrin",
+                "summary": None,
+                "content": "x",
+                "published": "2026-07-26T11:00:00+00:00",
+                "to": ["a", "b"],
+            },
+        ],
+    }
+
+    def test_the_count_is_right_instead_of_zero(self) -> None:
+        page = _from_older_hub(self.LEGACY, view="count", asked_since=False)
+        assert page["unread"] == 2, "an older hub's mail was reported as no mail"
+        assert page["hubTooOld"] is True
+
+    def test_the_rows_are_filled_in_instead_of_none(self) -> None:
+        page = _from_older_hub(self.LEGACY, view="summary", asked_since=False)
+        first, second = page["items"]
+        assert first["from"] == "rosemary_nasrin"
+        assert first["subject"] == "flaky tests"
+        assert first["chars"] == len("a long body")
+        assert first["broadcast"] is False
+        assert second["subject"] == "(no subject)", "a missing subject became None"
+        assert second["broadcast"] is True
+
+    def test_an_ignored_since_is_admitted_to(self) -> None:
+        """The filter is the hub's job. An old hub did not do it, and must say so."""
+        page = _from_older_hub(self.LEGACY, view="summary", asked_since=True)
+        assert page["sinceIgnored"] is True
+        assert page["unread"] == 2, "unfiltered mail must not be passed off as new"
+
+    def test_a_current_hub_is_left_alone(self) -> None:
+        """The shim must not touch an answer that is already in the right shape."""
+        from agent_mailbox.client import Config, HubClient
+
+        client = HubClient(Config(hub="http://hub.invalid", name="trevor_mahmood"))
+        modern = {"unread": 1, "cursor": "t|abc", "items": []}
+        client._call = lambda *a, **k: modern  # type: ignore[method-assign]
+        assert client.check_inbox() is modern

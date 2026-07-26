@@ -560,6 +560,67 @@ def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
     return target
 
 
+def _from_older_hub(page: Any, *, view: str, asked_since: bool) -> dict[str, Any]:
+    """An older hub's inbox, translated into the shape this client expects.
+
+    A hub that predates compact views ignores `view` and `since` and returns the AS2
+    collection of full notes it always did. Reading that with the new keys produced
+    `0` from `--count` and rows of `?` and `(None chars)` from a plain `inbox` — an
+    empty mailbox and a corrupt one, neither of them true, and no hint that the hub
+    was the reason. pablo_fantomas hit exactly that against a 0.16.1 hub and was right
+    to report it rather than trust it.
+
+    So: translate what can be translated exactly, and *say* what could not. `since`
+    cannot be honoured here — the filtering is the hub's job and this hub does not do
+    it — and quietly returning unfiltered mail as though it were new would be the same
+    lie in a different place.
+    """
+    notes = page.get("items", []) if isinstance(page, dict) else []
+    items = [
+        {
+            "id": note.get("id"),
+            "from": (note.get("attributedTo") or "").rsplit("/", 1)[-1] or None,
+            "subject": note.get("summary") or "(no subject)",
+            "published": note.get("published"),
+            "inReplyTo": note.get("inReplyTo"),
+            "broadcast": len(note.get("to") or []) + len(note.get("cc") or []) > 1,
+            "chars": len(note.get("content") or ""),
+        }
+        for note in notes
+    ]
+    translated: dict[str, Any] = {
+        "unread": page.get("totalItems", len(items)),
+        "cursor": "",
+        # The caller must be able to tell it is looking at a downgraded answer.
+        "hubTooOld": True,
+        "sinceIgnored": asked_since,
+    }
+    if view == "threads":
+        # Grouped here rather than at the hub, which is a compromise this shim exists
+        # to make visible: on a current hub the grouping is the hub's.
+        groups: dict[str, list[dict[str, Any]]] = {}
+        known = {row["id"] for row in items}
+        for row in items:
+            parent = row["inReplyTo"]
+            groups.setdefault(
+                parent if parent in known else row["id"] or "", []
+            ).append(row)
+        translated["threads"] = [
+            {
+                "root": root,
+                "subject": turns[0]["subject"],
+                "unread": len(turns),
+                "lastFrom": turns[-1]["from"],
+                "lastPublished": turns[-1]["published"],
+                "broadcast": turns[-1]["broadcast"],
+            }
+            for root, turns in groups.items()
+        ]
+    elif view != "count":
+        translated["items"] = items
+    return translated
+
+
 class HubClient:
     """One hub, over HTTP.
 
@@ -761,7 +822,10 @@ class HubClient:
         query = f"?view={urllib.parse.quote(view)}"
         if since:
             query += f"&since={urllib.parse.quote(since)}"
-        return self._call("GET", f"/actors/{self.config.name}/inbox{query}")
+        page = self._call("GET", f"/actors/{self.config.name}/inbox{query}")
+        if view == "full" or not isinstance(page, dict) or "unread" in page:
+            return page
+        return _from_older_hub(page, view=view, asked_since=bool(since))
 
     def send_message(
         self,
