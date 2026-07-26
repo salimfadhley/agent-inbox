@@ -300,7 +300,13 @@ def _needs_login(exc: Exception) -> bool:
     return "not_authenticated" in str(exc) or "enrolment_required" in str(exc)
 
 
-def _err(exc: Exception, hub: dict[str, Any] | None, title: str) -> Response:
+def _err(
+    exc: Exception,
+    hub: dict[str, Any] | None,
+    title: str,
+    *,
+    signed_in: bool = False,
+) -> Response:
     """Every screen either renders or explains — never a blank page.
 
     An operator staring at nothing cannot tell "hub down" from "nothing here", so a
@@ -310,8 +316,13 @@ def _err(exc: Exception, hub: dict[str, Any] | None, title: str) -> Response:
     open: on an enforcing hub *every* page fails this way until someone signs in, and
     meeting a first-time operator with a 502 about their own hub would be absurd. So
     that one case redirects to the sign-in page instead.
+
+    **Unless they are already signed in.** Then the refusal is about something else —
+    a page acting as the console's own identity, which has no token of its own — and
+    bouncing them to a login they have already passed reads as a random logout and
+    hides the real cause. Signed in, they get the message.
     """
-    if _needs_login(exc):
+    if _needs_login(exc) and not signed_in:
         return Redirect("/login")
     body = (
         '<p class="warn">The hub did not answer this request: '
@@ -322,6 +333,11 @@ def _err(exc: Exception, hub: dict[str, Any] | None, title: str) -> Response:
 
 def build_console(client: HubClient) -> Litestar:
     """A window onto one hub: watch anyone, act as yourself."""
+
+    def _signed_in(request: Request) -> bool:
+        """Does this browser carry a session at all? Not whether it is a valid one —
+        that is the hub's call, and this only decides how to report a refusal."""
+        return bool(request.cookies.get(SESSION_COOKIE))
 
     def seen_by(request: Request) -> HubClient:
         """The hub client to use for one request, carrying the operator's session.
@@ -384,7 +400,7 @@ def build_console(client: HubClient) -> Litestar:
             stats = seen_by(request).survey()
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Overview")
+            return _err(exc, hub, "Overview", signed_in=_signed_in(request))
 
         cards = "".join(
             f'<div class="card"><div class="n">{n}</div>'
@@ -452,7 +468,7 @@ def build_console(client: HubClient) -> Litestar:
         try:
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Agents")
+            return _err(exc, hub, "Agents", signed_in=_signed_in(request))
         rows = []
         for a in actors:
             name = a.get("preferredUsername", "")
@@ -488,7 +504,7 @@ def build_console(client: HubClient) -> Litestar:
             items = seen_by(request).observe_mailbox(name).get("items", [])
             info = seen_by(request).whois(name)
         except ClientError as exc:
-            return _err(exc, hub, name)
+            return _err(exc, hub, name, signed_in=_signed_in(request))
 
         rows = []
         for n in reversed(items):  # newest first for a reader
@@ -524,7 +540,7 @@ def build_console(client: HubClient) -> Litestar:
             turns = seen_by(request).observe_thread(object_id).get("items", [])
             detail = seen_by(request).observe_object(object_id)
         except ClientError as exc:
-            return _err(exc, hub, "Message")
+            return _err(exc, hub, "Message", signed_in=_signed_in(request))
 
         read_by = detail.get("readBy", []) if detail else []
         blocks = []
@@ -551,7 +567,7 @@ def build_console(client: HubClient) -> Litestar:
     # -- acting (as the console's own identity) ----------------------------
 
     @get("/inbox", media_type=MediaType.HTML, sync_to_thread=True)
-    def inbox() -> Response:
+    def inbox(request: Request) -> Response:
         """The console's *own* mail — this is the one mailbox it may consume.
 
         Everything else on this console watches without touching. Here the operator is
@@ -563,7 +579,7 @@ def build_console(client: HubClient) -> Litestar:
         try:
             items = client.check_inbox().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Inbox")
+            return _err(exc, hub, "Inbox", signed_in=_signed_in(request))
         rows = []
         for n in items:
             oid = _leaf(n.get("id"))
@@ -597,7 +613,7 @@ def build_console(client: HubClient) -> Litestar:
         return Redirect("/inbox")
 
     @get("/compose", media_type=MediaType.HTML, sync_to_thread=True)
-    def compose_form() -> Response:
+    def compose_form(request: Request) -> Response:
         hub = hub_or_none()
         me = html.escape(client.config.name)
         sent = ""  # populated by the redirect target below via query, kept simple
@@ -624,7 +640,7 @@ def build_console(client: HubClient) -> Litestar:
     # a GET when a sync GET and sync POST share one exact path, and the GET 500s. The
     # form posts here; the browser never sees the difference.
     @post("/compose/send", status_code=200, sync_to_thread=True)
-    def do_compose(data: Form) -> Response:
+    def do_compose(request: Request, data: Form) -> Response:
         hub = hub_or_none()
         recipients = [
             r.strip() for r in str(data.get("to", "")).split(",") if r.strip()
@@ -642,7 +658,7 @@ def build_console(client: HubClient) -> Litestar:
         try:
             client.send_message(recipients, body_text, subject=subject)
         except ClientError as exc:
-            return _err(exc, hub, "Compose")
+            return _err(exc, hub, "Compose", signed_in=_signed_in(request))
         done = (
             "<p>Sent to "
             + ", ".join(f"<code>{html.escape(r)}</code>" for r in recipients)
@@ -779,7 +795,7 @@ def build_console(client: HubClient) -> Litestar:
         try:
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Tokens")
+            return _err(exc, hub, "Tokens", signed_in=_signed_in(request))
         rows = [
             [
                 _mbox_link(a.get("preferredUsername", "")),
@@ -985,7 +1001,7 @@ def build_console(client: HubClient) -> Litestar:
             stats = seen_by(request).survey()
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Graph")
+            return _err(exc, hub, "Graph", signed_in=_signed_in(request))
 
         edges = [
             {"from": str(frm), "to": str(to), "count": int(count)}

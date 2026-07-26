@@ -808,3 +808,27 @@ def test_a_signed_in_operator_observes_with_their_own_session() -> None:
         c.cookies.set(SESSION_COOKIE, "sess-xyz")
         assert c.get("/").status_code == 200
     assert "sess-xyz" in seen, "the overview observed as nobody"
+
+
+def test_a_signed_in_operator_is_not_bounced_to_a_login_they_already_passed() -> None:
+    """The console's own pages act as the console, which holds no token under enforce.
+
+    Refusing those must not send a signed-in operator back to sign in: they have, it
+    worked, and doing so reads as a random logout while hiding what actually failed.
+    """
+
+    class RefusingInbox(StubHub):
+        def check_inbox(self) -> dict[str, Any]:
+            raise ClientError("requires authentication [not_authenticated]")
+
+    client, _ = make(RefusingInbox())
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        got = c.get("/inbox", follow_redirects=False)
+        assert got.status_code == 502, "signed in: explain, do not redirect"
+        assert "not_authenticated" in got.text
+    # and with no session at all, the door still opens
+    client2, _ = make(RefusingInbox())
+    with client2 as c:
+        got = c.get("/inbox", follow_redirects=False)
+        assert got.status_code in (302, 303, 307)
