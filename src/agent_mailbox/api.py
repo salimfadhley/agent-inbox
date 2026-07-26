@@ -279,12 +279,24 @@ class Api:
 
         # `unread` is always the true total, never the size of this page. A count that
         # silently meant "up to fifty" would let a backlog look handled.
+        #
+        # `totalItems` says the same thing under its ActivityStreams name, and it is
+        # here for a client older than this route. Without it, upgrading the hub made
+        # every already-running agent read `0 waiting` against a mailbox with eight
+        # messages in it — mail that looks like it is not there, which is the precise
+        # failure this mission exists to prevent, introduced by the mission itself.
         if view == "count":
-            return {"unread": total, "cursor": cursor}
+            return {"unread": total, "totalItems": total, "cursor": cursor}
         if view == "full":
             return self.wire.collection([self.wire.note(m) for m in waiting])
 
-        page: dict[str, Any] = {"unread": total, "cursor": cursor}
+        page: dict[str, Any] = {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "type": "Collection",
+            "unread": total,
+            "totalItems": total,
+            "cursor": cursor,
+        }
         if total > len(waiting):
             page["more"] = total - len(waiting)
         if view == "threads":
@@ -342,12 +354,22 @@ class Api:
         Everything a recipient decides from — who, what, when, is it a reply, how big —
         and nothing they would have to read. `chars` is there so "a broadcast I can
         safely leave" and "something long addressed to me" look different at a glance.
+
+        **The field names are ActivityStreams', not new ones.** A summary is a Note with
+        its `content` withheld, so it uses `attributedTo` and `summary` exactly as the
+        full form does. The first version invented `from` and `subject`, which read
+        better and broke every client older than the route: they looked for the AS2
+        names, found nothing, and rendered a mailbox of `?` and `None`. Prettier names
+        are not worth a reader who cannot see their mail.
         """
         body = record.content or ""
         return {
             "id": self.wire.object_uri(record.id),
-            "from": record.attributed_to,
-            "subject": record.summary or "(no subject)",
+            "type": "Note",
+            # The full URI, as the full Note renders it — a summary must not be a
+            # second dialect of the same message.
+            "attributedTo": self.wire.actor_uri(record.attributed_to),
+            "summary": record.summary or "(no subject)",
             "published": record.published,
             "inReplyTo": (
                 self.wire.object_uri(record.in_reply_to) if record.in_reply_to else None

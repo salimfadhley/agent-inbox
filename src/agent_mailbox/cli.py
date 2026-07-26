@@ -949,10 +949,11 @@ def inbox(
     _warn_if_old(page)
     for row in items:
         ident = (row.get("id") or "").rsplit("/", 1)[-1]
+        sender = (row.get("attributedTo") or "").rsplit("/", 1)[-1] or "?"
         mark = "*" if row.get("broadcast") else " "
         click.echo(
-            f"{ident}  {mark}{row.get('from') or '?':20} "
-            f"{row.get('subject')}  ({row.get('chars')} chars)"
+            f"{ident}  {mark}{sender:20} "
+            f"{row.get('summary')}  ({row.get('chars')} chars)"
         )
     # The cursor is the caller's to keep — printed so a script can hold it and a human
     # can see there is nothing hidden about it.

@@ -579,8 +579,9 @@ def _from_older_hub(page: Any, *, view: str, asked_since: bool) -> dict[str, Any
     items = [
         {
             "id": note.get("id"),
-            "from": (note.get("attributedTo") or "").rsplit("/", 1)[-1] or None,
-            "subject": note.get("summary") or "(no subject)",
+            "type": "Note",
+            "attributedTo": note.get("attributedTo"),
+            "summary": note.get("summary") or "(no subject)",
             "published": note.get("published"),
             "inReplyTo": note.get("inReplyTo"),
             "broadcast": len(note.get("to") or []) + len(note.get("cc") or []) > 1,
@@ -590,6 +591,7 @@ def _from_older_hub(page: Any, *, view: str, asked_since: bool) -> dict[str, Any
     ]
     translated: dict[str, Any] = {
         "unread": page.get("totalItems", len(items)),
+        "totalItems": page.get("totalItems", len(items)),
         "cursor": "",
         # The caller must be able to tell it is looking at a downgraded answer.
         "hubTooOld": True,
@@ -608,9 +610,9 @@ def _from_older_hub(page: Any, *, view: str, asked_since: bool) -> dict[str, Any
         translated["threads"] = [
             {
                 "root": root,
-                "subject": turns[0]["subject"],
+                "subject": turns[0]["summary"],
                 "unread": len(turns),
-                "lastFrom": turns[-1]["from"],
+                "lastFrom": turns[-1]["attributedTo"],
                 "lastPublished": turns[-1]["published"],
                 "broadcast": turns[-1]["broadcast"],
             }

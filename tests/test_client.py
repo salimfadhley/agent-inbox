@@ -330,11 +330,11 @@ class TestAnOlderHub:
     def test_the_rows_are_filled_in_instead_of_none(self) -> None:
         page = _from_older_hub(self.LEGACY, view="summary", asked_since=False)
         first, second = page["items"]
-        assert first["from"] == "rosemary_nasrin"
-        assert first["subject"] == "flaky tests"
+        assert first["attributedTo"].endswith("rosemary_nasrin")
+        assert first["summary"] == "flaky tests"
         assert first["chars"] == len("a long body")
         assert first["broadcast"] is False
-        assert second["subject"] == "(no subject)", "a missing subject became None"
+        assert second["summary"] == "(no subject)", "a missing subject became None"
         assert second["broadcast"] is True
 
     def test_an_ignored_since_is_admitted_to(self) -> None:

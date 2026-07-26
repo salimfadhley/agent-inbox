@@ -645,8 +645,8 @@ class TestCompactInbox:
 
         assert body["unread"] == 3
         row = body["items"][0]
-        assert row["from"] == ROSEMARY
-        assert row["subject"] == "subject 0"
+        assert row["attributedTo"].endswith(f"/actors/{ROSEMARY}")
+        assert row["summary"] == "subject 0"
         assert row["published"] and row["id"]
         assert row["chars"] == 4000, "the size hint should describe the body"
         assert "content" not in row and "x" * 100 not in repr(body)
@@ -685,7 +685,7 @@ class TestCompactInbox:
         fresh = client.get(
             f"/actors/{TREVOR}/inbox?since={_q(cursor)}", headers=as_(TREVOR)
         ).json()
-        assert [r["subject"] for r in fresh["items"]] == ["after the cursor"]
+        assert [r["summary"] for r in fresh["items"]] == ["after the cursor"]
 
     def test_a_shared_timestamp_cannot_swallow_a_message(
         self, client: TestClient
@@ -827,3 +827,76 @@ class TestCompactInboxPaging:
         assert len(rest["items"]) == 7, "the cursor did not reach the rest"
         assert "more" not in rest
         assert not {r["id"] for r in first["items"]} & {r["id"] for r in rest["items"]}
+
+
+class TestAnOlderClientCanStillReadItsMail:
+    """Upgrading the hub must not empty every already-running agent's mailbox.
+
+    It did. The first version of the compact manifest invented `from` and `subject` and
+    dropped `totalItems`, so a client older than the route looked for the
+    ActivityStreams names, found none, and reported `0 waiting` against a mailbox
+    holding eight messages — with rows of `?` and `None` for the mail it could not
+    describe. Mail that looks like it is not there is the exact failure this mission
+    exists to prevent, and the mission introduced it.
+
+    Clients and hubs are upgraded separately and always will be. A summary is therefore
+    a Note with its `content` withheld, in the same vocabulary as a full one.
+    """
+
+    def _old_client_reading(self, page: dict) -> tuple[int, list[tuple[str, str]]]:
+        """Exactly what a pre-0.17 client does with an inbox response."""
+        waiting = page.get("totalItems", 0)
+        rows = [
+            (
+                (note.get("attributedTo") or "").rsplit("/", 1)[-1],
+                note.get("summary") or "",
+            )
+            for note in page.get("items", [])
+        ]
+        return waiting, rows
+
+    def test_the_count_and_the_rows_survive(self, client: TestClient) -> None:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        for n in range(3):
+            client.post(
+                f"/actors/{ROSEMARY}/outbox",
+                json=note(
+                    [TREVOR], "a body an old client will not get", summary=f"s{n}"
+                ),
+                headers=as_(ROSEMARY),
+            )
+
+        page = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        waiting, rows = self._old_client_reading(page)
+
+        assert waiting == 3, "an old client saw an empty mailbox"
+        assert rows == [(ROSEMARY, "s0"), (ROSEMARY, "s1"), (ROSEMARY, "s2")], (
+            "an old client saw rows it could not describe"
+        )
+
+    def test_a_count_view_is_readable_too(self, client: TestClient) -> None:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "x", summary="s"),
+            headers=as_(ROSEMARY),
+        )
+        page = client.get(
+            f"/actors/{TREVOR}/inbox?view=count", headers=as_(TREVOR)
+        ).json()
+        assert page["totalItems"] == page["unread"] == 1
+
+    def test_the_body_is_still_withheld(self, client: TestClient) -> None:
+        """Compatibility must not quietly restore the cost the mission removed."""
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "the expensive part", summary="s"),
+            headers=as_(ROSEMARY),
+        )
+        page = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        assert "the expensive part" not in repr(page)
+        assert "content" not in page["items"][0]
