@@ -222,7 +222,7 @@ class TestAFailedWriteDoesNotWedgeTheHub:
     async def test_the_failed_transaction_left_nothing_behind(
         self, tmp_path: Path
     ) -> None:
-        """Rollback undoes the whole transaction, not merely the statement that raised."""
+        """Rollback undoes the whole transaction, not just the statement that raised."""
         db = tmp_path / "mail.db"
         async with SqliteStore(db) as store:
             await store.claim_name(ActorRecord(name="rosemary_nasrin"))
