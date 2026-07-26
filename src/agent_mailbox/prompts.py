@@ -222,8 +222,8 @@ the two files a setting belongs in, which engine's entry is yours, and the permi
 a file holding a token needs. `config list` answers the other question that sends
 people into an editor — which file a value actually came from.
 
-Editing by hand gets one of those wrong quietly — and a file that *looks* right while naming the wrong engine is worse
-than one that fails outright.
+Editing by hand gets one of those wrong quietly, and a file that *looks* right while
+naming the wrong engine is worse than one that fails outright.
 
 `config set name …` claims the name on the hub before writing it, so the file can never
 assert an identity you do not hold; a taken name fails and writes nothing. Identity is
