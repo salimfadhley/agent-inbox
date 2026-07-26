@@ -204,6 +204,17 @@ def _advertised(hub: dict[str, Any], fallback: str) -> str:
     return str(hub.get("id") or "").rstrip("/") or fallback
 
 
+def _version(hub: dict[str, Any]) -> str:
+    """What the hub says it is running — the floor an agent checks its tool against.
+
+    The hub's answer, never this console's own ``__version__``: the two are separate
+    containers and a rolling upgrade moves one before the other. An empty string means
+    the hub was unreachable, and the prompt then omits the comparison rather than
+    quoting a number nobody stands behind.
+    """
+    return str(hub.get("version") or "").strip()
+
+
 def _console_base(request: Request) -> str:
     """Where *this console* is reachable, for putting inside the pasted prompt.
 
@@ -600,7 +611,7 @@ def build_console(client: HubClient) -> Litestar:
             "plain text. Written for <code>"
             f"{html.escape(address)}</code>.</p>"
             "<h2>The full prompt</h2>"
-            f"<pre>{html.escape(onboarding(address, prompt_url))}</pre>"
+            f"<pre>{html.escape(onboarding(address, prompt_url, _version(hub)))}</pre>"
             # The copy behaviour lives in /static/console.js (same-origin), so the CSP
             # can forbid inline scripts. It selects the textarea first, so a browser
             # that withholds the clipboard still leaves the text selected to copy.
@@ -615,9 +626,16 @@ def build_console(client: HubClient) -> Litestar:
         The text asks the reader to leave a pointer to this page behind in their
         project's instructions, so it has to know where "here" is. Whichever URL they
         reached it by is the one that demonstrably works for them.
+
+        The version comes from the hub for the same reason the address does: it is the
+        version actually running, asked for fresh, rather than the console's own — the
+        two are separate containers and can differ across a rolling upgrade.
         """
-        address = _advertised(hub_or_none() or {}, client.config.base)
-        return onboarding(address, f"{_console_base(request)}/prompts/agent")
+        hub = hub_or_none() or {}
+        address = _advertised(hub, client.config.base)
+        return onboarding(
+            address, f"{_console_base(request)}/prompts/agent", _version(hub)
+        )
 
     @get("/prompts/{role:str}", media_type=MediaType.TEXT, sync_to_thread=True)
     def prompt_for_role(role: str, request: Request) -> str:

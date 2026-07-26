@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from litestar.testing import TestClient
 
-from agent_mailbox.client import SESSION_COOKIE, Config, HubClient
+from agent_mailbox.client import SESSION_COOKIE, ClientError, Config, HubClient
 from agent_mailbox.console import build_console
 
 HUB = "http://mailbox.invalid:8081"
@@ -197,6 +197,44 @@ def test_the_plain_text_form_is_the_same_prompt(console: TestClient) -> None:
     assert text.headers["content-type"].startswith("text/plain")
     assert "uv tool install" in text.text
     assert "uv tool install" in page.text
+
+
+def test_the_prompt_makes_the_reader_check_what_is_already_installed(
+    console: TestClient,
+) -> None:
+    """An agent arriving with an old copy is the case the check exists for.
+
+    It connects and answers, and is merely missing whatever the hub gained since — a
+    failure that looks like an absent tool rather than an error. So the prompt names
+    the command *and* the number to compare against, and the number is the hub's, not
+    one written into the text by hand.
+    """
+    text = console.get("/prompts/agent").text
+    assert "agent-mailbox --version" in text
+    assert "1.2.3" in text, "the floor must be the version the hub reports"
+    assert "uv tool install --no-cache --force" in text, "a plain install is a no-op"
+
+
+def test_an_unreachable_hub_does_not_invent_a_version_to_compare_against(
+    console: TestClient,
+) -> None:
+    """No hub, no number. The step falls back to installing unconditionally.
+
+    Quoting the console's own version here would be the sidecar trap again: separate
+    containers, and a rolling upgrade moves one before the other. Better to ask for an
+    install that is always safe than to publish a floor nobody stands behind.
+    """
+
+    class DeadHub(StubHub):
+        def hub_info(self) -> dict[str, Any]:
+            raise ClientError("hub is down")
+
+    client, _ = make(DeadHub())
+    with client as c:
+        text = c.get("/prompts/agent").text
+    assert "uv tool install" in text
+    assert "--version" not in text
+    assert "older than" not in text
 
 
 def test_there_is_exactly_one_prompt(console: TestClient) -> None:

@@ -16,23 +16,70 @@ rather than leaving a placeholder for someone to fill in wrongly.
 from __future__ import annotations
 
 
-def onboarding(hub_url: str, prompt_url: str = "") -> str:
+def _install(version: str) -> str:
+    """Step 1, which is a *check* first and an install only if the check fails.
+
+    The reader may well already have the tool, and an old copy is the failure worth
+    catching: it connects, it answers, and it is simply missing whatever was added
+    since — which presents as a tool that does not exist rather than as an error, so
+    nobody thinks to look at the version. One command settles it.
+
+    The floor is the hub's own version because hub and client are released together
+    from one package, so there is no compatibility table to keep and nothing here to go
+    stale. When the hub cannot be reached the version is unknown, and the step falls
+    back to the unconditional install rather than inventing a number.
+    """
+    if not version:
+        return """\
+```bash
+uv tool install --no-cache --force "agent-mailbox[clients]"
+```
+
+`--force` because a plain `uv tool install` does nothing at all when the tool is already
+installed — which is exactly the case where you need it to act. There is no separate
+upgrade command."""
+    return f"""\
+You may already have it. Ask, before installing anything:
+
+```bash
+agent-mailbox --version
+```
+
+**Install if that is not a command, or prints anything older than {version}:**
+
+```bash
+uv tool install --no-cache --force "agent-mailbox[clients]"
+```
+
+`--force` because a plain `uv tool install` does nothing at all when the tool is already
+installed — which is exactly the case where you need it to act. There is no separate
+upgrade command.
+
+This hub is running **{version}**, and the hub and the tool are released together as
+one package. A tool older than the hub is missing whatever was added since, and that
+shows up as a tool you simply do not have rather than as an error — which is why it is
+worth one command to check rather than assuming the copy here is current."""
+
+
+def onboarding(hub_url: str, prompt_url: str = "", version: str = "") -> str:
     """The whole prompt, with this hub's address already in it.
 
     *prompt_url* is where this document is served. It appears inside the text because
     the prompt asks the reader to leave a pointer to it behind in the project's own
     instructions — and a pointer has to name somewhere.
+
+    *version* is what the hub reports itself as running. It becomes the floor the
+    reader checks their installed tool against; empty means the hub could not be
+    reached, and the install step stops asking for a comparison it cannot supply.
     """
     prompt_url = prompt_url or f"{hub_url.rstrip('/')}/prompts/agent"
     return f"""\
 You share this machine with other AI agents. **agent-mailbox** lets you message them
 directly, so a human no longer has to carry messages between you.
 
-## 1. Install
+## 1. Install — or check what you already have
 
-```bash
-uv tool install --no-cache "agent-mailbox[clients]"
-```
+{_install(version)}
 
 ## 2. Connect
 
@@ -44,7 +91,9 @@ claude mcp add agent-mailbox --scope user -- agent-mailbox mcp
 deployment and does not belong in a repository.
 
 **Then restart your session.** MCP tools load at startup, so correct configuration alone
-will not give you the tools.
+will not give you the tools — and that applies just as much to an upgrade as to a first
+install: a session that was already running keeps the tools of the version it started
+with until it restarts.
 
 ## 3. Join — this also configures you
 

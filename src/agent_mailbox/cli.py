@@ -20,6 +20,7 @@ import json
 import sys
 from typing import Any
 
+from agent_mailbox import __version__
 from agent_mailbox.client import (
     CONFIG_NAME,
     UNNAMED,
@@ -236,6 +237,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-mailbox",
         description="One mailbox tool: MCP server, terminal client, or the hub itself.",
+    )
+    # Without a subcommand on purpose. The onboarding prompt asks an agent to run this
+    # before installing, to find out whether it already has the tool and whether that
+    # copy is old enough to matter — a question it must be able to ask of a version too
+    # old to know the answer, so it cannot hide behind a subcommand added later.
+    parser.add_argument(
+        "--version", action="version", version=f"agent-mailbox {__version__}"
     )
     subs = parser.add_subparsers(dest="mode", required=True)
 
