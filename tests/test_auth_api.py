@@ -324,3 +324,23 @@ class TestRemoteDoctor:
         assert body["you"]["token"] == "accepted"
         assert body["you"]["verified"] == ROSEMARY
         assert body["verdict"] == "your token was accepted"
+
+
+class TestDirectoryIsNotPublicUnderEnforce:
+    """Enumerating everyone on the hub is a disclosure, not a lookup."""
+
+    def test_the_directory_needs_a_credential_when_enforcing(self) -> None:
+        """It was open, and that is what let the console's Tokens page show a stranger
+        every agent on the hub while the front page was correctly redirecting to
+        sign-in. Turning authentication on has to mean this too.
+        """
+        client, _ = _build("enforce")
+        with client as c:
+            assert c.get("/actors").status_code == 401
+            assert c.get(f"/actors/{ROSEMARY}").status_code == 401
+
+    def test_the_directory_stays_open_on_a_trusted_lan(self) -> None:
+        """The guard is a no-op unless enforcing — `off` and `warn` are unchanged."""
+        client, _ = _build("off")
+        with client as c:
+            assert c.get("/actors").status_code == 200

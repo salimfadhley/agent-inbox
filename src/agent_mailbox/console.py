@@ -55,6 +55,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 #: agent-inbox, which the console's own hostname will rarely tell them.
 PROJECT_URL = "https://github.com/salimfadhley/agent-inbox"
 
+#: Reachable without signing in, once the hub authenticates. Each earns it by being
+#: needed *before* anyone can sign in: the way in, the way out, the container's health
+#: probe, and the onboarding prompt — which is how a new agent is set up in the first
+#: place and holds nothing secret. Everything else is behind the gate.
+#: `/prompts*` and `/static/*` are matched by prefix alongside this set.
+OPEN_PATHS = frozenset({"/login", "/login/submit", "/logout/submit", "/health"})
+
 #: A genuine Content-Security-Policy — stricter than the nothing that shipped before.
 #: Scripts may load only from this origin (the vendored lib + console.js) and never
 #: inline, so a reflected-script injection cannot execute. Inline *styles* and inline
@@ -1182,8 +1189,30 @@ def build_console(client: HubClient) -> Litestar:
             )
         return Redirect("/", cookies=_relay_cookie(set_cookie))
 
+    def _gate(request: Request) -> Response | None:
+        """Require a session for the console's own pages once the hub authenticates.
+
+        Relying on the API to refuse was not enough: a page that happens not to call a
+        guarded route still rendered, which is how `/tokens` showed a stranger every
+        agent on the hub while `/` was correctly redirecting to sign-in. A screen is
+        allowed only if it is needed *before* anyone can sign in.
+
+        This is a gate, not a check — the console holds no security state and does not
+        judge the cookie, it only insists one is present. The hub remains the authority
+        on whether that session is real, and refuses on every route that matters.
+        """
+        path = request.url.path
+        if path in OPEN_PATHS or path.startswith(("/prompts", "/static/")):
+            return None
+        if request.cookies.get(SESSION_COOKIE):
+            return None
+        if (hub_or_none() or {}).get("authenticated") is not True:
+            return None  # off or warn: unchanged, a trusted LAN needs no login
+        return Redirect("/login")
+
     return Litestar(
         on_startup=[ensure_own_mailbox],
+        before_request=_gate,
         after_request=_add_csp,
         route_handlers=[
             health,

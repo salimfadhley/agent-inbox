@@ -713,3 +713,47 @@ def test_a_hub_that_is_merely_broken_still_reports_the_fault(
         got = c.get("/", follow_redirects=False)
     assert got.status_code == 502
     assert "connection refused" in got.text
+
+
+# -- the gate ---------------------------------------------------------------
+
+
+class AuthenticatingHub(StubHub):
+    """A hub that reports it enforces authentication, like a real one under enforce."""
+
+    def hub_info(self) -> dict[str, Any]:
+        return {"id": HUB, "name": "testhub", "version": "1.2.3", "authenticated": True}
+
+
+def test_every_console_page_needs_a_session_once_the_hub_authenticates() -> None:
+    """Relying on the API to refuse was not enough.
+
+    A page that happens not to call a guarded route still rendered — which is exactly
+    how /tokens showed a stranger every agent on the hub while / was correctly
+    redirecting. The gate is on the console itself, so it does not depend on which
+    routes a given screen happens to touch.
+    """
+    client, _ = make(AuthenticatingHub())
+    with client as c:
+        for path in ("/", "/agents", "/tokens", "/graph", "/inbox", "/compose"):
+            got = c.get(path, follow_redirects=False)
+            assert got.status_code in (302, 303, 307), f"{path} rendered unguarded"
+            assert got.headers["location"].endswith("/login"), path
+
+
+def test_the_way_in_and_the_prompt_stay_open() -> None:
+    """A gate that locks the door from the outside is not a gate.
+
+    Sign-in, the health probe and the onboarding prompt are all needed *before* anyone
+    can hold a session — the prompt especially, since it is how an agent is set up in
+    the first place, and it holds nothing secret.
+    """
+    client, _ = make(AuthenticatingHub())
+    with client as c:
+        for path in ("/login", "/health", "/prompts", "/prompts/agent", "/prompts.txt"):
+            assert c.get(path, follow_redirects=False).status_code == 200, path
+
+
+def test_a_trusted_lan_is_not_asked_to_sign_in(console: TestClient) -> None:
+    """Off and warn unchanged: the gate closes only when the hub enforces."""
+    assert console.get("/", follow_redirects=False).status_code == 200

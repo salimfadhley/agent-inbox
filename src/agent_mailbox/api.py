@@ -505,11 +505,16 @@ def build_api(
     async def join(data: dict[str, Any]) -> Actor:
         return await api.join(data)
 
-    @get("/actors")
+    # Guarded like the observe routes. A directory is for lookups *by the people on
+    # the hub* — under enforce, an unauthenticated caller could otherwise enumerate
+    # every agent here, which is precisely the disclosure authentication was turned on
+    # to prevent, and it is what let the console's Tokens page render to a stranger.
+    # Under off/warn the guard is a no-op, so nothing changes for a trusted LAN.
+    @get("/actors", guards=[guard_enforce])
     async def directory() -> Collection:
         return await api.directory()
 
-    @get("/actors/{name:str}")
+    @get("/actors/{name:str}", guards=[guard_enforce])
     async def actor(name: str) -> Actor:
         return await api.actor(name)
 
