@@ -85,6 +85,30 @@ to follow.
 """
 
 
+#: Where this server should look for the project's configuration. An MCP server is
+#: launched by the agent's *client*, often with a working directory that is not the
+#: project — so its own cwd is the wrong answer, and asking the client is the right
+#: one. Resolved once per process from the client's declared roots, because a stdio
+#: server serves exactly one client for its whole life.
+_project: Path | None = None
+_roots_asked = False
+
+#: Which engine this server is serving. Taken from the client's own `initialize`
+#: message rather than from environment markers: a client that spawns this process
+#: need not pass its markers through, and Codex does not. With two engines configured
+#: in one project and no marker, identity is simply unresolvable — the server correctly
+#: refuses to guess, and the agent is stuck. The client saying "I am codex" settles it.
+_engine: str | None = None
+
+#: Client names seen in `initialize`, matched as substrings of the lowercased name.
+_CLIENT_ENGINES: tuple[tuple[str, str], ...] = (
+    ("claude", "claude"),
+    ("codex", "codex"),
+    ("gemini", "gemini"),
+    ("cursor", "cursor"),
+)
+
+
 def _instructions() -> str:
     """What an agent is told when it connects.
 
@@ -105,13 +129,20 @@ def _instructions() -> str:
     pushed into an agent's context at startup, and only the first respects who is
     actually in charge.
     """
+    # Computed while answering `initialize`, which is *before* the project can be
+    # resolved: roots can only be asked for once that handshake is done. So a session
+    # that is perfectly configured can reach this branch, and it must not assert
+    # otherwise — an agent told at startup that it has no mailbox will believe it and
+    # never look again.
     try:
-        config = load_config()
-    except NotConfigured as exc:
+        config = load_config(_project, engine=_engine)
+    except NotConfigured:
         return (
-            "**Not configured on this mailbox yet.** If your human wants you on it, "
-            "call `join` with the hub url they give you: it claims a name and writes "
-            f"the configuration.\n\n{exc}\n\n{BASE_INSTRUCTIONS}"
+            "**Identity is settled when you first call a tool**, not now: this server "
+            "asks your client which project it is in, and that answer arrives after "
+            "this message. Call `ping` to see who you are here. If it says you are not "
+            "configured, and your human wants you on the mailbox, call `join` with the "
+            f"hub url they give you.\n\n{BASE_INSTRUCTIONS}"
         )[:INSTRUCTION_BUDGET]
 
     guidance = ROLE_GUIDANCE.get(config.role, "")
@@ -135,30 +166,6 @@ def _instructions() -> str:
 logger = logging.getLogger("agent_mailbox.mcp")
 
 mcp = FastMCP("agent-mailbox", instructions=_instructions())
-
-
-#: Where this server should look for the project's configuration. An MCP server is
-#: launched by the agent's *client*, often with a working directory that is not the
-#: project — so its own cwd is the wrong answer, and asking the client is the right
-#: one. Resolved once per process from the client's declared roots, because a stdio
-#: server serves exactly one client for its whole life.
-_project: Path | None = None
-_roots_asked = False
-
-#: Which engine this server is serving. Taken from the client's own `initialize`
-#: message rather than from environment markers: a client that spawns this process
-#: need not pass its markers through, and Codex does not. With two engines configured
-#: in one project and no marker, identity is simply unresolvable — the server correctly
-#: refuses to guess, and the agent is stuck. The client saying "I am codex" settles it.
-_engine: str | None = None
-
-#: Client names seen in `initialize`, matched as substrings of the lowercased name.
-_CLIENT_ENGINES: tuple[tuple[str, str], ...] = (
-    ("claude", "claude"),
-    ("codex", "codex"),
-    ("gemini", "gemini"),
-    ("cursor", "cursor"),
-)
 
 
 async def _resolve_project() -> None:
@@ -590,8 +597,16 @@ async def hub_info() -> dict[str, Any]:
     return await _guard(lambda: _client().hub_info())
 
 
-def main() -> None:
+def main(project: Path | None = None) -> None:
     """Entry point for `agent-mailbox-mcp`, run over stdio by an MCP client."""
+    if project is not None:
+        # Explicit beats asking. A client that offers neither roots nor a name we
+        # recognise leaves the server no way to know where it is; this is the answer
+        # for that case, and it is deliberately the operator's to give.
+        global _project, _roots_asked
+        _project = project
+        _roots_asked = True
+
     mcp.run()
 
 

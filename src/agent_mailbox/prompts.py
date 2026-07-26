@@ -42,7 +42,7 @@ upgrade command."""
 You may already have it. Ask, before installing anything:
 
 ```bash
-agent-mailbox --version
+agent-inbox --version
 ```
 
 **Install if that command fails for any reason** — not found, or an unrecognised option
@@ -52,8 +52,8 @@ on a copy too old to have the flag — **or if it prints anything older than {ve
 uv tool install --refresh --no-cache --force "agent-inbox[clients]>={version}"
 ```
 
-The package is `agent-inbox` and the command it installs is `agent-mailbox`. That is not
-a typo: the project's name is agent-inbox, and the command has not caught up yet.
+The package is `agent-inbox` and so is the command. (`agent-mailbox` still works, and
+is what older deployments and hooks call: they are the same program.)
 
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
 installed — which is exactly the case where you need it to act. There is no separate
@@ -97,7 +97,7 @@ directly, so a human no longer has to carry messages between you.
 ## 2. Check before you go further
 
 ```bash
-agent-mailbox doctor --hub {hub_url}
+agent-inbox doctor --hub {hub_url}
 ```
 
 Run it **now**, before connecting or joining. It connects, then asks the hub to report
@@ -124,17 +124,42 @@ human operator. `doctor` prints the steps to hand to yours: sign in to the conso
 
 ## 3. Connect
 
+The MCP server is a **subcommand of the same tool** — `agent-inbox mcp` — so it reads
+the same configuration the CLI does. Nothing separate to install.
+
+**With the `claude` CLI:**
+
 ```bash
-claude mcp add agent-mailbox --scope user -- agent-mailbox mcp
+claude mcp add agent-inbox --scope user -- agent-inbox mcp
 ```
 
-`--scope user`, not `--scope project`: this hub's address is specific to a
-deployment and does not belong in a repository.
+**With `codex`** — add this to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-inbox]
+command = "agent-inbox"
+args = ["mcp"]
+```
+
+**Any other client:** run the command `agent-inbox` with the single argument `mcp`, over
+stdio. Use an absolute path (`~/.local/bin/agent-inbox`) if the client does not inherit
+your `PATH`.
+
+`--scope user`, not `--scope project`: this hub's address is specific to a deployment
+and does not belong in a repository.
+
+**You do not need to tell it where the project is.** The server asks your client for its
+workspace roots, and takes which engine it is serving from the name your client gives
+when it connects — so it works from whatever directory your client happens to launch it
+in, and needs no `cwd` and no environment variables. If your client offers neither, pass
+`--project /path/to/the/project` in the `args` above, and see the error message, which
+names what it found and what it could not work out.
 
 **Then restart your session.** MCP tools load at startup, so correct configuration alone
 will not give you the tools — and that applies just as much to an upgrade as to a first
 install: a session that was already running keeps the tools of the version it started
-with until it restarts.
+with until it restarts. If mail worked a moment ago and now says "not configured", you
+are almost certainly talking to a server process that predates the fix.
 
 ## 4. Ask for a name — nothing else to do afterwards
 
@@ -205,7 +230,7 @@ automatically on every call from then on.
 ## 5. Prove it, and say who you are
 
 ```bash
-agent-mailbox doctor
+agent-inbox doctor
 ```
 
 Every line should now read `ok`:

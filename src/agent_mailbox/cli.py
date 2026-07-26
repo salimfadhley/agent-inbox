@@ -58,7 +58,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     """Run as an MCP server over stdio, for an agent."""
     from agent_mailbox.mcp_client import main as run_mcp
 
-    run_mcp()
+    run_mcp(Path(args.project).expanduser() if args.project else None)
     return 0
 
 
@@ -609,6 +609,22 @@ def cmd_uninstall_hook(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="One mailbox tool: MCP server, terminal client, or the hub itself.",
+        epilog=(
+            "WHERE YOU RUN IT MATTERS. Identity is per project, so anything that acts "
+            "as an agent — join, configure, doctor, ping, inbox, send, read, reply, "
+            "agents, whoami, role, hub — reads agent-mailbox.toml from the directory "
+            "you are in, searching upwards and stopping at the repository root. Run "
+            "them inside the project. A shared token may live machine-wide "
+            "(`configure --global token=…`), because a credential admits the machine "
+            "rather than naming an agent.\n\n"
+            "`mcp` is the exception and needs no particular directory: it asks the "
+            "client that launched it for the workspace, falling back to this one, and "
+            "takes which engine it serves from the client's own name. `--project` "
+            "settles it for a client that offers neither.\n\n"
+            "`serve` and `console` are the hub and its window: they are configured by "
+            "the environment (AGENT_MAILBOX_*), not by a project, and run anywhere."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # Without a subcommand on purpose. The onboarding prompt asks an agent to run this
     # before installing, to find out whether it already has the tool and whether that
@@ -620,6 +636,12 @@ def build_parser() -> argparse.ArgumentParser:
     subs = parser.add_subparsers(dest="mode", required=True)
 
     run = subs.add_parser("mcp", help="run as an MCP server over stdio (for an agent)")
+    run.add_argument(
+        "--project",
+        help="the project this session is working in. Rarely needed: the server asks "
+        "the client for its workspace roots, and falls back to its working directory. "
+        "Use it when a client offers neither.",
+    )
     run.set_defaults(func=cmd_mcp)
 
     hub = subs.add_parser("serve", help="run the hub")

@@ -355,7 +355,7 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     one written into the text by hand.
     """
     text = console.get("/prompts/agent").text
-    assert "agent-mailbox --version" in text
+    assert "agent-inbox --version" in text
     assert "1.2.3" in text, "the floor must be the version the hub reports"
     # --force because a plain install is a no-op when the tool is there; --refresh
     # because a hub is upgraded before its agents, so this is usually run in the window
@@ -479,8 +479,11 @@ def test_the_prompt_says_the_hub_does_not_authenticate(console: TestClient) -> N
 
 def test_the_prompt_names_the_command_that_exists(console: TestClient) -> None:
     text = console.get("/prompts.txt").text
-    assert "agent-mailbox mcp" in text
+    # The subcommand form, under the project's own name. The hyphenated variants were
+    # separate console scripts once and are not commands at all now.
+    assert "agent-inbox mcp" in text
     assert "agent-mailbox-mcp" not in text
+    assert "agent-inbox-mcp" not in text
 
 
 # -- the observatory -------------------------------------------------------

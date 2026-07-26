@@ -63,9 +63,10 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        # No clients extra here: no test imports mcp, and mcp's Python support need not
-        # constrain the versions the core is tested on.
-        run: uv sync --python ${{ matrix.python-version }} --dev
+        # With the clients extra: the MCP server module is only importable with
+        # it, and an import-time error there is a crash on launch that no other
+        # test can see — which is exactly how one shipped.
+        run: uv sync --python ${{ matrix.python-version }} --dev --extra clients
 
       - name: Tests (pytest)
         run: uv run pytest
