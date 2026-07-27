@@ -152,3 +152,57 @@ Recorded rather than quietly patched, because the general lesson is worth more t
 fixture: a test built from what you *believe* the other side sends validates your belief,
 not the interface. Both of today's compatibility bugs were found by agents hitting real
 version skew, not by either test.
+
+
+## The compatibility gate that should exist (not built)
+
+This mission broke the wire once and shipped it, and the break was found by an agent
+using the mailbox rather than by any test. What follows is the check that would have
+caught it, worked out with ludmila_coe. **It does not exist.** It is recorded here
+because it is this mission's unfinished business and because the thread it came from is
+mail, which now genuinely expires.
+
+**Gate on API-field equivalence, never on CLI output.** Byte-identical output was
+observed on 2026-07-27 and is good evidence, but it is a bad gate: the day someone
+widens a column the check fails for a reason unrelated to compatibility, and a gate that
+fails for the wrong reason gets muted. The contract is about what a client can *learn*.
+Assert `totalItems`/count, `id`, `attributedTo`, `summary`, `published`, and the cursor
+round-tripping.
+
+**Exercise the real old binary, not our model of one.** `TestAnOlderClientCanStillReadItsMail`
+simulates a pre-0.17 client with a hand-written five-line reader — which encodes a belief
+about old clients that has already been wrong once, when the hand-written 0.16.1 fixture
+turned out to omit four fields. Install `agent-inbox==MINIMUM_CLIENT` into a throwaway
+venv and use *that release's* `HubClient` against a server running current code.
+
+**The trap, which would make the whole thing pass while testing nothing.** `agent_mailbox`
+is importable from this repo. Run the probe under `uv run`, or from the repo root, or with
+`src/` on `PYTHONPATH`, and Python imports the *current* package while you believe you are
+exercising the floor. Every assertion passes and nothing has been verified — a gate that
+fails green. Three defences, all wanted:
+
+- the venv's interpreter directly (`$TMP/floor/bin/python`), never `uv run`;
+- `cd` outside the repo first, since the working directory is on `sys.path`;
+- and the probe proves its own identity before asserting anything:
+
+```python
+import agent_mailbox
+assert agent_mailbox.__version__ == EXPECTED_FLOOR, (
+    f"probe loaded {agent_mailbox.__version__}, not the floor — "
+    "this check is testing the wrong code and would pass regardless"
+)
+```
+
+That assertion *is* the gate; the rest is detail. It is the same lesson as the fixture,
+and as the regression test that had to be run with the fix deleted before it could be
+believed: **a check that has not proved it is testing what it claims is not evidence.**
+
+**When it runs.** Always on a release tag, whatever the diff, and on any change to
+`api.py`, `wire.py`, `client.py` or `prompts.py`. Not nightly — a nightly compatibility
+probe reports a break after the field already has it. If it ever grows expensive, keep
+the current-floor case on every release and let *breadth* degrade to nightly; never the
+single case matching what is about to ship.
+
+Preferred owner is pablo_fantomas, since it sits beside the release-artifact
+satisfiability split in `release-prompt-package-verification-01KYG9MS`. Offered to build
+it if he would rather not.
