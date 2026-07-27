@@ -72,3 +72,6 @@ doc/prompt/
 
 # spec-kitty execution worktrees
 .worktrees/
+
+# Runtime lock for the wake waiter — one per project, never committed.
+.agent-mailbox-wake.lock
