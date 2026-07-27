@@ -15,6 +15,7 @@ import pytest
 from agent_mailbox.addressing import LOCAL, Address, local_name, parse
 from agent_mailbox.exceptions import (
     AddressError,
+    DeliversToNobody,
     MailboxError,
     MalformedAddress,
     NameUnavailable,
@@ -215,23 +216,72 @@ class TestDistinctFailures:
             with pytest.raises(AddressError):
                 await mailbox.send("rosemary_nasrin", bad, "x")
 
-    async def test_an_empty_group_is_not_an_error(self, mailbox: Mailbox) -> None:
-        """A group with nobody else in it is legitimately empty, not a typo.
+    async def test_an_empty_group_reaches_nobody_and_says_so(
+        self, mailbox: Mailbox
+    ) -> None:
+        """A group everyone has left is not a typo, but it is still a dead end.
 
-        `to` holds who it actually reached — nobody, since the sender is excluded from
-        their own message — while `audience` records that "ops" was addressed.
+        This used to succeed with an empty `to`. The name is real, so it is not
+        `unknown_recipient` — but the caller was handed an object id indistinguishable
+        from a delivery, for a message nobody would ever read.
         """
         await mailbox.join("rosemary_nasrin")
         await mailbox.update_profile("rosemary_nasrin", {"groups": ["ops"]})
-        sent = await mailbox.send("rosemary_nasrin", "ops", "anyone there?")
-        assert sent.to == ()
-        assert sent.document["audience"] == ["ops"]
+        with pytest.raises(DeliversToNobody) as exc:
+            await mailbox.send("rosemary_nasrin", "ops", "anyone there?")
+        assert exc.value.code == "delivers_to_nobody"
+        assert "'ops'" in str(exc.value)
 
-    async def test_everyone_works_on_an_otherwise_empty_mailbox(
+    async def test_everyone_on_a_mailbox_of_one_reaches_nobody(
         self, mailbox: Mailbox
     ) -> None:
         await mailbox.join("rosemary_nasrin")
-        assert await mailbox.send("rosemary_nasrin", "everyone", "hello?")
+        with pytest.raises(DeliversToNobody) as exc:
+            await mailbox.send("rosemary_nasrin", "everyone", "hello?")
+        assert "only one here" in str(exc.value)
+
+    async def test_everyone_still_works_once_somebody_else_joins(
+        self, mailbox: Mailbox
+    ) -> None:
+        """The refusal is about reach, not about `everyone` being special."""
+        await mailbox.join("rosemary_nasrin")
+        await mailbox.join("trevor_mahmood")
+        sent = await mailbox.send("rosemary_nasrin", "everyone", "hello?")
+        assert sent.to == ("trevor_mahmood",)
+
+    async def test_nothing_undeliverable_is_stored(self, mailbox: Mailbox) -> None:
+        """The refusal happens before the write, so no orphan object is left behind."""
+        await mailbox.join("rosemary_nasrin")
+        before = len(tuple(await mailbox._store.objects()))
+        with pytest.raises(DeliversToNobody):
+            await mailbox.send("rosemary_nasrin", "everyone", "hello?")
+        assert len(tuple(await mailbox._store.objects())) == before
+
+    async def test_addressing_yourself_by_name_delivers(self, mailbox: Mailbox) -> None:
+        """Writing your own name is deliberate, and has real uses.
+
+        A note to yourself that outlives the session, or the stimulus for a test that
+        needs mail to actually arrive. This is the case that reported the whole defect:
+        a self-send returned success and delivered nothing, so an experiment built on it
+        could only ever produce a false negative.
+        """
+        await mailbox.join("rosemary_nasrin")
+        sent = await mailbox.send("rosemary_nasrin", "rosemary_nasrin", "note to self")
+        assert sent.to == ("rosemary_nasrin",)
+        waiting = await mailbox.peek("rosemary_nasrin")
+        assert [obj.id for obj in waiting] == [sent.id]
+
+    async def test_your_own_fan_out_still_does_not_come_back(
+        self, mailbox: Mailbox
+    ) -> None:
+        """Explicit is delivered; incidental is not. Scenario 6 still holds."""
+        await mailbox.join("rosemary_nasrin")
+        await mailbox.join("trevor_mahmood")
+        await mailbox.update_profile("rosemary_nasrin", {"groups": ["ops"]})
+        await mailbox.update_profile("trevor_mahmood", {"groups": ["ops"]})
+        sent = await mailbox.send("rosemary_nasrin", "ops", "morning all")
+        assert sent.to == ("trevor_mahmood",)
+        assert await mailbox.peek("rosemary_nasrin") == ()
 
     async def test_a_caller_who_never_joined_is_a_different_error_again(
         self, mailbox: Mailbox

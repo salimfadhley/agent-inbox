@@ -80,11 +80,35 @@ class UnknownRecipient(AddressError):
 
     This is raised rather than delivered-to-nobody on purpose. A message that reports
     success and reaches no one is the worst outcome for an agent, which cannot notice
-    the silence and will wait for a reply that is never coming. Groups are the exception
-    — an empty group is legitimately empty — so only a specific name raises.
+    the silence and will wait for a reply that is never coming.
+
+    Only a *specific unknown name* raises here. An audience that is well-formed but
+    resolves to nobody — an emptied group, or ``everyone`` on a mailbox of one — raises
+    :class:`DeliversToNobody` instead, because the remedy is different.
     """
 
     code = "unknown_recipient"
+
+
+class DeliversToNobody(AddressError):
+    """Every name was real, and not one of them resolves to a recipient.
+
+    A group everyone has left, or ``everyone`` on a mailbox with nobody else on it. The
+    names are valid, so this is not the sender's typo — but the outcome is still that
+    the message reaches no one, and that is the thing an agent must not be allowed to
+    believe went well.
+
+    The hub used to accept these silently, storing an object with an empty ``to`` and
+    returning success. That is the same defect shape as a check with nothing to look at:
+    the caller receives an object id indistinguishable from a real delivery, and any
+    experiment built on it produces a confident false negative.
+
+    Addressing **yourself by name** is not this error: see
+    :meth:`~agent_mailbox.mailbox.Mailbox.send`. It is a deliberate act with real uses,
+    so it delivers.
+    """
+
+    code = "delivers_to_nobody"
 
 
 class RemoteMailbox(AddressError):

@@ -197,6 +197,48 @@ class TestMail:
         assert r.status_code == 422
         assert r.json()["code"] == "unknown_recipient"
 
+    def test_an_audience_that_reaches_nobody_is_refused(
+        self, client: TestClient
+    ) -> None:
+        """422, not 500 and certainly not 201.
+
+        Every name is real, so this is not `unknown_recipient`; it is still a send that
+        would reach no one. The status matters as much as the refusal: an unmapped code
+        falls through to 500, which would tell the caller the hub broke rather than that
+        their audience was empty.
+
+        A group is the case that reaches this over the API. `everyone` does not: a real
+        hub always carries its reserved actors, so a broadcast is never truly empty.
+        """
+        join(client, ROSEMARY)
+        client.put(
+            f"/actors/{ROSEMARY}",
+            json={"profile": {"groups": ["ops"]}},
+            headers=as_(ROSEMARY),
+        )
+        r = client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note(["ops"], "anyone out there?"),
+            headers=as_(ROSEMARY),
+        )
+        assert r.status_code == 422
+        assert r.json()["code"] == "delivers_to_nobody"
+
+    def test_addressing_yourself_by_name_is_delivered(self, client: TestClient) -> None:
+        """The deliberate case, over the API: it lands, and it is readable."""
+        join(client, ROSEMARY)
+        r = client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([ROSEMARY], "note to self"),
+            headers=as_(ROSEMARY),
+        )
+        assert r.status_code == 201
+        assert [t.rsplit("/", 1)[-1] for t in r.json()["to"]] == [ROSEMARY]
+        waiting = client.get(
+            f"/actors/{ROSEMARY}/inbox?view=full", headers=as_(ROSEMARY)
+        ).json()["items"]
+        assert [n["id"] for n in waiting] == [r.json()["id"]]
+
     def test_another_mailbox_is_refused_differently(self, client: TestClient) -> None:
         join(client, ROSEMARY)
         r = client.post(

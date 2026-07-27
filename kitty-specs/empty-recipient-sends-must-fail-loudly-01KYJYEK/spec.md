@@ -3,7 +3,8 @@
 - Mission: `empty-recipient-sends-must-fail-loudly-01KYJYEK`
 - Raised by: `ludmila_coe` (host), ranked **#1** on her improvement list, 2026-07-27
 - Characterised by: `nicole_ruzickova`, against halob 0.21.1
-- Status: **specified, not started.** Awaiting human prioritisation.
+- Status: **shipped.** See "What actually shipped" at the foot of this document — the
+  operator changed the design when approving it, and self-send now *delivers*.
 
 ## What this is
 
@@ -153,5 +154,57 @@ host-side friction across multiple agents. Classified on request, across MCP, CL
 API, on 2026-07-27. The `to`/`audience` invariant is the acceptance criterion agreed
 between host and admin in that exchange.
 
-Per the operator's standing instruction, this is written up for human discussion and is
-**not to be implemented on the strength of the report alone**.
+Per the operator's standing instruction, this was written up for human discussion and
+was **not** implemented on the strength of the report alone. The human then approved it,
+with a change — recorded below.
+
+---
+
+## What actually shipped
+
+The operator approved the blanket-with-distinguished-errors option **and rejected the
+premise of open question 2**: *"I think there's a legitimate testing use case in
+messaging yourself."*
+
+That is the case that produced this report in the first place — arming a wake experiment
+needed mail to actually arrive — so the answer above ("self-send should fail") was wrong.
+The shipped design is therefore not what this spec proposed:
+
+**Explicit self-address delivers. Incidental self-inclusion still does not.**
+
+| Case | Before | Now |
+|---|---|---|
+| Addressing yourself by name | success, delivered to nobody | **delivered**, appears in your own inbox |
+| Inside your own group's fan-out | not delivered to you | unchanged — not delivered to you |
+| Group with no other members | success, `to: []` | `delivers_to_nobody`, 422 |
+| `everyone` on a mailbox of one | success, `to: []` | `delivers_to_nobody`, 422 |
+| Unknown name | `unknown_recipient` | unchanged |
+
+The distinction is the **typed** audience, not the resolved one: writing your own name is
+deliberate, being swept into your own fan-out is not. Scenario 6 — never being handed back
+what you just said — survives intact for the case it was written for. This is why
+`audience` is stored unresolved (ADR 0006); that decision paid for itself here.
+
+### Two things this got wrong first
+
+**The status code.** `mailbox_error_handler` does `STATUS_BY_CODE.get(exc.code, 500)`, so
+a new code that nobody maps becomes a **500** — the hub reporting its own fault for the
+caller's empty audience. Caught by writing the API test instead of reasoning that "the
+handler is generic, so it propagates". It does propagate; it propagates wrongly.
+
+**The `everyone` case is not reachable over the API.** A real hub always carries its
+reserved actors (`admin`, `host`), so a broadcast is never genuinely empty. The first API
+test asserted a 422 and got a correct 201. Only the empty-group case reaches this error on
+a real hub; the lone-`everyone` case is reachable from a bare `Mailbox`, which is where it
+is tested.
+
+### Verification
+
+The regression tests were watched failing with the fix removed, per the rule above: 8 of
+10 failed. The two that did not are the scenario-6 guard, which asserts behaviour that was
+already correct and had to keep working — a test that passes both ways is doing its job
+there, but it would have been worthless as evidence for the new behaviour.
+
+Still open, unchanged: **FR-006**, the three undeliverable probe objects on halob. They
+predate the fix and are not removed by it.
+

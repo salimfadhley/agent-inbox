@@ -27,6 +27,7 @@ from typing import Any
 from agent_mailbox import addressing, naming, rules
 from agent_mailbox.addressing import LOCAL
 from agent_mailbox.exceptions import (
+    DeliversToNobody,
     NameUnavailable,
     NoSuchMessage,
     UnknownActor,
@@ -207,12 +208,22 @@ class Mailbox:
         # The sender comes out here too: `to` now means *who received this*, and you
         # never receive your own message. Read-time exclusion still happens and is
         # harmless — but a stored `to` that listed the sender would be a lie.
+        # An explicit self-address delivers; being caught in your own fan-out does not.
+        # See `rules.recipients_of`, which must agree with this or mail would be stored
+        # as delivered and then be invisible to the only person it was for.
         reached = rules.resolve_audience(recipients, all_actors, memberships) - {sender}
+        if rules.named_self(recipients, sender):
+            reached |= {sender}
         also = (
             rules.resolve_audience(copies, all_actors, memberships) - {sender} - reached
         )
+        if rules.named_self(copies, sender) and sender not in reached:
+            also |= {sender}
         resolved_to = tuple(sorted(reached))
         resolved_cc = tuple(sorted(also))
+        self._reject_undeliverable(
+            recipients + copies, resolved_to + resolved_cc, memberships
+        )
 
         obj = ObjectRecord(
             id=uuid.uuid4().hex,
@@ -254,6 +265,37 @@ class Mailbox:
                 f"nobody here is called {', '.join(repr(m) for m in missing)} — "
                 "check the name, or call `directory` to see who has joined"
             )
+
+    @staticmethod
+    def _reject_undeliverable(
+        addressed: Sequence[str],
+        delivered: Sequence[str],
+        memberships: dict[str, frozenset[str]],
+    ) -> None:
+        """Refuse a well-formed audience that reaches nobody, and say which kind it is.
+
+        Every name here is real — a typo raised earlier. What is left is an audience
+        that resolves to no one: a group everyone has left, or ``everyone`` on a mailbox
+        of one. The hub used to store these and return success, which hands the caller
+        an object id indistinguishable from a real delivery.
+
+        The message names the cause, because the remedies are different: wait for
+        somebody to join, versus address a group that still has members.
+        """
+        if delivered or not addressed:
+            return
+        groups = sorted({name for name in addressed if name in memberships})
+        if rules.EVERYONE in addressed:
+            detail = "you are the only one here, so `everyone` reaches nobody"
+        elif groups:
+            named = ", ".join(repr(group) for group in groups)
+            detail = f"{named} has no members besides you"
+        else:
+            detail = "every name addressed resolves to nobody"
+        raise DeliversToNobody(
+            f"this would reach nobody — {detail}. Nothing was sent; "
+            "call `agents` to see who has joined"
+        )
 
     async def reply(
         self, caller: str, object_id: str, body: str, *, subject: str | None = None

@@ -78,8 +78,25 @@ def recipients_of(
     Self-exclusion is scenario 6: being handed back what you just said costs a turn and
     teaches nothing. It applies to fan-out and direct mail alike, so an agent that
     addresses a group it belongs to is not its own recipient.
+
+    **Unless it named itself.** Writing your own name is a deliberate act, not the
+    accident of being inside your own fan-out, and it has real uses — a note that
+    survives the session, or the stimulus for a test that needs mail to actually
+    arrive. So an explicit self-address delivers, while being swept into a group or
+    ``everyone`` still does not. The distinction is the *typed* audience, which is why
+    the unresolved names are kept (ADR 0006).
     """
-    return resolve_audience(obj.audience, all_actors, memberships) - {obj.attributed_to}
+    delivered = resolve_audience(obj.audience, all_actors, memberships) - {
+        obj.attributed_to
+    }
+    if named_self(obj.audience, obj.attributed_to):
+        delivered |= {obj.attributed_to}
+    return delivered
+
+
+def named_self(audience: Iterable[str], sender: str) -> bool:
+    """Whether ``sender`` wrote its own name, rather than landing in its own fan-out."""
+    return sender in frozenset(audience)
 
 
 def delivers_to(

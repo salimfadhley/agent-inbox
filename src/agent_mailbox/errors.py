@@ -32,6 +32,8 @@ STATUS_BY_CODE: dict[str, int] = {
     # well-formed, but names something that cannot be reached
     "unknown_recipient": 422,
     "remote_mailbox": 422,
+    # every name was real; together they resolve to nobody
+    "delivers_to_nobody": 422,
     # the caller has not joined
     "unknown_actor": 404,
     # absent, or not yours — deliberately the same answer
