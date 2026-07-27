@@ -2,9 +2,11 @@
 
 - Status: **Superseded by [ADR 0002](0002-sqlite-backend.md)** (2026-07-23)
 - Date: 2026-07-22
-- Context: `agent-mail` — inter-agent messaging for local LLM agents
+- Context: `agent-inbox` — inter-agent messaging for local LLM agents
+  (the project was called `agent-mail` when this was written; PyPI refused that name
+  and it was renamed on 2026-07-23 — see [mission 0019](../missions/0019-reclone-under-correct-name.md))
 
-> **Superseded.** agent-mail shipped on NATS/JetStream, then replaced it with a single
+> **Superseded.** The project shipped on NATS/JetStream, then replaced it with a single
 > local SQLite file. The problem framing below still holds (durable store + a wake
 > signal + a per-agent listener); the conclusion that NATS is the right store does not.
 > The hosted HTTP hub already provides cross-host reach, so NATS was paying operational
@@ -49,7 +51,7 @@ Use **NATS JetStream** as the mailbox substrate.
 ### Why not the alternatives
 
 - **Keep the git-file channel.** Durable and auditable but no wake signal and no
-  standard listener. We keep it as an interim/parallel channel; `agent-mail` adds
+  standard listener. We keep it as an interim/parallel channel; this project adds
   the missing attention primitive.
 - **Plain NATS pub/sub (no JetStream).** No persistence — an offline agent loses
   messages. Unacceptable for a mailbox.

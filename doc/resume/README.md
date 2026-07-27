@@ -20,3 +20,8 @@ Example:
 20260727-2235-UTC_codex-gpt-5_restart-wake-release-gate-handoff.md
 ```
 
+The convention applies to new files. `2026-07-25-handover.md` and
+`2026-07-27-handover.md` predate it and are deliberately left as they are: both are
+referenced by name from other documents, and a tidier filename is not worth breaking a
+pointer into the record.
+

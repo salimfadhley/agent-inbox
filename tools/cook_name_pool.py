@@ -1,7 +1,9 @@
 """Cook the checked-in name pool. Build-time only; Faker is not a runtime dependency."""
 import re
+import sys
 import textwrap
 import warnings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 from faker import Faker
@@ -69,6 +71,8 @@ for t in sorted(pool):
         wrapped = textwrap.fill(body, 84, initial_indent=" "*8, subsequent_indent=" "*12)
         lines.append(f"        (  # {label}\n{wrapped}\n        ),")
     lines.append("    ),")
-open("/private/tmp/claude-501/-Volumes-Home-work-agent-mail/a8159256-43d0-4059-9873-6d0874ccd82e/scratchpad/pool_body.txt","w").write("\n".join(lines))
+OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "pool_body.txt")
+OUT.write_text("\n".join(lines), encoding="utf-8")
+print(f"wrote {OUT}")
 tot_g = sum(len(g) for g,_ in pool.values()); tot_f = sum(len(f) for _,f in pool.values())
 print(f"traditions={len(pool)}  given={tot_g}  family={tot_f}  combinations={tot_g*tot_f:,}")

@@ -3,11 +3,11 @@
 - Status: Accepted
 - Date: 2026-07-23
 - Supersedes: [ADR 0001](0001-nats-jetstream-mailbox.md)
-- Context: `agent-mail` — inter-agent messaging for local LLM agents
+- Context: `agent-inbox` — inter-agent messaging for local LLM agents
 
 ## Context
 
-agent-mail shipped on NATS/JetStream (ADR 0001). In real use, every agent connects
+The project shipped on NATS/JetStream (ADR 0001). In real use, every agent connects
 over HTTP to **one** central MCP server (`http://<host>:8080/<project>/<agent>/mcp`),
 which owns the store. That topology changes the trade-off:
 
@@ -29,8 +29,8 @@ delivery modes (direct, any-one, broadcast) and automatic cleanup. SQLite is exa
 Use a **single local SQLite file** as the one and only backend. Remove NATS/JetStream
 and the planned Elasticsearch audit log entirely.
 
-- **One file** (`AGENT_MAIL_DB`, default `~/.local/share/agent-mail/agent-mail.db`;
-  `/data/agent-mail.db` on a mounted volume in the container). Zero external services:
+- **One file** (`AGENT_MAILBOX_DB`, default `~/.local/share/agent-mailbox/agent-mailbox.db`;
+  `/data/agent-mailbox.db` on a mounted volume in the container). Zero external services:
   install, set identity, run.
 - **`Mailbox` reimplemented on `aiosqlite`**, same method surface, so the CLI and MCP
   server are unchanged for callers.
@@ -40,15 +40,23 @@ and the planned Elasticsearch audit log entirely.
 - **`notify` becomes a best-effort no-op** — SQLite can't push cross-process; agents
   discover mail by checking their inbox each turn (which is the model anyway). The verb
   stays for API symmetry and any future push-capable backend.
-- **Automatic expiry:** messages older than `ttl_days` (default 14) are purged when the
-  mailbox opens — a trivial one-file retention rule that NATS/ES made complicated.
+- **Automatic expiry:** messages older than `ttl_days` (default 14) are purged — a
+  trivial one-file retention rule that NATS/ES made complicated.
+
+  > **Correction (2026-07-27).** As decided here, the purge was to happen "when the
+  > mailbox opens". It never did: `expire()` shipped with **no caller at all**, so no
+  > mail was ever removed, and nothing said so. Retention now runs as a scheduled task
+  > inside the hub, and reports whether it is alive — `agent-mailbox retention`,
+  > `agent-mailbox hub`, and `GET /observe/purge/status`. The lesson is recorded in
+  > `AGENTS.md`: a check with nothing to look at is not a passing check.
 - **`max_message_bytes`** (default 1 MiB) enforced on send; advertised via `hub_info`.
 
 ## Consequences
 
 **Gains**
-- No broker to run, secure, or debug. `docker run -v agent-mail-data:/data` and you're up.
-- Persistence is a volume mount; inspection is `sqlite3 agent-mail.db`.
+- No broker to run, secure, or debug. `docker run -v agent-mailbox-data:/data` and you're
+  up.
+- Persistence is a volume mount; inspection is `sqlite3 agent-mailbox.db`.
 - Tests need no external service — the former gated live-JetStream suite is now normal CI.
 - Follow-ons get simpler: server-side `wait_for_message` (0003) and presence (0004) are a
   poll/query on one table in one process, not consumer choreography across a broker.
