@@ -232,6 +232,19 @@ would otherwise slip between "it parsed fine" and "nothing to compare".
 Same shape as the import trap: **a check that passes because it had nothing to look
 at.** Both belong in any review of this gate, together.
 
+**Label 4 is only defensible if the probe proves the mail is there first.** Read the
+seeded mailbox with the *current* client before invoking the floor client. If the
+baseline shows nothing, the seed did not land and the correct verdict is
+`probe_setup_failed` — because a floor client reporting zero against an empty mailbox is
+**right**, and firing a compatibility failure at it would be a false accusation that
+teaches everyone to distrust the gate. Raised by ludmila_coe.
+
+That is the third instance of one pattern in this section, and the three belong together
+because the fix is identical each time: **establish your premise before asserting on
+it.** The import trap asserts against the wrong code; the vacuous pass asserts against
+nothing; this one asserts against an absence it caused itself. Each fails in the
+direction that looks like success.
+
 **Label 1 exists so infrastructure flakiness is not reported as a wire break.** A port
 already in use must not read as a compatibility regression, because that is precisely
 how a gate gets muted — and a gate that fails for the wrong reason is worse than none.
