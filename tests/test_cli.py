@@ -402,9 +402,13 @@ class TestHubReportsRetentionLiveness:
                     raise ClientError("no such route")
                 return status
 
-        monkeypatch.setattr(cli_module, "HubClient", Fake)
+        # Patch the client seam itself rather than the config. This test is about what
+        # `hub` prints, not about engine resolution — and resolution depends on the
+        # environment, so a version that went through it passed on my machine (where
+        # CLAUDECODE is set) and failed in CI (where no engine marker exists and this
+        # repo configures two).
         monkeypatch.setattr(
-            cli_module, "load_config", lambda **kw: Config(hub="h", name="nic")
+            cli_module, "_client", lambda ctx: Fake(Config(hub="h", name="nic"))
         )
         result = CliRunner().invoke(cli_module.cli, ["hub"])
         assert result.exit_code == 0, result.output
