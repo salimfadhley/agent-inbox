@@ -19,8 +19,12 @@ visibility rules hold however the caller was identified.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import msgspec
@@ -378,6 +382,37 @@ class Api:
             "chars": len(body),
         }
 
+    # -- maintenance -------------------------------------------------------
+
+    async def purge_preview(self) -> dict[str, Any]:
+        """What a purge would remove, described per conversation. Removes nothing."""
+        doomed = await self.house.expire_preview()
+        return {
+            "threads": [
+                {
+                    "root": self.wire.object_uri(t.root),
+                    "subject": t.subject,
+                    "lastPublished": t.last_published,
+                    "messages": t.messages,
+                    "ids": [self.wire.object_uri(i) for i in t.ids],
+                }
+                for t in doomed
+            ],
+            "threadCount": len(doomed),
+            "messageCount": sum(t.messages for t in doomed),
+        }
+
+    async def purge(self) -> dict[str, Any]:
+        """Remove them. Irreversible, and there is nothing left behind to say so."""
+        preview = await self.purge_preview()
+        removed = await self.house.expire()
+        api_logger.info(
+            "purge: operator removed %d message(s) in %d thread(s)",
+            removed,
+            preview["threadCount"],
+        )
+        return {**preview, "removed": removed}
+
     async def read_object(self, object_id: str, caller: str) -> Note:
         got = await self.house.read(caller, self.wire.object_id_from(object_id))
         return self.wire.note(got)
@@ -485,6 +520,42 @@ def decode_activity(raw: dict[str, Any]) -> Create:
     return Create(object=msgspec.convert(raw, Note, strict=False))
 
 
+async def purge_forever(house: House, minutes: int) -> None:
+    """Remove conversations that have gone quiet, for as long as the hub is up.
+
+    Retention was written, tested and documented long before it had a caller: nothing
+    ever invoked `expire()`, so no message on any hub was ever removed and the prompt's
+    promise that "mail expires after about a fortnight" was simply untrue. This is the
+    caller.
+
+    **It sleeps before its first run, deliberately.** Purging at startup would tie an
+    unbounded, irreversible deletion to a container restart — the moment nobody is
+    watching, decided by whoever happened to restart it, who does not know they are
+    deciding anything. A hub that has just come up should serve, not delete.
+
+    A failure is logged and the loop continues. Housekeeping is the one place where
+    "keep serving mail" beats "fail loudly": on 2026-07-26 an unrelated error left an
+    abandoned transaction and took the hub's mail down for eleven minutes, and a purge
+    that kills the hub it maintains would be the same mistake wearing a different hat.
+    """
+    while True:
+        await asyncio.sleep(minutes * 60)
+        try:
+            started = time.monotonic()
+            removed = await house.expire()
+            took = (time.monotonic() - started) * 1000
+            # Logged every cycle, including when nothing goes. For the first fortnight
+            # of any hub that is the *only* line there will be — nothing is old enough
+            # to remove yet — and it is what tells us whether the window is right. A
+            # purge that speaks only when it deletes teaches nothing while we are still
+            # learning.
+            api_logger.info("purge: removed %d message(s) in %.0f ms", removed, took)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - housekeeping must not stop the hub
+            api_logger.exception("purge failed; retrying at the next interval")
+
+
 def build_api(
     house: House,
     public_url: str,
@@ -494,6 +565,7 @@ def build_api(
     auth_mode: str = "off",
     throttle: LoginThrottle | None = None,
     trust_proxy: bool = False,
+    purge_interval_minutes: int = 0,
 ) -> Litestar:
     """Assemble the app. Everything routes through the house.
 
@@ -773,6 +845,30 @@ def build_api(
 
     # The observation routes are the operator's view — under enforce they need a valid
     # credential (this is what finally makes them safe to expose; M2 FR-010).
+    @get(
+        "/observe/purge",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def purge_preview(operator: str) -> dict[str, Any]:
+        """What a purge would remove. Reads only — safe to call at any time."""
+        return await api.purge_preview()
+
+    @post(
+        "/observe/purge",
+        guards=[guard_enforce],
+        status_code=200,
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def purge_now(operator: str) -> dict[str, Any]:
+        """Purge now, rather than waiting for the next scheduled run.
+
+        Operator-only, because it deletes. There are no tombstones and no undo, so
+        anyone reaching for this should have read the preview first — which is why the
+        preview is a separate, read-only route rather than a flag on this one.
+        """
+        return await api.purge()
+
     @get("/observe/stats", guards=[guard_enforce])
     async def observe_stats(since: str = "") -> dict[str, Any]:
         return await api.survey(since)
@@ -969,6 +1065,8 @@ def build_api(
     handlers = [
         hub,
         health,
+        purge_preview,
+        purge_now,
         doctor,
         join,
         directory,
@@ -1001,8 +1099,31 @@ def build_api(
             revoke_token,
         ]
 
+    @asynccontextmanager
+    async def scheduled_purge(_: Litestar) -> AsyncIterator[None]:
+        """Run the purge loop for exactly as long as the hub is serving.
+
+        Cancelled on shutdown, so nothing is left purging a store that is closing.
+        `purge_interval_minutes = 0` means no schedule at all — the operator routes
+        still work, which is what makes disabling it safe rather than a way to forget
+        about retention entirely.
+        """
+        if purge_interval_minutes <= 0:
+            api_logger.info("scheduled purge is off (purge interval 0)")
+            yield
+            return
+        task = asyncio.create_task(purge_forever(house, purge_interval_minutes))
+        api_logger.info("scheduled purge every %d minute(s)", purge_interval_minutes)
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
     app = Litestar(
         on_startup=[open_the_house],
+        lifespan=[scheduled_purge],
         route_handlers=handlers,
         exception_handlers={
             MailboxError: mailbox_error_handler,

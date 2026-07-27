@@ -454,12 +454,27 @@ class Mailbox:
         message by message once deleted the opening of a live conversation and left the
         replies — a fragment that reads as complete is worse than no fragment at all.
         """
+        doomed = await self.expire_preview()
+        ids = frozenset(ident for thread in doomed for ident in thread.ids)
+        return await self._store.remove_objects(ids) if ids else 0
+
+    async def expire_preview(self) -> tuple[rules.ExpiringThread, ...]:
+        """What :meth:`expire` would remove, without removing it.
+
+        The same computation the real purge uses — `expire` is this plus the deletion —
+        so a dry run and a purge cannot disagree about what dies. Two functions each
+        working out their own answer would agree right up until they did not, and the
+        moment they disagreed would be the moment someone had trusted the preview.
+
+        There are no tombstones: expiry is real removal, and afterwards a purged thread
+        is indistinguishable from one that never existed. This is the only chance
+        anybody gets to look first.
+        """
         if self._retention_days <= 0:
-            return 0
+            return ()
         cutoff = (self._clock() - timedelta(days=self._retention_days)).isoformat()
         objects = tuple(await self._store.objects())
-        doomed = rules.expired_object_ids(objects, cutoff)
-        return await self._store.remove_objects(doomed) if doomed else 0
+        return rules.expiring_threads(objects, cutoff)
 
 
 def _reply_subject(subject: str | None) -> str | None:

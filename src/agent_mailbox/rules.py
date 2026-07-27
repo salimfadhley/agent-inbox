@@ -15,6 +15,7 @@ The scenario numbers refer to ``doc/messaging-rules.md``.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from typing import NamedTuple
 
 from agent_mailbox.records import ActorRecord, ObjectRecord
 
@@ -129,6 +130,43 @@ def unread(
 # ------------------------------------------------------------------ threading
 
 
+def thread_roots(objects: Iterable[ObjectRecord]) -> dict[str, str]:
+    """Every message's thread root, in one pass.
+
+    :func:`thread_root` answers for one message and rebuilds its index each time it is
+    asked, which is fine for one lookup and quadratic for a whole store: expiry called
+    it twice per message, so a 10,000-message purge rebuilt a 10,000-entry index 20,000
+    times and took 4.5 seconds against a 250 ms budget.
+
+    The walk is the same walk — up ``inReplyTo``, stopping at a parent that is absent or
+    outside this set — but each answer is remembered, so a chain is climbed once however
+    many messages hang off it. Cycles terminate on the visited set, as before: they
+    cannot arise from correct use, but a corrupt store could produce one and a purge
+    that spins is worse than a purge that is wrong.
+    """
+    by_id = {obj.id: obj for obj in objects}
+    roots: dict[str, str] = {}
+    for obj in by_id.values():
+        chain: list[str] = []
+        seen: set[str] = set()
+        current = obj.id
+        while current not in roots and current not in seen:
+            seen.add(current)
+            chain.append(current)
+            node = by_id.get(current)
+            if (
+                node is None
+                or node.in_reply_to is None
+                or node.in_reply_to not in by_id
+            ):
+                break
+            current = node.in_reply_to
+        root = roots.get(current, current)
+        for member in chain:
+            roots[member] = root
+    return roots
+
+
 def thread_root(objects: Iterable[ObjectRecord], object_id: str) -> str:
     """Follow ``inReplyTo`` up to the conversation's first message (scenario 5).
 
@@ -235,15 +273,72 @@ def expired_object_ids(objects: Iterable[ObjectRecord], cutoff: str) -> frozense
     ``cutoff`` is passed in rather than read from a clock, so this stays pure and
     testable at any date.
     """
+    return frozenset(
+        ident for doomed in expiring_threads(objects, cutoff) for ident in doomed.ids
+    )
+
+
+class ExpiringThread(NamedTuple):
+    """One conversation that has gone quiet, described rather than deleted.
+
+    What a dry run reports. Per thread and not per message, because the decision is per
+    thread: nobody can look at forty message ids and say whether the verdict was right,
+    but "this conversation, idle since 3 July, 14 messages" is something an operator can
+    disagree with.
+    """
+
+    root: str
+    subject: str
+    last_published: str
+    messages: int
+    ids: tuple[str, ...]
+
+
+def expiring_threads(
+    objects: Iterable[ObjectRecord], cutoff: str
+) -> tuple[ExpiringThread, ...]:
+    """Every fully idle conversation, oldest last activity first.
+
+    The single place that decides what expiry would remove. :func:`expired_object_ids`
+    is this function with the descriptions thrown away, so a dry run and a real purge
+    can never disagree about what dies — which they could, and eventually would, if each
+    computed its own answer.
+    """
     objects = tuple(objects)
     if not objects:
-        return frozenset()
+        return ()
+
+    roots = thread_roots(objects)
     latest: dict[str, str] = {}
     for obj in objects:
-        root = thread_root(objects, obj.id)
+        root = roots[obj.id]
         latest[root] = max(latest.get(root, ""), obj.published)
+
+    # `<` and not `<=`: a thread whose last word landed exactly on the cutoff is kept.
+    # Expiry errs towards keeping mail, here as everywhere.
     dead = {root for root, last in latest.items() if last < cutoff}
-    return frozenset(obj.id for obj in objects if thread_root(objects, obj.id) in dead)
+    if not dead:
+        return ()
+
+    members: dict[str, list[ObjectRecord]] = {}
+    for obj in objects:
+        if (root := roots[obj.id]) in dead:
+            members.setdefault(root, []).append(obj)
+
+    doomed = []
+    for root, turns in members.items():
+        ordered = sorted(turns, key=lambda o: o.published)
+        opener = next((o for o in ordered if o.id == root), ordered[0])
+        doomed.append(
+            ExpiringThread(
+                root=root,
+                subject=opener.summary or "(no subject)",
+                last_published=latest[root],
+                messages=len(ordered),
+                ids=tuple(o.id for o in ordered),
+            )
+        )
+    return tuple(sorted(doomed, key=lambda t: t.last_published))
 
 
 def traffic_by_day(

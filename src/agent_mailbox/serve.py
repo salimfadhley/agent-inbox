@@ -52,6 +52,9 @@ class Settings:
     public_url: str = ""
     hub_name: str = "local"
     retention_days: int = 14
+    #: How often the hub purges expired conversations, in minutes. 0 disables the
+    #: schedule (retention_days = 0 disables expiry itself, whatever this says).
+    purge_interval_minutes: int = 60
     log_level: str = "INFO"
     #: off | warn | enforce (see _AUTH_MODES). Default off keeps the LAN behaviour.
     auth_mode: str = "off"
@@ -84,6 +87,7 @@ class Settings:
             public_url=_env("PUBLIC_URL", "") or f"http://localhost:{port}",
             hub_name=_env("HUB_NAME", "local"),
             retention_days=int(_env("RETENTION_DAYS", "14")),
+            purge_interval_minutes=int(_env("PURGE_INTERVAL_MINUTES", "60")),
             log_level=_env("LOG_LEVEL", "INFO").upper(),
             auth_mode=auth_mode,
             secret_key=_env("SECRET_KEY", ""),
@@ -153,6 +157,7 @@ def build_app(
         auth_mode=config.auth_mode,
         throttle=throttle,
         trust_proxy=config.trust_proxy,
+        purge_interval_minutes=config.purge_interval_minutes,
     )
 
     async def open_store(_: Litestar) -> None:

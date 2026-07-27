@@ -8,6 +8,7 @@ decision has quietly migrated up into this layer.
 from __future__ import annotations
 
 import ast
+import contextlib
 import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
@@ -900,3 +901,189 @@ class TestAnOlderClientCanStillReadItsMail:
         page = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
         assert "the expensive part" not in repr(page)
         assert "content" not in page["items"][0]
+
+
+class TestPurgeRoutes:
+    """The operator's view of expiry: look first, then act.
+
+    Retention was written and never called — no message on any hub had ever been
+    removed, while the onboarding prompt told agents mail expires after a fortnight.
+    These routes are the operator half of fixing that; `purge_forever` is the other.
+    """
+
+    @pytest.fixture
+    def aged(self) -> Iterator[TestClient]:
+        """A hub holding one conversation that has gone quiet and one that has not.
+
+        The clock is injected rather than the rows backdated. The API deliberately
+        offers no way to send into the past, and adding one for a test would be a door
+        into the store that nothing else has.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        class Clock:
+            def __init__(self) -> None:
+                self.now = datetime.now(UTC)
+
+            def __call__(self) -> datetime:
+                return self.now
+
+        clock = Clock()
+        house = House(
+            Mailbox(InMemoryStore(), hub_name="testhub", retention_days=1, clock=clock)
+        )
+        with TestClient(app=build_api(house, HUB)) as client:
+            join(client, ROSEMARY)
+            join(client, TREVOR)
+            client.post(
+                f"/actors/{ROSEMARY}/outbox",
+                json=note([TREVOR], "old", summary="gone quiet"),
+                headers=as_(ROSEMARY),
+            )
+            clock.now += timedelta(days=30)
+            client.post(
+                f"/actors/{ROSEMARY}/outbox",
+                json=note([TREVOR], "new", summary="still talking"),
+                headers=as_(ROSEMARY),
+            )
+            yield client
+
+    def test_the_preview_names_what_would_go_and_removes_nothing(
+        self, aged: TestClient
+    ) -> None:
+        first = aged.get("/observe/purge", headers=as_(ROSEMARY)).json()
+        assert first["threadCount"] == 1
+        assert first["messageCount"] == 1
+        assert first["threads"][0]["subject"] == "gone quiet"
+
+        again = aged.get("/observe/purge", headers=as_(ROSEMARY)).json()
+        assert again == first, "the preview consumed or changed something"
+
+    def test_purging_removes_exactly_what_the_preview_named(
+        self, aged: TestClient
+    ) -> None:
+        preview = aged.get("/observe/purge", headers=as_(ROSEMARY)).json()
+        done = aged.post("/observe/purge", headers=as_(ROSEMARY)).json()
+
+        assert done["removed"] == preview["messageCount"] == 1
+        assert done["threads"] == preview["threads"], (
+            "the purge did not do what the preview said it would — "
+            "a preview that can disagree is worse than none, because it is trusted"
+        )
+        after = aged.get("/observe/purge", headers=as_(ROSEMARY)).json()
+        assert after["threadCount"] == 0, "purging twice would remove it twice"
+
+    def test_the_live_thread_survives(self, aged: TestClient) -> None:
+        aged.post("/observe/purge", headers=as_(ROSEMARY))
+        waiting = aged.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        assert waiting["unread"] == 1
+        assert waiting["items"][0]["summary"] == "still talking"
+
+    def test_retention_off_means_nothing_is_ever_named(self) -> None:
+        """`retention_days = 0` disables expiry, whatever any schedule says.
+
+        A maintenance feature that ignores its own off switch is the worst bug
+        available here, because the operator believes they have turned it off.
+        """
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub", retention_days=0))
+        with TestClient(app=build_api(house, HUB)) as client:
+            join(client, ROSEMARY)
+            assert client.get("/observe/purge", headers=as_(ROSEMARY)).json() == {
+                "threads": [],
+                "threadCount": 0,
+                "messageCount": 0,
+            }
+
+
+class TestTheScheduler:
+    """The loop that was missing for the life of the project.
+
+    `expire()` was written, tested, documented as running "on every mailbox open", and
+    never called by anything. These pin the three properties that make a scheduled
+    deleter safe to leave running unattended.
+    """
+
+    async def test_it_sleeps_before_its_first_run(self) -> None:
+        """A restart is not a decision to delete.
+
+        Purging at startup would tie an unbounded, irreversible deletion to whoever
+        happened to restart the container — at the moment nobody is watching, and
+        without them knowing they had decided anything.
+        """
+        import asyncio
+
+        from agent_mailbox.api import purge_forever
+
+        purges = 0
+
+        class Counting:
+            async def expire(self) -> int:
+                nonlocal purges
+                purges += 1
+                return 0
+
+        task = asyncio.create_task(purge_forever(Counting(), minutes=60))
+        await asyncio.sleep(0.05)  # far longer than startup, far shorter than an hour
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        assert purges == 0, "the hub deleted something the moment it came up"
+
+    async def test_a_failed_purge_does_not_stop_the_next_one(self) -> None:
+        """Housekeeping must not take the hub down.
+
+        On 2026-07-26 an unrelated failure left an abandoned transaction and stopped all
+        mail for eleven minutes. A purge that kills the hub it maintains would be that
+        same mistake in a different coat.
+        """
+        import asyncio
+
+        from agent_mailbox.api import purge_forever
+
+        attempts = 0
+
+        class Failing:
+            async def expire(self) -> int:
+                nonlocal attempts
+                attempts += 1
+                raise RuntimeError("the store said no")
+
+        # A minute expressed in fractions, so the test does not wait for one.
+        task = asyncio.create_task(purge_forever(Failing(), minutes=0.001))
+        await asyncio.sleep(0.25)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        assert attempts > 1, "one failure stopped the schedule for good"
+
+    async def test_it_stops_with_the_app(self) -> None:
+        """Nothing should be left purging a store that is closing."""
+        import asyncio
+
+        from agent_mailbox.api import purge_forever
+
+        class Idle:
+            async def expire(self) -> int:
+                return 0
+
+        task = asyncio.create_task(purge_forever(Idle(), minutes=0.001))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        assert task.done()
+
+    def test_interval_zero_starts_no_schedule(self) -> None:
+        """The off switch must win, and the operator routes must still work.
+
+        Disabling the schedule is a decision to purge by hand, not a decision to forget
+        retention exists.
+        """
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub", retention_days=1))
+        with TestClient(app=build_api(house, HUB, purge_interval_minutes=0)) as client:
+            join(client, ROSEMARY)
+            assert (
+                client.get("/observe/purge", headers=as_(ROSEMARY)).status_code == 200
+            )

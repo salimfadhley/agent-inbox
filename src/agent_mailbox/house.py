@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Any, Self
 
+from agent_mailbox import rules
 from agent_mailbox.mailbox import Mailbox, _reply_subject
 from agent_mailbox.policy import Attempt, Outcome, Policy, default_policies
 from agent_mailbox.records import ActorRecord, ObjectRecord
@@ -226,6 +227,10 @@ class House:
 
     async def expire(self) -> int:
         return await self._mailbox.expire()
+
+    async def expire_preview(self) -> tuple[rules.ExpiringThread, ...]:
+        """What a purge would remove. Reads only; deletes nothing."""
+        return await self._mailbox.expire_preview()
 
     # -- observation -------------------------------------------------------
     #

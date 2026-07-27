@@ -194,6 +194,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
         + link("/inbox", "Inbox")
         + link("/compose", "Compose")
         + link("/prompts", "Prompt")
+        + link("/maintenance", "Maintenance")
         + link("/account", "Account")
     )
     return f"""<!doctype html>
@@ -900,6 +901,106 @@ def build_console(client: HubClient) -> Litestar:
     @get("/tokens/{name:str}", media_type=MediaType.HTML, sync_to_thread=True)
     def tokens(name: str, request: Request) -> Response:
         return _tokens_page(request, name)
+
+    def _refused(
+        body: dict[str, Any] | None, fallback: str, hub: dict[str, Any] | None
+    ) -> str:
+        detail = (body or {}).get("detail", fallback)
+        return _page(
+            "Maintenance",
+            f"<h2>Expiry</h2><p>{html.escape(str(detail))}</p>"
+            "<p><a href='/maintenance'>Try again</a></p>",
+            hub,
+            "/maintenance",
+        )
+
+    def _purge_page(
+        preview: dict[str, Any], hub: dict[str, Any] | None, note: str = ""
+    ) -> str:
+        """The maintenance page: what would go, and the button that makes it go.
+
+        Deliberately shows the preview *first* and every time. Expiry leaves no
+        tombstone — afterwards a purged conversation is indistinguishable from one that
+        never happened — so this page is the only chance anyone gets to disagree with
+        it, and a button without the list would be one nobody could press responsibly.
+        """
+        threads = preview.get("threads", []) if isinstance(preview, dict) else []
+        count = preview.get("threadCount", 0) if isinstance(preview, dict) else 0
+        messages = preview.get("messageCount", 0) if isinstance(preview, dict) else 0
+
+        if not threads:
+            body = (
+                "<p>Nothing has gone quiet for long enough to expire. "
+                "The hub checks on its own schedule; this page is here for when you "
+                "want to look, or to act sooner.</p>"
+            )
+            button = ""
+        else:
+            rows = "".join(
+                "<tr><td>{subject}</td><td>{last}</td><td>{n}</td></tr>".format(
+                    subject=html.escape(str(t.get("subject", ""))),
+                    last=html.escape(str(t.get("lastPublished", ""))[:10]),
+                    n=t.get("messages", 0),
+                )
+                for t in threads
+            )
+            body = (
+                f"<p><strong>{count} conversation(s), {messages} message(s)</strong> "
+                "would be removed. Each has been idle for longer than this hub keeps "
+                "mail. Live conversations are kept whole however old they started.</p>"
+                "<table><thead><tr><th>Conversation</th><th>Last activity</th>"
+                "<th>Messages</th></tr></thead><tbody>"
+                f"{rows}</tbody></table>"
+            )
+            button = (
+                "<form method='post' action='/maintenance/purge'>"
+                f"<button type='submit'>Purge these {messages} message(s)</button>"
+                "</form>"
+                "<p class='muted'>There is no undo, and nothing is left behind to say "
+                "a conversation was here.</p>"
+            )
+        return _page(
+            "Maintenance",
+            f"<h2>Expiry</h2>{note}{body}{button}",
+            hub,
+            "/maintenance",
+        )
+
+    @get("/maintenance", media_type=MediaType.HTML, sync_to_thread=True)
+    def maintenance(request: Request) -> Response:
+        """What a purge would remove. Reads only."""
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call("GET", "/observe/purge", session=sid)
+        if status != 200:
+            return Response(
+                _refused(body, "the hub would not say what it would purge", hub),
+                media_type=MediaType.HTML,
+            )
+        return Response(_purge_page(body or {}, hub), media_type=MediaType.HTML)
+
+    @post("/maintenance/purge", status_code=200, sync_to_thread=True)
+    def maintenance_purge(request: Request) -> Response:
+        """Purge now. The preview above said what this would do."""
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call("POST", "/observe/purge", session=sid)
+        if status != 200:
+            return Response(
+                _refused(body, "the hub refused to purge", hub),
+                media_type=MediaType.HTML,
+            )
+        removed = (body or {}).get("removed", 0)
+        note = (
+            f"<p><strong>Removed {removed} message(s).</strong> "
+            "The next scheduled purge will run as usual.</p>"
+        )
+        # Re-read rather than reusing the response: what is left is the interesting
+        # part, and showing a stale list beside "removed" would read as a failure.
+        status, fresh, _ = client.auth_call("GET", "/observe/purge", session=sid)
+        return Response(
+            _purge_page(fresh or {}, hub, note=note), media_type=MediaType.HTML
+        )
 
     @post("/tokens/{name:str}/mint", status_code=200, sync_to_thread=True)
     def mint(name: str, request: Request, data: Form) -> Response:

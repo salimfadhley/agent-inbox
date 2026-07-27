@@ -11,6 +11,7 @@ from agent_mailbox.records import ActorRecord, ObjectRecord
 from agent_mailbox.rules import (
     EVERYONE,
     expired_object_ids,
+    expiring_threads,
     group_memberships,
     is_party_to,
     may_attach_to,
@@ -367,3 +368,130 @@ class TestObservationRules:
             note("c", ROSEMARY, (YITZHAK,)),
         )
         assert dict(correspondents(msgs, ROSEMARY)) == {TREVOR: 2, YITZHAK: 1}
+
+
+class TestExpiringThreads:
+    """The dry run, and the cases where a purge could take something it should not.
+
+    Expiry leaves no tombstone: afterwards a purged conversation is indistinguishable
+    from one that never existed. There is no undo and no record, so every one of these
+    is a case where being wrong is permanent.
+    """
+
+    CUTOFF = "2026-07-10T00:00:00Z"
+
+    def _obj(self, ident, published, parent=None, summary="s"):
+        return ObjectRecord(
+            id=ident,
+            attributed_to="rosemary_nasrin",
+            to=("trevor_mahmood",),
+            cc=(),
+            content="x",
+            summary=summary,
+            published=published,
+            in_reply_to=parent,
+        )
+
+    def test_a_live_thread_is_kept_however_old_its_root(self) -> None:
+        """The bug this whole area exists for: old root, fresh reply, keep it all."""
+        objects = (
+            self._obj("root", "2026-07-01T00:00:00Z"),
+            self._obj("reply", "2026-07-20T00:00:00Z", parent="root"),
+        )
+        assert expiring_threads(objects, self.CUTOFF) == ()
+        assert expired_object_ids(objects, self.CUTOFF) == frozenset()
+
+    def test_an_idle_thread_goes_whole_and_is_described(self) -> None:
+        objects = (
+            self._obj("root", "2026-07-01T00:00:00Z", summary="DNS"),
+            self._obj("reply", "2026-07-02T00:00:00Z", parent="root"),
+        )
+        (doomed,) = expiring_threads(objects, self.CUTOFF)
+        assert doomed.subject == "DNS", "the operator needs to know what is going"
+        assert doomed.messages == 2
+        assert doomed.last_published == "2026-07-02T00:00:00Z"
+        assert set(doomed.ids) == {"root", "reply"}
+
+    def test_a_thread_landing_exactly_on_the_cutoff_is_kept(self) -> None:
+        """Boundary equality is where a `<` rule fails, and it had never been tested."""
+        objects = (self._obj("solo", self.CUTOFF),)
+        assert expiring_threads(objects, self.CUTOFF) == ()
+
+    def test_an_orphaned_reply_becomes_its_own_root(self) -> None:
+        """A parent outside the store must not miscompute the thread it belongs to."""
+        recent = (self._obj("orphan", "2026-07-20T00:00:00Z", parent="long_gone"),)
+        assert expiring_threads(recent, self.CUTOFF) == ()
+
+        old = (self._obj("orphan", "2026-07-01T00:00:00Z", parent="long_gone"),)
+        (doomed,) = expiring_threads(old, self.CUTOFF)
+        assert doomed.ids == ("orphan",)
+
+    def test_a_cycle_terminates(self) -> None:
+        """Impossible from correct use; a corrupt store could still produce one.
+
+        A purge that spins is worse than a purge that is wrong, because the hub stops.
+        """
+        objects = (
+            self._obj("a", "2026-07-01T00:00:00Z", parent="b"),
+            self._obj("b", "2026-07-01T00:00:00Z", parent="a"),
+        )
+        doomed = expiring_threads(objects, self.CUTOFF)
+        assert sum(t.messages for t in doomed) == 2
+
+    def test_the_preview_and_the_purge_never_disagree(self) -> None:
+        """`expired_object_ids` is the preview with the descriptions thrown away.
+
+        Two functions each working out their own answer would agree until they did not,
+        and the moment they disagreed would be the moment somebody had trusted the
+        preview and pressed the button.
+        """
+        objects = (
+            self._obj("live_root", "2026-07-01T00:00:00Z"),
+            self._obj("live_reply", "2026-07-20T00:00:00Z", parent="live_root"),
+            self._obj("dead_root", "2026-07-01T00:00:00Z"),
+            self._obj("dead_reply", "2026-07-03T00:00:00Z", parent="dead_root"),
+            self._obj("orphan", "2026-07-02T00:00:00Z", parent="vanished"),
+        )
+        from_preview = {
+            i for t in expiring_threads(objects, self.CUTOFF) for i in t.ids
+        }
+        assert from_preview == expired_object_ids(objects, self.CUTOFF)
+        assert from_preview == {"dead_root", "dead_reply", "orphan"}
+
+    def test_roots_are_resolved_once_not_once_per_message(self) -> None:
+        """NFR-001: purging was O(n^2) and took 4.5 s on 10,000 messages.
+
+        `thread_root` rebuilt its index on every call and expiry called it twice per
+        message. This asserts the shape rather than a wall-clock threshold, because a
+        threshold alone passes on a fast machine and leaves the quadratic for someone
+        else's machine to find.
+        """
+        import time
+
+        def store(n: int):
+            out, prev = [], None
+            for i in range(n):
+                root = i % 5 == 0
+                out.append(
+                    self._obj(
+                        f"m{i}",
+                        f"2026-07-{(i % 20) + 1:02d}T00:00:00Z",
+                        parent=None if root else prev,
+                    )
+                )
+                prev = f"m{i}"
+            return tuple(out)
+
+        def timed(n: int) -> float:
+            objects = store(n)
+            start = time.perf_counter()
+            expired_object_ids(objects, self.CUTOFF)
+            return time.perf_counter() - start
+
+        timed(500)  # warm
+        small, large = timed(1000), timed(4000)
+        # Four times the messages must not cost anything like sixteen times the work.
+        assert large < small * 8, (
+            f"1k took {small * 1000:.1f} ms, 4k took {large * 1000:.1f} ms — "
+            "expiry looks quadratic again"
+        )
