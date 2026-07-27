@@ -649,11 +649,12 @@ def build_api(
             )
 
     async def provide_operator(request: Request) -> str:
-        """A human operator's username, for the token-admin routes.
+        """A human operator's username, for actions no agent should be able to take.
 
         Under ``off`` there is no auth, so a placeholder operator is returned (dev/LAN).
-        Otherwise a full (non-limited) session is required — minting or revoking
-        a device token is an operator action.
+        Otherwise a full (non-limited) session is required. Minting or revoking a
+        device token is an operator action, and so is purging: a credential that lets an
+        agent send mail must not also let it delete everyone's.
         """
         if auth is None or auth_mode == "off":
             return "operator"
@@ -661,7 +662,10 @@ def build_api(
         session = await auth.resolve_session(sid) if sid else None
         if session is not None and not session.limited:
             return session.username
-        raise NotAuthenticated("log in as an operator to manage device tokens")
+        raise NotAuthenticated(
+            "log in at the console as an operator — this action is not available to "
+            "an agent's device token, however valid"
+        )
 
     @get("/", media_type=MediaType.JSON)
     async def hub() -> dict[str, Any]:
