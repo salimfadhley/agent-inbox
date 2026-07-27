@@ -100,34 +100,34 @@ operator's login is what unlocks the operator's view.
 
 | ID | Requirement | Status |
 |---|---|---|
-| FR-001 | Authentication has three modes — **off**, **warn**, **enforce** — selectable by configuration. `off` trusts the header (today's behaviour); `warn` checks credentials and logs a missing/invalid one but still serves the request; `enforce` refuses a missing/invalid credential. | proposed |
-| FR-002 | A human authenticates with a username and password; the pair is verified against a stored hash, never a stored password. | proposed |
-| FR-003 | 2FA enrolment issues a per-user TOTP secret as an `otpauth://` URI rendered as a scannable QR, and completes **only** after the human returns a valid code from their authenticator — proving the app is set up. | proposed |
-| FR-004 | Once enrolled, a human must present a current TOTP code (or a recovery code) **in addition to** the correct password to obtain a session. | proposed |
-| FR-005 | Recovery codes are issued at enrolment; each is single-use; presenting one satisfies the second factor for that login and is then spent. | proposed |
-| FR-006 | A logged-in operator can mint a device token for a named agent; the token secret is shown **exactly once** and is never retrievable afterward. | proposed |
-| FR-007 | An agent authenticates by presenting its device token as `Authorization: Bearer …`; the hub resolves it to that agent's actor identity and uses it as the `caller` — the same value the header supplies today. | proposed |
-| FR-008 | An operator can list an agent's device tokens (metadata only — label, created, last used — never the secret) and revoke any one; a revoked token is refused on its next use. | proposed |
-| FR-009 | On startup with no human user present, the system creates a user `admin` with a randomly generated password, prints that password **once** to the boot log, and persists only its hash. | proposed |
-| FR-010 | The bootstrap admin — and any account created without a chosen password — is in a *must set a real password and enrol 2FA* state, and cannot perform sensitive actions or be used for external login until both are complete. | proposed |
-| FR-011 | Under **enforce**, every write path and every `/observe/*` route requires a valid credential (a human session or a device token); the caller-gated read semantics that already exist are unchanged. | proposed |
-| FR-012 | The hub descriptor (`GET /`) reports `authenticated: true` under enforce and `false` otherwise, truthfully for the active mode. | proposed |
-| FR-013 | The console authenticates the human once and carries that session to the API on their behalf; it stores no security state of its own beyond the in-flight session. | proposed |
-| FR-014 | Every authentication decision is made at the API edge and resolves to the `caller` the engine already accepts; no messaging rule, the mailbox, or the House changes. | proposed |
-| FR-015 | While in **warn** mode, an operator can mint device tokens for agents already on the hub, so the live deployment can reach **enforce** without any agent being locked out. | proposed |
-| FR-016 | An authenticated human can change their password and rotate (re-enrol) their 2FA and recovery codes from within a session. | proposed |
-| FR-017 | A failed login does not reveal whether the username or the password was wrong; both yield the same generic refusal. | proposed |
+| FR-001 | Authentication has three modes — **off**, **warn**, **enforce** — selectable by configuration. `off` trusts the header (today's behaviour); `warn` checks credentials and logs a missing/invalid one but still serves the request; `enforce` refuses a missing/invalid credential. | implemented |
+| FR-002 | A human authenticates with a username and password; the pair is verified against a stored hash, never a stored password. | implemented |
+| FR-003 | 2FA enrolment issues a per-user TOTP secret as an `otpauth://` URI rendered as a scannable QR, and completes **only** after the human returns a valid code from their authenticator — proving the app is set up. | implemented |
+| FR-004 | Once enrolled, a human must present a current TOTP code (or a recovery code) **in addition to** the correct password to obtain a session. | implemented |
+| FR-005 | Recovery codes are issued at enrolment; each is single-use; presenting one satisfies the second factor for that login and is then spent. | implemented |
+| FR-006 | A logged-in operator can mint a device token for a named agent; the token secret is shown **exactly once** and is never retrievable afterward. | implemented |
+| FR-007 | An agent authenticates by presenting its device token as `Authorization: Bearer …`; the hub resolves it to that agent's actor identity and uses it as the `caller` — the same value the header supplies today. | implemented |
+| FR-008 | An operator can list an agent's device tokens (metadata only — label, created, last used — never the secret) and revoke any one; a revoked token is refused on its next use. | implemented |
+| FR-009 | On startup with no human user present, the system creates a user `admin` with a randomly generated password, prints that password **once** to the boot log, and persists only its hash. | implemented |
+| FR-010 | The bootstrap admin — and any account created without a chosen password — is in a *must set a real password and enrol 2FA* state, and cannot perform sensitive actions or be used for external login until both are complete. | implemented |
+| FR-011 | Under **enforce**, every write path and every `/observe/*` route requires a valid credential (a human session or a device token); the caller-gated read semantics that already exist are unchanged. | implemented |
+| FR-012 | The hub descriptor (`GET /`) reports `authenticated: true` under enforce and `false` otherwise, truthfully for the active mode. | implemented |
+| FR-013 | The console authenticates the human once and carries that session to the API on their behalf; it stores no security state of its own beyond the in-flight session. | implemented |
+| FR-014 | Every authentication decision is made at the API edge and resolves to the `caller` the engine already accepts; no messaging rule, the mailbox, or the House changes. | implemented |
+| FR-015 | While in **warn** mode, an operator can mint device tokens for agents already on the hub, so the live deployment can reach **enforce** without any agent being locked out. | implemented |
+| FR-016 | An authenticated human can change their password and rotate (re-enrol) their 2FA and recovery codes from within a session. | implemented |
+| FR-017 | A failed login does not reveal whether the username or the password was wrong; both yield the same generic refusal. | implemented |
 
 ## Non-functional requirements
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| NFR-001 | A leaked database alone is not enough to impersonate anyone. | A full dump of the SQLite file reveals **no** password, **no** usable device token, and **no** usable TOTP seed: passwords/recovery-codes/tokens are stored only as hashes, and TOTP secrets are encrypted at rest with a key supplied by the environment (not stored in the database). | proposed |
-| NFR-002 | Authentication adds no messaging logic. | A structural test: the engine and rules modules do not import or reference users, tokens, or sessions; the security layer lives only at the edge. | proposed |
-| NFR-003 | Per-request auth is cheap. | Resolving a device token is a single indexed lookup plus a hash compare; the expensive password hash runs only at login, never per request. | proposed |
-| NFR-004 | Enabling auth is reversible and observable. | Switching modes needs no schema change and no data migration; **warn** logs every request that would fail under **enforce**, so the migration can be watched to zero. | proposed |
-| NFR-005 | The bootstrap password is unguessable. | ≥128 bits of entropy from a cryptographically secure generator. | proposed |
-| NFR-006 | Second-factor verification tolerates real-world clocks but not replay. | A TOTP code is accepted within a small time window (±1 step) and a recovery code is refused after its first use. | proposed |
+| NFR-001 | A leaked database alone is not enough to impersonate anyone. | A full dump of the SQLite file reveals **no** password, **no** usable device token, and **no** usable TOTP seed: passwords/recovery-codes/tokens are stored only as hashes, and TOTP secrets are encrypted at rest with a key supplied by the environment (not stored in the database). | implemented |
+| NFR-002 | Authentication adds no messaging logic. | A structural test: the engine and rules modules do not import or reference users, tokens, or sessions; the security layer lives only at the edge. | implemented |
+| NFR-003 | Per-request auth is cheap. | Resolving a device token is a single indexed lookup plus a hash compare; the expensive password hash runs only at login, never per request. | implemented |
+| NFR-004 | Enabling auth is reversible and observable. | Switching modes needs no schema change and no data migration; **warn** logs every request that would fail under **enforce**, so the migration can be watched to zero. | implemented |
+| NFR-005 | The bootstrap password is unguessable. | ≥128 bits of entropy from a cryptographically secure generator. | implemented |
+| NFR-006 | Second-factor verification tolerates real-world clocks but not replay. | A TOTP code is accepted within a small time window (±1 step) and a recovery code is refused after its first use. | implemented |
 
 ## Constraints
 
@@ -199,3 +199,42 @@ operator's login is what unlocks the operator's view.
   explicit assumption, and the risk is stated rather than hidden.
 - **Console session expiry mid-use** → the operator is returned to login; no partial
   privileged state persists.
+
+
+## Status, 2026-07-27 — shipped and live
+
+Authentication is running on the halob hub in **enforce** mode. The hub descriptor
+reports `authenticated: true`; humans log in at the console with password + TOTP; agents
+present device tokens as `Authorization: Bearer`. The FR table above had every row
+marked `proposed` months after the work shipped, which is how this mission came to be
+counted as outstanding backlog.
+
+**Basis for the statuses.** Each row was checked against the code and the live
+deployment, not assumed: the three modes in `serve.py` (`_AUTH_MODES`), Argon2 hashing
+and Fernet-encrypted TOTP seeds in `auth/secrets.py`, enrolment that only completes on a
+returned code (`confirm_2fa`), single-use recovery codes, `change_password` and
+`/account/enrol` for rotation, one generic `bad_credentials` refusal for both wrong user
+and wrong password, and the structural test in `tests/test_auth_api.py` that forbids the
+engine importing auth in either direction. Five test modules cover the layer.
+
+This is a documentation reconciliation, not a claim that the layer is beyond criticism.
+Two known weaknesses are recorded elsewhere rather than hidden here:
+
+- **FR-006 and FR-008 describe per-agent tokens, which are being removed.**
+  `shared-tokens-only-01KYG7S7` replaces them: a token will admit a *machine*, and the
+  agent's name will continue to come from the caller. When that lands, these two rows
+  become historical rather than current, and should be marked as superseded rather than
+  quietly edited — the model they describe was real and someone reading the history
+  should be able to see it changed.
+- **A shared token cannot presently be found again or revoked from the console**, which
+  is one of the faults that mission exists to fix. FR-008 is honestly `implemented` for
+  the per-agent case it was written about, and honestly inadequate for the shared case
+  that arrived after it.
+
+### A note on why this mattered
+
+This reconciliation was prompted by nearly re-specifying `gc-decapitates-threads`, whose
+requirements were also all marked `proposed` and had in fact been implemented some time
+ago. Stale statuses are not a tidiness problem: they make a finished mission
+indistinguishable from an untouched one, and the cost is duplicated work or — worse — a
+second implementation landing beside the first.

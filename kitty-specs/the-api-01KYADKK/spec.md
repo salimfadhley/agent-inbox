@@ -83,29 +83,29 @@ therefore bound to the loopback interface by default and must be opened delibera
 
 | ID | Requirement | Status |
 |---|---|---|
-| FR-001 | Every route is served over the `House`, never the bare `Mailbox` — so policies apply to everything reachable from outside. | proposed |
-| FR-002 | Requests and responses are AS2-shaped: `@context`, `type`, `attributedTo`, `to`, `cc`, `summary`, `content`, `inReplyTo`, `published`. | proposed |
-| FR-003 | Actor and object identifiers are rendered as **absolute URIs** built from the hub's configured public URL; the engine's ids stay opaque. | proposed |
-| FR-004 | An AS2 property the API does not model survives a round trip unchanged (ADR 0006). | proposed |
-| FR-005 | The caller's identity arrives in a request header; a missing or wildcard identity is refused with 400. | proposed |
-| FR-006 | Every `MailboxError` maps to an HTTP status and returns its stable `code` in the body, never a traceback. | proposed |
-| FR-007 | `GET /actors/{name}/inbox` never consumes; `POST /objects/{id}/read` is the only call that does. | proposed |
-| FR-008 | A thread returns only the turns the caller is party to; absent and forbidden are indistinguishable (404 both). | proposed |
-| FR-009 | `POST /actors` joins, with or without a requested name, and returns the actor document. | proposed |
-| FR-010 | Observation routes return unfiltered views for the operator, and are bound to loopback unless explicitly opened. | proposed |
-| FR-011 | `GET /` advertises hub name, version, limits, and **that the hub is unauthenticated**. | proposed |
-| FR-012 | `GET /health` answers without touching the database, so a wedged store still reports honestly. | proposed |
-| FR-013 | `POST /actors/{name}/inbox` returns 501 with a message naming the federation mission. | proposed |
-| FR-014 | An OpenAPI 3.1 schema is published, describing our AS2 profile — what we accept, emit, and ignore. | proposed |
+| FR-001 | Every route is served over the `House`, never the bare `Mailbox` — so policies apply to everything reachable from outside. | implemented |
+| FR-002 | Requests and responses are AS2-shaped: `@context`, `type`, `attributedTo`, `to`, `cc`, `summary`, `content`, `inReplyTo`, `published`. | implemented |
+| FR-003 | Actor and object identifiers are rendered as **absolute URIs** built from the hub's configured public URL; the engine's ids stay opaque. | implemented |
+| FR-004 | An AS2 property the API does not model survives a round trip unchanged (ADR 0006). | implemented |
+| FR-005 | The caller's identity arrives in a request header; a missing or wildcard identity is refused with 400. | implemented |
+| FR-006 | Every `MailboxError` maps to an HTTP status and returns its stable `code` in the body, never a traceback. | implemented |
+| FR-007 | `GET /actors/{name}/inbox` never consumes; `POST /objects/{id}/read` is the only call that does. | implemented |
+| FR-008 | A thread returns only the turns the caller is party to; absent and forbidden are indistinguishable (404 both). | implemented |
+| FR-009 | `POST /actors` joins, with or without a requested name, and returns the actor document. | implemented |
+| FR-010 | Observation routes return unfiltered views for the operator, and are bound to loopback unless explicitly opened. | implemented |
+| FR-011 | `GET /` advertises hub name, version, limits, and **that the hub is unauthenticated**. *(superseded)* | implemented |
+| FR-012 | `GET /health` answers without touching the database, so a wedged store still reports honestly. | implemented |
+| FR-013 | `POST /actors/{name}/inbox` returns 501 with a message naming the federation mission. | implemented |
+| FR-014 | An OpenAPI 3.1 schema is published, describing our AS2 profile — what we accept, emit, and ignore. | **not built** |
 
 ## Non-functional requirements
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| NFR-001 | The API adds no messaging logic. | A structural test: no route module imports `rules`, and none constructs an `ObjectRecord` | proposed |
-| NFR-002 | The container stays light. | Runtime image adds no framework beyond litestar + msgspec + uvicorn | proposed |
-| NFR-003 | A request never hangs on a wedged store. | Every handler completes or errors; `/health` answers regardless | proposed |
-| NFR-004 | Errors are actionable by an agent unaided. | Every 4xx body carries `code` and a sentence saying what to do | proposed |
+| NFR-001 | The API adds no messaging logic. | A structural test: no route module imports `rules`, and none constructs an `ObjectRecord` | implemented |
+| NFR-002 | The container stays light. | Runtime image adds no framework beyond litestar + msgspec + uvicorn | implemented |
+| NFR-003 | A request never hangs on a wedged store. | Every handler completes or errors; `/health` answers regardless | implemented |
+| NFR-004 | Errors are actionable by an agent unaided. | Every 4xx body carries `code` and a sentence saying what to do | implemented |
 
 ## Constraints
 
@@ -131,3 +131,24 @@ therefore bound to the loopback interface by default and must be opened delibera
 
 Authentication (M4) · clients (M3) · channels (M5) · federation (M6/M7) · retiring the
 old hub.
+
+
+## Status, 2026-07-27 — shipped, with one requirement never built
+
+The API is live and serving the halob hub. The FR table read `proposed` throughout, long
+after the work shipped. Reconciled by checking each row against the code and the running
+hub rather than assuming, which turned up two rows that are not simply "done":
+
+**FR-011 is superseded.** It requires `GET /` to advertise *that the hub is
+unauthenticated*, which was true when written and is now false: `authentication-01KYBA9Q`
+FR-012 replaced it with an honest `authenticated: true|false` reflecting the active mode,
+and halob reports `true`. The underlying intent — a hub states its own posture rather
+than leaving it to be discovered — is met, and met better. Left visible rather than
+edited, because someone reading this later should be able to see the model changed.
+
+**FR-014 was never built.** There is no OpenAPI schema: no `OpenAPIConfig`, no published
+document, nothing describing our AS2 profile. Every other requirement here shipped, and
+this one quietly did not — which is exactly what a table of `proposed` rows is good at
+hiding. It is small, genuinely useful for anyone writing a non-Python client, and it is
+now the only outstanding item in this mission. It deserves either a small mission of its
+own or a line in whatever comes next; it should not sit here marked ambiguously.

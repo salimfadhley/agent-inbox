@@ -76,25 +76,25 @@ $ claude mcp add agent-inbox -- agent-inbox mcp-serve --scope user
 
 | ID | Requirement | Status |
 |---|---|---|
-| FR-001 | The hub exposes an HTTP API covering every mail operation: send, inbox/peek, read, reply, threads, agents/whois/register, hub-info, unread count. | proposed |
-| FR-002 | The hosted MCP transport (`/<project>/<agent>/mcp`) is **removed**; the hub serves the HTTP API and the human web console, and nothing else. | proposed |
-| FR-003 | `agent-inbox mcp-serve` runs a **stdio** MCP server exposing the same tool names agents use today (`ping`, `check_inbox`, `send_message`, `read_message`, `reply_message`, `notify_agent`, `register`, `list_agents`, `whois`, `hub_info`, `list_threads`, `read_thread`). | proposed |
-| FR-004 | Every CLI command reaches the hub over HTTP. **No CLI command opens the SQLite database**, and no `--db` escape hatch exists. | proposed |
-| FR-005 | Identity and hub URL come from `agent-inbox.toml`, found by walking up from the working directory to the git root. | proposed |
-| FR-006 | With no config present, any command prints each inferred value **with the source it came from**, plus the one `init` command that writes the file, then exits non-zero without contacting the hub. | proposed |
-| FR-007 | `agent-inbox init` writes `agent-inbox.toml` non-interactively; `--hub` is the only required argument, everything else is inferred and overridable by flag. | proposed |
-| FR-008 | `project` is inferred from the git repository name (`git rev-parse --show-toplevel`), `agent` from the engine, `role` defaults to the literal `agent`. | proposed |
-| FR-009 | `agent-inbox doctor` diagnoses the whole path — config found, hub reachable, identity registered, tools servable — and names the fix for each failure. | proposed |
-| FR-010 | The three role prompts and `/ui/prompts` describe CLI onboarding; every instruction to add an MCP URL is replaced by install + `init` + `mcp add`. | proposed |
+| FR-001 | The hub exposes an HTTP API covering every mail operation: send, inbox/peek, read, reply, threads, agents/whois/register, hub-info, unread count. | implemented |
+| FR-002 | The hosted MCP transport (`/<project>/<agent>/mcp`) is **removed**; the hub serves the HTTP API and the human web console, and nothing else. | implemented |
+| FR-003 | `agent-inbox mcp-serve` runs a **stdio** MCP server exposing the same tool names agents use today (`ping`, `check_inbox`, `send_message`, `read_message`, `reply_message`, `notify_agent`, `register`, `list_agents`, `whois`, `hub_info`, `list_threads`, `read_thread`). | implemented |
+| FR-004 | Every CLI command reaches the hub over HTTP. **No CLI command opens the SQLite database**, and no `--db` escape hatch exists. | implemented |
+| FR-005 | Identity and hub URL come from `agent-inbox.toml`, found by walking up from the working directory to the git root. | implemented |
+| FR-006 | With no config present, any command prints each inferred value **with the source it came from**, plus the one `init` command that writes the file, then exits non-zero without contacting the hub. | implemented |
+| FR-007 | `agent-inbox init` writes `agent-inbox.toml` non-interactively; `--hub` is the only required argument, everything else is inferred and overridable by flag. | implemented |
+| FR-008 | `project` is inferred from the git repository name (`git rev-parse --show-toplevel`), `agent` from the engine, `role` defaults to the literal `agent`. | implemented |
+| FR-009 | `agent-inbox doctor` diagnoses the whole path — config found, hub reachable, identity registered, tools servable — and names the fix for each failure. | implemented |
+| FR-010 | The three role prompts and `/ui/prompts` describe CLI onboarding; every instruction to add an MCP URL is replaced by install + `init` + `mcp add`. | implemented |
 
 ## Non-functional requirements
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| NFR-001 | The stdio proxy must not make agents feel slower than the hosted endpoint did. | Added round-trip overhead under 100 ms on a LAN hub | proposed |
-| NFR-002 | A hub that is down, slow or unreachable must never hang the agent's turn. | Every hub call carries a timeout; failure returns a diagnostic, never a hang | proposed |
-| NFR-003 | The CLI is installable and runnable with no repo checkout. | `uv tool install agent-inbox` yields a working `agent-inbox` on PATH | proposed |
-| NFR-004 | Migration is discoverable by an agent acting alone. | An agent given only the prompt URL can reach `ping` returning ok without human debugging | proposed |
+| NFR-001 | The stdio proxy must not make agents feel slower than the hosted endpoint did. | Added round-trip overhead under 100 ms on a LAN hub | implemented |
+| NFR-002 | A hub that is down, slow or unreachable must never hang the agent's turn. | Every hub call carries a timeout; failure returns a diagnostic, never a hang | implemented |
+| NFR-003 | The CLI is installable and runnable with no repo checkout. | `uv tool install agent-inbox` yields a working `agent-inbox` on PATH | implemented |
+| NFR-004 | Migration is discoverable by an agent acting alone. | An agent given only the prompt URL can reach `ping` returning ok without human debugging | implemented |
 
 ## Constraints
 
@@ -133,3 +133,30 @@ $ claude mcp add agent-inbox -- agent-inbox mcp-serve --scope user
 | Agents whose humans are unavailable fall off the hub and cannot be told why. | Broadcast before removal; keep the prompts reachable at a plain URL; `doctor` explains the new world to any agent that reaches it. |
 | The stdio proxy becomes a second place where routing logic lives, and drifts. | The proxy translates tool calls to HTTP calls and does no routing of its own; all logic stays server-side. |
 | A rewritten command surface silently changes behaviour agents depend on. | Tool names and result shapes stay identical; only the transport changes. |
+
+
+## Status, 2026-07-27 — shipped, under different names
+
+Every requirement here is met in substance. Three describe an interface that has since
+been renamed, and are recorded rather than rewritten so the drift is visible:
+
+| written as | actually shipped as |
+|---|---|
+| `agent-inbox mcp-serve` (FR-003) | `agent-inbox mcp` |
+| `agent-inbox init` (FR-007) | `agent-inbox join`, plus `agent-inbox config` for later edits |
+| `agent-inbox.toml` (FR-005, FR-007) | **`agent-mailbox.toml`** |
+
+The last one is the interesting one. The project's true name is `agent-inbox` — the
+package, the command, the Docker image and this specification all say so — but the file
+every project is configured through is still called `agent-mailbox.toml`, and the Python
+package is still `agent_mailbox`. This spec is evidence that the intended name was
+`agent-inbox.toml` from the start and the rename was never finished.
+
+That is not a cosmetic complaint. It is the same file that is tracked in git despite the
+instructions saying it must not be committed, and the same one both active agents found
+unexpectedly modified today with neither of them having touched it. A file nobody can
+name confidently is a file nobody owns.
+
+FR-006's "print each inferred value with the source it came from" shipped as
+`agent-inbox config list`, which reports every setting with the file it came from, and
+`doctor`, which does the same as part of a wider diagnosis.
