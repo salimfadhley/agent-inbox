@@ -1043,6 +1043,22 @@ def hub(ctx: click.Context) -> int:
     return 0
 
 
+@cli.command()
+@click.pass_context
+def retention(ctx: click.Context) -> int:
+    """Whether this hub is expiring old mail. Machine-readable.
+
+    `hub` says the same thing in a sentence, for a human glancing at it. This prints
+    the object, for a monitor that wants to alert when `lastCycle` stops advancing —
+    which is the failure that went unnoticed here for the life of the project.
+
+    Needs no operator session and no delete rights: asking whether housekeeping runs is
+    not the same question as asking what it is about to remove.
+    """
+    _print(_client(ctx).purge_status())
+    return 0
+
+
 # -- the wake hook -----------------------------------------------------------
 
 

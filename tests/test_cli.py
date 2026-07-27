@@ -452,3 +452,60 @@ class TestHubReportsRetentionLiveness:
         out = self._run(monkeypatch, None)
         assert "retention" not in out
         assert "hub" in out
+
+
+class TestRetentionCommand:
+    """`agent-inbox retention` — the machine-readable form, for monitors.
+
+    Asked for by ludmila_coe, whose use is a host checking retention liveness without a
+    curl snippet. `hub` prints a sentence for a human; this prints the object, so a
+    monitor can alert on `lastCycle` failing to advance.
+    """
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, status: dict[str, Any]) -> str:
+        from click.testing import CliRunner
+
+        from agent_mailbox import cli as cli_module
+
+        class Fake:
+            def __init__(self, config: Any) -> None:
+                self.config = config
+
+            def purge_status(self) -> dict[str, Any]:
+                return status
+
+        monkeypatch.setattr(
+            cli_module, "_client", lambda ctx: Fake(Config(hub="h", name="nic"))
+        )
+        result = CliRunner().invoke(cli_module.cli, ["retention"])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_it_prints_the_object_not_a_sentence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json
+
+        status = {
+            "lastCycle": "2026-07-27T02:41:04+00:00",
+            "cycles": 2,
+            "lastRemovedThreads": 0,
+            "lastRemovedObjects": 0,
+            "lastError": None,
+        }
+        parsed = json.loads(self._run(monkeypatch, status))
+        assert parsed == status, "a monitor could not parse this"
+
+    def test_it_carries_no_mail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The same boundary as the route: liveness is not the same as content."""
+        out = self._run(
+            monkeypatch,
+            {
+                "lastCycle": None,
+                "cycles": 0,
+                "lastRemovedThreads": 0,
+                "lastRemovedObjects": 0,
+                "lastError": None,
+            },
+        )
+        assert "threads" not in out and "subject" not in out
