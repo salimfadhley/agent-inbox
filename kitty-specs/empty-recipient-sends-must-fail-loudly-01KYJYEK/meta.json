@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-27T23:27:07.325316+00:00",
+  "flattened": false,
+  "friendly_name": "empty recipient sends must fail loudly",
+  "mission_id": "01KYJYEKHW0BS5SVJBGTBP3DZ2",
+  "mission_number": null,
+  "mission_slug": "empty-recipient-sends-must-fail-loudly-01KYJYEK",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances empty recipient sends must fail loudly on kitty/mission-manual-activitypub-federation-v1-01KYJY10 so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "empty recipient sends must fail loudly",
+  "slug": "empty-recipient-sends-must-fail-loudly-01KYJYEK",
+  "target_branch": "kitty/mission-manual-activitypub-federation-v1-01KYJY10",
+  "topology": "single_branch"
+}
