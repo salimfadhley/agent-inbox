@@ -1017,10 +1017,10 @@ class TestTheScheduler:
         purges = 0
 
         class Counting:
-            async def expire(self) -> int:
+            async def purge(self) -> tuple[()]:
                 nonlocal purges
                 purges += 1
-                return 0
+                return ()
 
         task = asyncio.create_task(purge_forever(Counting(), minutes=60))
         await asyncio.sleep(0.05)  # far longer than startup, far shorter than an hour
@@ -1044,7 +1044,7 @@ class TestTheScheduler:
         attempts = 0
 
         class Failing:
-            async def expire(self) -> int:
+            async def purge(self) -> tuple[()]:
                 nonlocal attempts
                 attempts += 1
                 raise RuntimeError("the store said no")
@@ -1065,8 +1065,8 @@ class TestTheScheduler:
         from agent_mailbox.api import purge_forever
 
         class Idle:
-            async def expire(self) -> int:
-                return 0
+            async def purge(self) -> tuple[()]:
+                return ()
 
         task = asyncio.create_task(purge_forever(Idle(), minutes=0.001))
         await asyncio.sleep(0.05)
@@ -1087,3 +1087,74 @@ class TestTheScheduler:
             assert (
                 client.get("/observe/purge", headers=as_(ROSEMARY)).status_code == 200
             )
+
+
+class TestTheSchedulerDoesNotDieQuietly:
+    """The whole argument against a sidecar was that its death would be invisible.
+
+    Moving the loop inside the hub does not by itself fix that — an in-process task can
+    stop just as silently, and the symptom would be identical: mail quietly not
+    expiring, which is the symptom this project had from the start and nobody noticed.
+    Raised by ludmila_coe, who pointed out I had made the argument and not the fix.
+    """
+
+    async def test_a_loop_that_dies_says_so_at_critical(self, caplog) -> None:
+        import asyncio
+        import logging
+
+        from agent_mailbox.api import _complain_if_it_died
+
+        async def dies() -> None:
+            raise RuntimeError("the event loop went away")
+
+        task = asyncio.create_task(dies())
+        with contextlib.suppress(RuntimeError):
+            await task
+        with caplog.at_level(logging.CRITICAL, logger="agent_mailbox.api"):
+            _complain_if_it_died(task)
+
+        assert caplog.records, "the purge loop died and nothing said anything"
+        (record,) = caplog.records
+        assert record.levelno == logging.CRITICAL
+        assert "NO LONGER" in record.message, (
+            "the operator must be told retention stopped, not just that a task did"
+        )
+
+    async def test_a_loop_that_returns_also_says_so(self, caplog) -> None:
+        """`while True` cannot return — so if it ever does, something is very wrong."""
+        import asyncio
+        import logging
+
+        from agent_mailbox.api import _complain_if_it_died
+
+        async def returns() -> None:
+            return None
+
+        task = asyncio.create_task(returns())
+        await task
+        with caplog.at_level(logging.CRITICAL, logger="agent_mailbox.api"):
+            _complain_if_it_died(task)
+
+        assert caplog.records
+        assert "no longer running" in caplog.records[0].message.lower()
+
+    async def test_shutdown_is_silent(self, caplog) -> None:
+        """Cancellation is the one way it is meant to end. Crying wolf at every
+        shutdown would train everyone to ignore the message that matters."""
+        import asyncio
+        import logging
+
+        from agent_mailbox.api import _complain_if_it_died
+
+        async def forever() -> None:
+            await asyncio.sleep(3600)
+
+        task = asyncio.create_task(forever())
+        await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        with caplog.at_level(logging.CRITICAL, logger="agent_mailbox.api"):
+            _complain_if_it_died(task)
+
+        assert not caplog.records, "a normal shutdown logged a crisis"

@@ -447,6 +447,11 @@ class Mailbox:
             ),
         }
 
+    @property
+    def retention_days(self) -> int:
+        """How long a conversation may stay quiet before it expires. 0 disables it."""
+        return self._retention_days
+
     async def expire(self) -> int:
         """Remove conversations that have gone quiet. Returns messages removed.
 
@@ -454,9 +459,20 @@ class Mailbox:
         message by message once deleted the opening of a live conversation and left the
         replies — a fragment that reads as complete is worse than no fragment at all.
         """
+        return sum(thread.messages for thread in await self.purge())
+
+    async def purge(self) -> tuple[rules.ExpiringThread, ...]:
+        """Remove idle conversations and say which ones went.
+
+        One pass, not two: an earlier version previewed and then expired, which decided
+        what to delete twice and could — on a busy hub — decide differently the second
+        time. Reporting what was actually removed is also the only honest thing to log.
+        """
         doomed = await self.expire_preview()
         ids = frozenset(ident for thread in doomed for ident in thread.ids)
-        return await self._store.remove_objects(ids) if ids else 0
+        if ids:
+            await self._store.remove_objects(ids)
+        return doomed
 
     async def expire_preview(self) -> tuple[rules.ExpiringThread, ...]:
         """What :meth:`expire` would remove, without removing it.

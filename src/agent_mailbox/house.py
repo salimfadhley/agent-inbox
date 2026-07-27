@@ -232,6 +232,10 @@ class House:
         """What a purge would remove. Reads only; deletes nothing."""
         return await self._mailbox.expire_preview()
 
+    async def purge(self) -> tuple[rules.ExpiringThread, ...]:
+        """Remove idle conversations, and report which ones went."""
+        return await self._mailbox.purge()
+
     # -- observation -------------------------------------------------------
     #
     # The operator's view, passed through unfiltered on purpose. Policy does not get a

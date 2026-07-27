@@ -115,6 +115,19 @@ class StoreNotOpen(MailboxError):
     code = "store_not_open"
 
 
+# -- release ---------------------------------------------------------------
+
+
+class ReleaseGateError(MailboxError):
+    """A release would publish a prompt that cannot be followed.
+
+    The onboarding prompt is executable guidance: when it names a package floor, a
+    clean resolver must be able to reach that floor before a live hub advertises it.
+    """
+
+    code = "release_gate_error"
+
+
 # -- messages ---------------------------------------------------------------
 
 

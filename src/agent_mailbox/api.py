@@ -386,7 +386,9 @@ class Api:
 
     async def purge_preview(self) -> dict[str, Any]:
         """What a purge would remove, described per conversation. Removes nothing."""
-        doomed = await self.house.expire_preview()
+        return self._describe(await self.house.expire_preview())
+
+    def _describe(self, doomed: tuple[Any, ...]) -> dict[str, Any]:
         return {
             "threads": [
                 {
@@ -404,14 +406,15 @@ class Api:
 
     async def purge(self) -> dict[str, Any]:
         """Remove them. Irreversible, and there is nothing left behind to say so."""
-        preview = await self.purge_preview()
-        removed = await self.house.expire()
+        doomed = await self.house.purge()
+        removed = sum(thread.messages for thread in doomed)
         api_logger.info(
-            "purge: operator removed %d message(s) in %d thread(s)",
+            "event=mailbox.purge removed_threads=%d removed_objects=%d "
+            "dry_run=false trigger=operator",
+            len(doomed),
             removed,
-            preview["threadCount"],
         )
-        return {**preview, "removed": removed}
+        return {**self._describe(doomed), "removed": removed}
 
     async def read_object(self, object_id: str, caller: str) -> Note:
         got = await self.house.read(caller, self.wire.object_id_from(object_id))
@@ -520,6 +523,34 @@ def decode_activity(raw: dict[str, Any]) -> Create:
     return Create(object=msgspec.convert(raw, Note, strict=False))
 
 
+def _complain_if_it_died(task: asyncio.Task[None]) -> None:
+    """Say so, loudly, if the purge loop ever stops on its own.
+
+    The case against a purge *sidecar* was that its failures would be invisible: it
+    dies, purging silently stops, and the symptom is mail not expiring — which is
+    exactly the symptom this project had from the beginning and nobody noticed.
+
+    Moving the loop indoors does not by itself fix that; an in-process task can die just
+    as quietly. `purge_forever` catches `Exception` around every cycle, so the only ways
+    out are cancellation — expected, at shutdown — and something that is not an
+    `Exception` at all. Both are silent unless somebody is watching. This watches.
+    """
+    if task.cancelled():
+        return  # shutdown: the one way it is supposed to end
+    if (failure := task.exception()) is not None:
+        api_logger.critical(
+            "event=mailbox.purge.stopped reason=raised — retention is NO LONGER "
+            "RUNNING on this hub, and mail will accumulate until it is restarted",
+            exc_info=failure,
+        )
+    else:
+        api_logger.critical(
+            "event=mailbox.purge.stopped reason=returned — the purge loop exited "
+            "without an error, which it should not be able to do. Retention is no "
+            "longer running on this hub."
+        )
+
+
 async def purge_forever(house: House, minutes: int) -> None:
     """Remove conversations that have gone quiet, for as long as the hub is up.
 
@@ -542,18 +573,30 @@ async def purge_forever(house: House, minutes: int) -> None:
         await asyncio.sleep(minutes * 60)
         try:
             started = time.monotonic()
-            removed = await house.expire()
+            doomed = await house.purge()
+            removed = sum(thread.messages for thread in doomed)
             took = (time.monotonic() - started) * 1000
             # Logged every cycle, including when nothing goes. For the first fortnight
             # of any hub that is the *only* line there will be — nothing is old enough
             # to remove yet — and it is what tells us whether the window is right. A
             # purge that speaks only when it deletes teaches nothing while we are still
             # learning.
-            api_logger.info("purge: removed %d message(s) in %.0f ms", removed, took)
+            # Structured, so it can be grepped and later monitored without anyone
+            # having to parse an English sentence.
+            api_logger.info(
+                "event=mailbox.purge removed_threads=%d removed_objects=%d "
+                "duration_ms=%.0f dry_run=false interval_minutes=%d",
+                len(doomed),
+                removed,
+                took,
+                minutes,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - housekeeping must not stop the hub
-            api_logger.exception("purge failed; retrying at the next interval")
+            api_logger.exception(
+                "event=mailbox.purge.failed retrying_in_minutes=%d", minutes
+            )
 
 
 def build_api(
@@ -1117,7 +1160,12 @@ def build_api(
             yield
             return
         task = asyncio.create_task(purge_forever(house, purge_interval_minutes))
-        api_logger.info("scheduled purge every %d minute(s)", purge_interval_minutes)
+        task.add_done_callback(_complain_if_it_died)
+        api_logger.info(
+            "event=mailbox.purge.scheduled interval_minutes=%d retention_days=%d",
+            purge_interval_minutes,
+            house.mailbox.retention_days,
+        )
         try:
             yield
         finally:
