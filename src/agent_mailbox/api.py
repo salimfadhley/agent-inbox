@@ -969,6 +969,21 @@ def build_api(
 
     # The observation routes are the operator's view — under enforce they need a valid
     # credential (this is what finally makes them safe to expose; M2 FR-010).
+    @get("/observe/purge/status", guards=[guard_enforce])
+    async def purge_status_route() -> dict[str, Any]:
+        """Whether retention is actually running. No mail, no subjects, no deletion.
+
+        Deliberately **not** operator-only, unlike the preview beside it. "Is
+        housekeeping alive?" is the question anyone should be able to ask, and needing
+        the one credential that can delete everything in order to ask it is how a check
+        stops being done. It answers with timings and counts; the preview, which lists
+        the subjects of conversations about to die, stays operator-gated.
+
+        The distinction was found by trying to verify the heartbeat on a live hub and
+        being refused by my own guard — correctly, and uselessly.
+        """
+        return api.purge_status.as_dict()
+
     @get(
         "/observe/purge",
         guards=[guard_enforce],
@@ -1190,6 +1205,7 @@ def build_api(
         hub,
         health,
         purge_preview,
+        purge_status_route,
         purge_now,
         doctor,
         join,

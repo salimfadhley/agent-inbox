@@ -1295,3 +1295,40 @@ class TestThePurgeHeartbeat:
         assert "schedule" in body
         assert body["schedule"]["lastCycle"] is None
         assert body["schedule"]["cycles"] == 0
+
+
+class TestAskingWhetherHousekeepingIsAlive:
+    """The health of retention is not a secret; what is about to be deleted is.
+
+    Found by trying to verify the heartbeat on the live hub and being refused by my own
+    guard. Correctly refused, and uselessly: needing the credential that can delete
+    every message in order to ask whether deletion is running is how a check stops being
+    performed at all.
+    """
+
+    def test_an_agent_can_ask_whether_retention_is_running(
+        self, client: TestClient
+    ) -> None:
+        join(client, ROSEMARY)
+        body = client.get("/observe/purge/status", headers=as_(ROSEMARY)).json()
+        assert set(body) == {
+            "lastCycle",
+            "cycles",
+            "lastRemovedThreads",
+            "lastRemovedObjects",
+            "lastError",
+        }
+
+    def test_it_carries_no_mail_and_no_subjects(self, client: TestClient) -> None:
+        """The preview lists what is about to die. This must not."""
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "a private body", summary="a private subject"),
+            headers=as_(ROSEMARY),
+        )
+        body = client.get("/observe/purge/status", headers=as_(ROSEMARY)).text
+        assert "private subject" not in body
+        assert "private body" not in body
+        assert "threads" not in body
