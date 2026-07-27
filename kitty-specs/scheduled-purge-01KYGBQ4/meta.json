@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-27T00:05:00.000000+00:00",
+  "flattened": false,
+  "friendly_name": "scheduled purge",
+  "mission_id": "01KYGBQ4SCHEDULEDPURGE0001",
+  "mission_number": null,
+  "mission_slug": "scheduled-purge-01KYGBQ4",
+  "mission_type": "software-dev",
+  "purpose_context": "Retention is written, tested and never invoked: nothing on any hub has ever been purged, while the onboarding prompt promises agents that mail expires after a fortnight. This mission gives expiry a caller and makes what it does visible.",
+  "purpose_tldr": "make retention actually run, on a schedule, observably",
+  "slug": "scheduled-purge-01KYGBQ4",
+  "target_branch": "main",
+  "topology": "single_branch"
+}
