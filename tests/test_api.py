@@ -1332,3 +1332,61 @@ class TestAskingWhetherHousekeepingIsAlive:
         assert "private subject" not in body
         assert "private body" not in body
         assert "threads" not in body
+
+
+class TestThePublishedSchema:
+    """`the-api` FR-014, which shipped with every other requirement in that mission
+    except this one — and stayed marked `proposed` for months, indistinguishable from
+    work nobody had started.
+
+    A generated schema is nearly free. The part worth testing is the part a generator
+    cannot produce: the AS2 *profile*. A client author in another language can read the
+    route signatures for themselves; what they cannot infer is which properties survive
+    a round trip, which addressing is refused, and which call consumes.
+    """
+
+    def _schema(self, client: TestClient) -> dict:
+        response = client.get("/schema/openapi.json")
+        assert response.status_code == 200, "no schema is published"
+        return response.json()
+
+    def test_it_is_openapi_3_1(self, client: TestClient) -> None:
+        assert self._schema(client)["openapi"].startswith("3.1")
+
+    def test_it_covers_the_routes_that_carry_mail(self, client: TestClient) -> None:
+        paths = self._schema(client)["paths"]
+        for required in (
+            "/actors/{name}/inbox",
+            "/actors/{name}/outbox",
+            "/objects/{object_id}",
+            "/objects/{object_id}/read",
+        ):
+            assert required in paths, f"{required} is undocumented"
+
+    def test_it_describes_what_a_generator_cannot(self, client: TestClient) -> None:
+        """The profile: what we accept, emit, ignore, and refuse.
+
+        Asserted on meaning rather than wording, so rephrasing the prose does not fail
+        the test — but removing a *subject* does.
+        """
+        described = " ".join(self._schema(client)["info"]["description"].split())
+
+        assert "bto" in described and "bcc" in described, (
+            "blind addressing is refused with 422 and the schema does not say so"
+        )
+        assert "consumes nothing" in described, (
+            "the schema does not say that reading the inbox is free"
+        )
+        assert "survives a round trip" in described, (
+            "unknown AS2 properties are preserved (ADR 0006) and the schema is silent"
+        )
+        assert "X-Agent-Name" in described, "the identity header is undocumented"
+        assert "404" in described, (
+            "absent and forbidden are deliberately the same answer; a client author "
+            "who does not know that will read a 404 as a bug"
+        )
+
+    def test_it_names_the_running_version(self, client: TestClient) -> None:
+        from agent_mailbox import __version__
+
+        assert self._schema(client)["info"]["version"] == __version__

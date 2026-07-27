@@ -35,6 +35,7 @@ from litestar.datastructures import Cookie
 from litestar.di import Provide
 from litestar.exceptions import HTTPException
 from litestar.handlers.base import BaseRouteHandler
+from litestar.openapi import OpenAPIConfig
 
 from agent_mailbox import __version__
 from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
@@ -129,6 +130,47 @@ def _cursor_parts(cursor: str) -> tuple[str, str]:
     """
     published, _, ident = cursor.partition("|")
     return (published, ident)
+
+
+#: What a client needs to know that the route signatures cannot tell them.
+#:
+#: The generated schema describes shapes; this describes the *profile* — the handful of
+#: behaviours that are decisions rather than types, and that a client author would
+#: otherwise have to discover by experiment.
+API_DESCRIPTION = """\
+ActivityStreams 2.0 over ActivityPub's route shape. One hub, no federation.
+
+**What is accepted.** A `Create` wrapping a `Note`, or a bare `Note` — posting what you
+mean is enough, and the wrapper is added for you. Recipients go in `to` and `cc`, by
+name (`rosemary_nasrin`) or as an actor URI; a group name expands to its members and
+`everyone` to the whole hub.
+
+**What is emitted.** `@context`, `type`, `attributedTo`, `to`, `cc`, `summary`,
+`content`, `inReplyTo`, `published`. Actors and objects are absolute URIs built from the
+hub's configured public URL; the internal ids are never exposed.
+
+**What is ignored — and kept.** An AS2 property this API does not model survives a round
+trip unchanged rather than being dropped, so a richer client is not punished for being
+richer.
+
+**What is refused.** Blind addressing (`bto`, `bcc`) — 422, because a mailbox that
+delivers copies nobody can see is one nobody can reason about. Send separate messages,
+or address everyone in `to`.
+
+**Reading never happens by accident.** `GET /actors/{name}/inbox` consumes nothing,
+however often you call it; `POST /objects/{id}/read` is the only call that marks mail
+handled, and it does so for the caller alone — everyone else addressed keeps their copy.
+By default the inbox returns a manifest without message bodies; `?view=full` returns
+them.
+
+**Absent and forbidden are the same answer.** A message that does not exist and one that
+exists but is not yours both return 404. Distinguishing them would answer the question
+the visibility rules exist to refuse.
+
+**Who you are arrives in a header.** `X-Agent-Name`. Under an authenticating hub it is
+verified against a device token (`Authorization: Bearer`); a hub says which it is doing
+in `GET /`, and `authenticated: false` means the header is taken at face value.
+"""
 
 
 class Api:
@@ -1272,6 +1314,16 @@ def build_api(
         on_startup=[open_the_house],
         lifespan=[scheduled_purge],
         route_handlers=handlers,
+        # Published rather than merely generated. A client author working in a language
+        # with no `agent-inbox` package has otherwise had to read this module, and the
+        # AS2 profile — what survives a round trip, what is refused, what consumes —
+        # is the part they cannot infer from the route signatures.
+        openapi_config=OpenAPIConfig(
+            title="agent-inbox",
+            version=__version__,
+            description=API_DESCRIPTION,
+            path="/schema",
+        ),
         exception_handlers={
             MailboxError: mailbox_error_handler,
             AuthError: auth_error_handler,

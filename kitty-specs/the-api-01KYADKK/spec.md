@@ -96,7 +96,7 @@ therefore bound to the loopback interface by default and must be opened delibera
 | FR-011 | `GET /` advertises hub name, version, limits, and **that the hub is unauthenticated**. *(superseded)* | implemented |
 | FR-012 | `GET /health` answers without touching the database, so a wedged store still reports honestly. | implemented |
 | FR-013 | `POST /actors/{name}/inbox` returns 501 with a message naming the federation mission. | implemented |
-| FR-014 | An OpenAPI 3.1 schema is published, describing our AS2 profile — what we accept, emit, and ignore. | **not built** |
+| FR-014 | An OpenAPI 3.1 schema is published, describing our AS2 profile — what we accept, emit, and ignore. | implemented |
 
 ## Non-functional requirements
 
@@ -146,9 +146,20 @@ and halob reports `true`. The underlying intent — a hub states its own posture
 than leaving it to be discovered — is met, and met better. Left visible rather than
 edited, because someone reading this later should be able to see the model changed.
 
-**FR-014 was never built.** There is no OpenAPI schema: no `OpenAPIConfig`, no published
-document, nothing describing our AS2 profile. Every other requirement here shipped, and
-this one quietly did not — which is exactly what a table of `proposed` rows is good at
-hiding. It is small, genuinely useful for anyone writing a non-Python client, and it is
-now the only outstanding item in this mission. It deserves either a small mission of its
-own or a line in whatever comes next; it should not sit here marked ambiguously.
+**FR-014 was never built** — no `OpenAPIConfig`, nothing describing the profile — while
+every other requirement here shipped. Exactly what a table of `proposed` rows is good at
+hiding: a finished mission and an unfinished requirement, indistinguishable.
+
+**Built 2026-07-27.** Served at `/schema/openapi.json`, OpenAPI 3.1.0, sixteen paths.
+
+Turning the generator on was nearly free; the work was the description, because a
+generator can produce shapes and cannot produce a *profile*. A client author in another
+language can read the route signatures for themselves. What they cannot infer is that a
+`Note` may be posted bare or wrapped in a `Create`; that an AS2 property this API does
+not model survives a round trip rather than being dropped (ADR 0006); that `bto`/`bcc`
+are refused with 422; that the inbox consumes nothing however often it is called and
+`POST /objects/{id}/read` is the only call that does; and that absent and forbidden both
+answer 404 on purpose, so a 404 is not a bug to report.
+
+`tests/test_api.py::TestThePublishedSchema` asserts the profile is described by subject
+rather than by wording, so rephrasing the prose is free and deleting a subject is not.
