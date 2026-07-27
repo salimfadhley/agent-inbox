@@ -1,0 +1,415 @@
+# Spec - Manual ActivityPub Federation V1
+
+## What This Is
+
+`agent-inbox` can exchange addressed mail with other servers using a narrow
+ActivityPub-compatible profile.
+
+Federation is manual and opt-in by default. A fresh server federates with nobody. Human
+operators use a Federation UI tab to configure the server identity, peer servers,
+blocklists, warning-gated experimental modes, and actor visibility.
+
+V1 is direct server-to-server federation only. It does not introduce a bridge, tunnel,
+relay, public timeline, groups, or broad social-network behavior.
+
+## Problem
+
+The mailbox is currently local to one hub. Operators want separate `agent-inbox` servers
+to exchange mail while preserving the product's core properties:
+
+- local-first operation;
+- one small deployable service;
+- explicit trust boundaries;
+- mail as data, never instructions;
+- per-recipient inbox semantics;
+- no accidental broadcast into another operator's fleet.
+
+ActivityPub already names most of the concepts we need: actors, actor documents, inboxes,
+`Create`, `Note`, `to`, `cc`, and `inReplyTo`. V1 should use those shapes directly,
+while staying much smaller than a general Fediverse implementation.
+
+## Prior Art And Starting Defaults
+
+The starting operational defaults are borrowed from Lemmy where they fit this product:
+
+- federation has allowlist, blocklist, and open modes;
+- TLS is the normal federation posture;
+- outbound federation is queued instead of blocking the user action;
+- per-target outgoing concurrency defaults to `1`;
+- retries use backoff and do not make the sender wait;
+- duplicate inbound activity ids are remembered so retries are no-ops;
+- inbound processing has a short timeout;
+- fetched collections and remote content are bounded.
+
+Concrete V1 thresholds use Lemmy-inspired values unless planning finds a project-specific
+reason to adjust them:
+
+| Limit | V1 Starting Value | Source/Reason |
+|---|---:|---|
+| Outgoing sends per peer | `1` concurrent request | Lemmy default `concurrent_sends_per_instance` |
+| Inbound activity processing timeout | `9s` | Lemmy shared inbox timeout |
+| Remote fetch budget per object resolution | `100` HTTP fetches | Lemmy federation fetch limit |
+| Directory/page fetch size | `50` items | Lemmy fetch/page maximum |
+| Note body length | `10,000` characters | Lemmy ordinary body limit |
+| Long-form body support | out of scope; hard cap `50,000` if reused internally | Lemmy post body limit |
+| Remote actor display name | `50` characters | Lemmy display name limit |
+| Server summary/profile text | `150` characters initially | Lemmy site summary limit |
+| Remote URL length | `2,000` characters | Lemmy URL length limit |
+| Retry backoff | immediate first retry, exponential `1.25^n`, cap `24h` | Lemmy retry shape |
+
+These are product defaults, not protocol claims. Operators should not see these values
+unless a warning, error, or advanced setting needs to explain them.
+
+## User Scenarios
+
+1. **Default local-only server.** A new server has no peers and cannot send or receive
+   federated mail.
+2. **Add a trusted peer.** An operator adds `https://inkbox.example`, sees its display
+   name, capabilities, key fingerprint, and health status, then enables it.
+3. **LAN experiment over HTTP.** An operator adds `http://workstation.lan:8080`, accepts a
+   clear insecure-transport warning, and uses it only on a trusted isolated LAN.
+4. **Open-mode experiment.** An operator enables open federation after accepting a strong
+   warning that unsolicited remote servers can deliver mail.
+5. **Block a server.** An operator blocks a domain or peer. Inbound is rejected,
+   outbound delivery is suppressed, and pending deliveries to that peer are cancelled or
+   made permanently failed.
+6. **Send to a Fediverse-style address.** A local actor sends to `@alice@example.com`;
+   the server resolves the address via WebFinger, fetches the actor document, and queues
+   delivery to Alice's inbox.
+7. **Receive remote mail.** A permitted remote actor sends `Create/Note` to a local actor.
+   The message lands immediately in the normal inbox/thread flow and is visibly marked as
+   remote.
+8. **Choose actor visibility.** A human or agent can be `local`, `normal`, or
+   `discoverable`. The default is `normal`.
+9. **Edit server profile.** An operator changes the human-readable server display name
+   and summary. Federation identity remains the stable base URL.
+10. **Audit a risky change.** An operator can see who enabled HTTP, open mode, a peer, or
+    a blocklist entry.
+
+## Functional Requirements
+
+| ID | Requirement | Status |
+|---|---|---|
+| FR-001 | Add a Federation UI tab for peer management, federation mode, blocklist, server profile, delivery status, and warnings. | proposed |
+| FR-002 | Federation defaults to no peers and no remote delivery. | accepted |
+| FR-003 | Federation trust is server-level: adding a peer authorizes addressed mail exchange with that server, not database access, inbox reads, admin API access, or history access. | accepted |
+| FR-004 | Support federation modes `disabled`, `allowlist`, and warning-gated `open`. | accepted |
+| FR-005 | `allowlist` is the default enabled mode. In allowlist mode, only configured enabled peers may exchange mail. | accepted |
+| FR-006 | `open` mode is experimental and requires a strong UI warning before activation. | accepted |
+| FR-007 | A blocklist is available in every mode and always overrides allowlist/open policy. | accepted |
+| FR-008 | Blocking a peer/domain rejects inbound, suppresses outbound, prevents actor discovery, and cancels or marks pending deliveries to that target as failed. | proposed |
+| FR-009 | HTTPS is the normal allowed scheme for peer URLs, WebFinger, actor documents, and inboxes. | accepted |
+| FR-010 | HTTP can be enabled experimentally with an explicit insecure-transport warning. | accepted |
+| FR-011 | HTTP in open mode requires a stronger warning than HTTP in allowlist mode. | proposed |
+| FR-012 | Schemes other than `https` and explicitly enabled `http` are rejected. This includes `file`, `gopher`, `s3`, `ftp`, and similar non-HTTP schemes. | accepted |
+| FR-013 | Direct federation requires a stable `federation_base_url`. It must be configured before federation can be enabled. | accepted |
+| FR-014 | The server can have editable human-readable profile fields, including display name and summary, separate from `federation_base_url`. | accepted |
+| FR-015 | Changing `federation_base_url` is treated as a high-risk identity change and must warn that existing federated actor/activity ids become stale. | proposed |
+| FR-016 | Expose a safe server descriptor at `/.well-known/agent-inbox` for peer compatibility checks. | accepted |
+| FR-017 | The descriptor includes software name, version, base URL, display name, summary, federation mode/capabilities, supported schemes, and public key metadata. | proposed |
+| FR-018 | Support WebFinger resolution for Fediverse-style handles such as `@alice@example.com`, using `acct:alice@example.com` as the resource. | accepted |
+| FR-019 | WebFinger responses for local actors return a JRD with a `self` link to the ActivityPub actor document. | proposed |
+| FR-020 | Full actor URLs may be accepted as an advanced/debug addressing path, but user-facing UI teaches Fediverse-style handles. | proposed |
+| FR-021 | Store canonical remote identity as the actor URI, not the typed handle or display name. | accepted |
+| FR-022 | Local and remote actors may have the same username. Remote actors are always displayed with their domain. | accepted |
+| FR-023 | Add actor federation visibility enum: `local`, `normal`, `discoverable`. | accepted |
+| FR-024 | Default actor federation visibility is `normal`. | accepted |
+| FR-025 | `local` actors are not discoverable, do not resolve through WebFinger, reject inbound federated mail, and cannot send outbound federated mail as that actor. | accepted |
+| FR-026 | `normal` actors are not listed in the federated directory but can be resolved/addressed if the remote sender knows the exact handle or actor URI. | accepted |
+| FR-027 | `discoverable` actors appear in the federated directory and are addressable, subject to server policy and blocklist. | accepted |
+| FR-028 | Humans and agents can opt into `discoverable` or `local`. Groups are out of V1 unless the implementation already makes them trivial. | accepted |
+| FR-029 | Expose a federated directory containing only discoverable actors and minimal profile data. | accepted |
+| FR-030 | Directory data excludes email address, login state, 2FA state, operator/admin status, read state, mailbox stats, and message history. | accepted |
+| FR-031 | V1 supports outbound and inbound `Create` activities wrapping `Note` objects. | accepted |
+| FR-032 | V1 supports `to`, `cc`, and `inReplyTo` for addressed mail and replies. | accepted |
+| FR-033 | V1 rejects unsupported activity types before delivery, including `Follow`, `Like`, `Announce`, `Delete`, `Update`, `Undo`, votes, boosts, and timeline actions. | accepted |
+| FR-034 | Local send succeeds after local persistence; remote delivery happens asynchronously through per-peer queues. | accepted |
+| FR-035 | Remote messages that pass policy, signature, size, and type checks land immediately in the normal inbox/thread flow. | accepted |
+| FR-036 | No quarantine is added in V1. Remote provenance is visible instead. | accepted |
+| FR-037 | Duplicate inbound activity ids are no-ops and do not duplicate delivered messages. | accepted |
+| FR-038 | Federation delivery state is visible in the UI: pending, delivered, failed, suppressed by blocklist, or unsupported. | proposed |
+| FR-039 | Federation uses signed server-to-server HTTP requests. The canonical `agent-inbox` profile uses RFC 9421 HTTP Message Signatures unless planning proves a compatibility shim is required. | proposed |
+| FR-040 | Remote content is sanitized and rendered as remote content, not as trusted instruction. | accepted |
+| FR-041 | All authenticated human operators can manage federation in V1. Finer-grained roles are future work. | accepted |
+| FR-042 | Record audit events for federation mode changes, warning acknowledgements, peer changes, blocklist changes, server profile changes, actor visibility changes, key changes, rejected inbound messages, and failed/cancelled outbound deliveries. | accepted |
+
+## Federation Policy
+
+### Modes
+
+`disabled`
+
+- Reject inbound federation.
+- Do not attempt outbound federation.
+- Keep configured peers and blocklist for later re-enable.
+
+`allowlist`
+
+- Default enabled mode.
+- Only enabled peers can send to this server or receive from this server.
+- Empty allowlist means federation is effectively local-only.
+
+`open`
+
+- Experimental.
+- Accept compatible HTTPS federation from any non-blocked server.
+- If experimental HTTP is also enabled, open mode requires an additional warning.
+- Unsupported signatures, unsupported activity types, oversized payloads, blocked
+  domains, and disallowed actor visibility still reject before delivery.
+
+### Blocklist
+
+The blocklist is an override, not a mode. It applies to every scheme and every federation
+mode.
+
+Blocklist entries may be stored as normalized base URLs/domains, with planning to decide
+the precise representation. Matching must be deterministic and resistant to case,
+trailing slash, and default-port confusion.
+
+## URL And Reachability Policy
+
+V1 direct federation requires both sides to be reachable at their configured base URLs.
+
+- `https://` is allowed by default.
+- `http://` is available only as an experimental setting with a persistent insecure marker
+  in the UI.
+- No other URL scheme is accepted.
+- HTTP peers are visually marked as insecure wherever they appear.
+- A private HTTP node behind NAT cannot federate with a public HTTPS node in V1 unless
+  separate infrastructure makes it directly reachable.
+
+### HTTP Warning Text
+
+When enabling HTTP federation or adding an HTTP peer, the UI must present substantially
+this warning:
+
+> HTTP federation is not encrypted. Anyone on the network path may read traffic, observe
+> message metadata, block delivery, or replay captured requests. Use this only on a
+> trusted isolated LAN.
+
+Open mode plus HTTP must add substantially this warning:
+
+> Open HTTP federation lets any reachable non-blocked server attempt to deliver mail over
+> an unencrypted connection. This can expose message content and metadata to the network
+> and can create unsolicited agent attention cost. Use only for experiments on isolated
+> networks.
+
+## Actor Visibility
+
+Actor visibility is a single enum, not independent booleans:
+
+| Value | Directory | Exact Addressing | Inbound Federated Mail | Outbound Federated Mail |
+|---|---|---|---|---|
+| `local` | no | no WebFinger result | rejected | rejected |
+| `normal` | no | yes | accepted if policy allows | accepted if policy allows |
+| `discoverable` | yes | yes | accepted if policy allows | accepted if policy allows |
+
+Server policy still wins. In `disabled` mode nobody remote can talk to anyone. The
+blocklist always wins. Discoverability is not a trust grant.
+
+System/internal actors are never discoverable unless a later mission explicitly designs
+that exposure.
+
+## WebFinger And Addressing
+
+The primary user-facing remote address format is:
+
+```text
+@alice@example.com
+```
+
+The server resolves it as:
+
+```text
+GET https://example.com/.well-known/webfinger?resource=acct:alice@example.com
+Accept: application/jrd+json
+```
+
+The response must identify an ActivityPub actor document with a `self` link:
+
+```json
+{
+  "subject": "acct:alice@example.com",
+  "aliases": ["https://example.com/actors/alice"],
+  "links": [
+    {
+      "rel": "self",
+      "type": "application/activity+json",
+      "href": "https://example.com/actors/alice"
+    }
+  ]
+}
+```
+
+For experimental HTTP peers, the same shape is allowed over HTTP only when the relevant
+HTTP warning has been accepted and policy allows the target peer.
+
+## Peer Add Flow
+
+When an operator adds a peer URL, the server runs a compatibility check:
+
+1. Normalize the URL and reject unsupported schemes.
+2. Check blocklist first.
+3. Fetch `/.well-known/agent-inbox` if present.
+4. Read display name, base URL, version, federation capabilities, supported schemes, and
+   public key metadata.
+5. Validate the peer URL matches the descriptor's declared base URL or show a warning.
+6. Confirm the peer exposes WebFinger.
+7. Confirm at least one actor can resolve when the operator supplies a handle, or accept
+   descriptor-only readiness for an empty server.
+8. Record key fingerprint and first-seen metadata.
+9. Show `Ready`, `Warning`, or `Failed` with exact reasons.
+
+Adding a peer does not import a directory by default.
+
+## Automatic Fetching And Crawling
+
+V1 allows only shallow, explicit remote fetching:
+
+- peer descriptor during peer add/check;
+- WebFinger for a typed handle;
+- actor document for a resolved actor;
+- inbox URL and public key metadata from the actor document;
+- object fetches required to validate an inbound or replied-to object, bounded by the
+  fetch budget.
+
+V1 does not crawl remote outboxes, followers, following collections, public timelines,
+actor directories, replies, attachments, or arbitrary embedded URLs.
+
+## Delivery Semantics
+
+Outbound:
+
+- Persist the local message first.
+- Resolve remote recipients to actor URIs and inbox URLs.
+- Queue one delivery per target peer/inbox.
+- Default to one concurrent send per peer.
+- Retry failed sends with backoff.
+- Show delivery state in the Federation tab and message details.
+- Cancelling/removing/blocking a peer suppresses pending delivery to that peer.
+
+Inbound:
+
+- Enforce global mode, blocklist, peer policy, scheme policy, signature validity, actor
+  visibility, type support, size limits, and duplicate activity id checks before delivery.
+- Deliver accepted mail immediately.
+- Store remote actor URI, typed/display handle, server/domain, and activity id.
+- Mark remote provenance visibly in UI and API responses.
+
+Remote delivery does not affect local read state. Remote peers cannot read local inboxes
+or thread history through federation.
+
+## ActivityPub Profile
+
+V1 emits and accepts only:
+
+- actor documents for local humans and agents;
+- `Create` activities wrapping `Note`;
+- `summary` as subject, if present;
+- `content` as body;
+- `to` / `cc` as recipients;
+- `inReplyTo` for replies;
+- public key metadata required for request signature verification;
+- server descriptor metadata for `agent-inbox` peers.
+
+Unsupported ActivityPub fields may be ignored if safe. Unsupported activities are
+rejected with a clear reason and audit event.
+
+## Server Profile
+
+Editable fields:
+
+- display name;
+- summary/description;
+- optional contact field if planning includes it;
+- icon/avatar is future work unless trivial.
+
+Restricted fields:
+
+- `federation_base_url`;
+- signing keys;
+- federation mode;
+- HTTP/open warnings.
+
+Restricted fields are still manageable by operators, but require dedicated flows with
+warnings and audit events.
+
+## Audit Log
+
+Federation must record enough audit data to answer "who opened the door?" and "why was
+this message accepted or rejected?"
+
+Each audit entry includes:
+
+- timestamp;
+- acting human username for admin actions;
+- action type;
+- target peer/domain/actor/activity if applicable;
+- before/after values where safe;
+- warning acknowledgement id/version where applicable;
+- rejection/failure reason for automated decisions.
+
+## Non-Functional Requirements
+
+| ID | Requirement | Threshold | Status |
+|---|---|---|---|
+| NFR-001 | Federation is off by default. | A newly started server has no remote ingress or egress without operator action. | accepted |
+| NFR-002 | Federation is bounded. | Payload sizes, fetch budgets, directory pages, retry loops, and processing timeouts have enforced limits. | accepted |
+| NFR-003 | Remote content is visibly remote. | API and UI include remote actor URI/handle and server/domain wherever remote mail is shown. | accepted |
+| NFR-004 | Remote content is not instruction. | Inbound remote messages are framed as untrusted message data in UI/API/tool surfaces. | accepted |
+| NFR-005 | UI warnings are unavoidable for risky modes. | HTTP and open mode require explicit operator acknowledgement before activation. | accepted |
+| NFR-006 | Peer failures are diagnosable. | Federation tab shows peer health and recent delivery/rejection reasons. | proposed |
+| NFR-007 | Implementation preserves one API. | CLI, MCP, console, and federation call the API/server behavior rather than opening storage directly. | accepted |
+
+## Constraints
+
+| ID | Constraint | Status |
+|---|---|---|
+| C-001 | Do not invent names for concepts already named by ActivityStreams/ActivityPub. | accepted |
+| C-002 | Federation is an edge capability; it must not rewrite the mailbox core into a social network. | accepted |
+| C-003 | Groups are future work unless they are mechanically free from the actor model. | accepted |
+| C-004 | Bridge/NAT relay mode is future work and not part of V1. | accepted |
+| C-005 | Roles are future work. In V1 every authenticated human is an operator. | accepted |
+| C-006 | No public self-registration is introduced by this mission. | accepted |
+| C-007 | `@local` or any equivalent local-only addressing guarantee must never be federated. | accepted |
+
+## Success Criteria
+
+| ID | Outcome |
+|---|---|
+| SC-001 | A new server shows no configured peers and cannot federate until an operator enables direct federation. |
+| SC-002 | An operator can add an HTTPS peer, verify descriptor/WebFinger/signing capability, and see readiness in the Federation tab. |
+| SC-003 | An operator can add an HTTP peer only after accepting the insecure LAN warning; the peer remains visibly marked insecure. |
+| SC-004 | In allowlist mode, mail exchanges only with enabled peers and blocklist entries override that permission. |
+| SC-005 | In open mode, compatible non-blocked HTTPS senders can deliver `Create/Note` and the UI records that open mode warning was accepted. |
+| SC-006 | `@alice@example.com` resolves through WebFinger to a canonical actor URI and inbox URL. |
+| SC-007 | `local`, `normal`, and `discoverable` actor visibility states behave as specified for directory listing, WebFinger, inbound, and outbound federation. |
+| SC-008 | Remote messages that pass validation land immediately in normal inbox/thread views and are visibly marked with remote provenance. |
+| SC-009 | Duplicate inbound activity ids do not create duplicate messages. |
+| SC-010 | Unsupported activity types, oversized content, blocked domains, invalid signatures, disallowed schemes, and `local` recipients are rejected before delivery and audited. |
+| SC-011 | Local send does not wait for remote delivery; delivery state is visible and retry behavior is bounded. |
+| SC-012 | Federation base URL, server profile, warnings, peer list, blocklist, actor visibility, and delivery decisions have audit coverage. |
+
+## Out Of Scope
+
+- Federation bridge, NAT relay, tunneled inbox, or delegated public identity.
+- Public timeline, feeds, likes, boosts, follows, votes, or social engagement mechanics.
+- Cross-server groups or group discovery.
+- Attachments/media federation unless an existing local attachment model makes a safe
+  subset trivial.
+- End-to-end encryption.
+- Full Fediverse compatibility with every implementation.
+- Role-based federation administration.
+- Remote read/unread state.
+- Remote inbox browsing or message history export.
+- Automatic remote crawling.
+
+## References
+
+- W3C ActivityPub Recommendation: https://www.w3.org/TR/activitypub/
+- W3C ActivityStreams Core: https://www.w3.org/TR/activitystreams-core/
+- RFC 7033 WebFinger: https://datatracker.ietf.org/doc/html/rfc7033
+- RFC 9421 HTTP Message Signatures: https://datatracker.ietf.org/doc/rfc9421/
+- Lemmy federation docs: https://join-lemmy.org/docs/administration/federation_getting_started.html
+- Lemmy ActivityPub integration docs: https://join-lemmy.org/docs/contributors/05-federation.html
+- Lemmy source inspected for defaults: LemmyNet/lemmy commit `7d4b7b4`
