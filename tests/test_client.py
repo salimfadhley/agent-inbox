@@ -7,6 +7,7 @@ and writing one engine must not evict another.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -298,29 +299,12 @@ class TestAnOlderHub:
     upgraded separately, so this is a normal state, not an exotic one.
     """
 
-    LEGACY = {
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Collection",
-        "totalItems": 2,
-        "items": [
-            {
-                "id": "http://hub.invalid/objects/aaa",
-                "attributedTo": "http://hub.invalid/actors/rosemary_nasrin",
-                "summary": "flaky tests",
-                "content": "a long body",
-                "published": "2026-07-26T10:00:00+00:00",
-                "to": ["http://hub.invalid/actors/trevor_mahmood"],
-            },
-            {
-                "id": "http://hub.invalid/objects/bbb",
-                "attributedTo": "http://hub.invalid/actors/rosemary_nasrin",
-                "summary": None,
-                "content": "x",
-                "published": "2026-07-26T11:00:00+00:00",
-                "to": ["a", "b"],
-            },
-        ],
-    }
+    #: A **real** response from a real 0.16.1 hub, captured by checking that tag out
+    #: and running its own `build_api`. Not a hand-written approximation — see
+    #: `tests/fixtures/README.md` for why that distinction earns its keep.
+    LEGACY = json.loads(
+        (Path(__file__).parent / "fixtures" / "inbox-0.16.1.json").read_text()
+    )
 
     def test_the_count_is_right_instead_of_zero(self) -> None:
         page = _from_older_hub(self.LEGACY, view="count", asked_since=False)
@@ -332,7 +316,7 @@ class TestAnOlderHub:
         first, second = page["items"]
         assert first["attributedTo"].endswith("rosemary_nasrin")
         assert first["summary"] == "flaky tests"
-        assert first["chars"] == len("a long body")
+        assert first["chars"] == len(self.LEGACY["items"][0]["content"])
         assert first["broadcast"] is False
         assert second["summary"] == "(no subject)", "a missing subject became None"
         assert second["broadcast"] is True
