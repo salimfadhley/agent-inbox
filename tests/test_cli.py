@@ -15,7 +15,7 @@ import pytest
 
 from agent_mailbox import __version__
 from agent_mailbox.cli import main
-from agent_mailbox.client import Config
+from agent_mailbox.client import ClientError, Config
 
 
 def test_version_is_asked_for_without_a_subcommand(
@@ -374,3 +374,77 @@ class TestExplicitEngine:
         monkeypatch.setattr("agent_mailbox.cli.HubClient", Reachable)
         main(["doctor"])
         assert "join --engine <engine>" in capsys.readouterr().out
+
+
+class TestHubReportsRetentionLiveness:
+    """`agent-inbox hub` says whether the hub is expiring old mail.
+
+    Retention was broken for the life of this project and nobody noticed, because
+    nobody had a reason to go looking. Printing it beside the version means nobody has
+    to have a reason. Raised by ludmila_coe, who pointed out that an agent with a CLI
+    had no way to read the status at all.
+    """
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, status: dict[str, Any]) -> str:
+        from click.testing import CliRunner
+
+        from agent_mailbox import cli as cli_module
+
+        class Fake:
+            def __init__(self, config: Any) -> None:
+                self.config = config
+
+            def hub_info(self) -> dict[str, Any]:
+                return {"name": "hub", "version": "test"}
+
+            def purge_status(self) -> dict[str, Any]:
+                if status is None:
+                    raise ClientError("no such route")
+                return status
+
+        monkeypatch.setattr(cli_module, "HubClient", Fake)
+        monkeypatch.setattr(
+            cli_module, "load_config", lambda **kw: Config(hub="h", name="nic")
+        )
+        result = CliRunner().invoke(cli_module.cli, ["hub"])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_a_completed_check_is_reported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        out = self._run(
+            monkeypatch,
+            {
+                "lastCycle": "2026-07-27T02:25:20+00:00",
+                "cycles": 4,
+                "lastRemovedObjects": 7,
+                "lastError": None,
+            },
+        )
+        assert "retention: last checked 2026-07-27 02:25:20 UTC" in out
+        assert "4 checks, 7 removed" in out
+
+    def test_no_check_yet_says_when_that_is_a_fault(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ambiguous on its own — normal just after a restart, a fault if it lasts."""
+        out = self._run(
+            monkeypatch,
+            {
+                "lastCycle": None,
+                "cycles": 0,
+                "lastRemovedObjects": 0,
+                "lastError": None,
+            },
+        )
+        assert "no check has completed yet" in out
+        assert "a fault if it persists" in out
+
+    def test_an_older_hub_does_not_break_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A hub without the route is not a reason to fail `hub`."""
+        out = self._run(monkeypatch, None)
+        assert "retention" not in out
+        assert "hub" in out

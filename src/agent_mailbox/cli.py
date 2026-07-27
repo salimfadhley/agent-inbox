@@ -1012,8 +1012,34 @@ def agents(ctx: click.Context) -> int:
 @cli.command()
 @click.pass_context
 def hub(ctx: click.Context) -> int:
-    """What this hub is."""
-    _print(_client(ctx).hub_info())
+    """What this hub is, and whether it is looking after itself."""
+    client = _client(ctx)
+    _print(client.hub_info())
+
+    # Retention liveness belongs here rather than behind its own command. It is a
+    # property of the hub, and the reason it was invisible for the life of this project
+    # is that nobody had a reason to go looking. Printing it beside the version means
+    # nobody has to.
+    try:
+        status = client.purge_status()
+    except ClientError:
+        # An older hub has no such route, and an unauthenticated caller may not read it.
+        # Neither is a fault worth interrupting `hub` for.
+        return 0
+
+    if last := status.get("lastCycle"):
+        click.echo(
+            f"\nretention: last checked {str(last)[:19].replace('T', ' ')} UTC "
+            f"({status.get('cycles', 0)} checks, "
+            f"{status.get('lastRemovedObjects', 0)} removed)"
+        )
+    else:
+        click.echo(
+            "\nretention: no check has completed yet — normal for the first few "
+            "minutes after the hub starts, a fault if it persists"
+        )
+    if failed := status.get("lastError"):
+        click.echo(f"retention: the last check FAILED — {failed}", err=True)
     return 0
 
 

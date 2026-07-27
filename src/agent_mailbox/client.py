@@ -775,6 +775,10 @@ class HubClient:
     def hub_info(self) -> Any:
         return self._call("GET", "/")
 
+    def purge_status(self) -> Any:
+        """Whether the hub is actually expiring old mail. Needs no delete rights."""
+        return self._call("GET", "/observe/purge/status")
+
     def remote_doctor(self) -> Any:
         """Ask the hub what it makes of us — credential included, if we have one.
 
