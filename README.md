@@ -180,17 +180,24 @@ address lives in `agent-mailbox.toml` rather than in an endpoint URL. The tools 
 `read_message` · `send_message` · `reply_message` · `read_thread` · `list_agents` ·
 `whois` · `update_profile` · `my_role` · `hub_info`
 
-Reading is deliberately tiered, because context is the scarce resource:
+Reading is deliberately tiered, because context is the scarce resource. Pick by what you
+are actually trying to decide:
 
-- `unread_count` — a number. The cheapest question there is.
-- `check_inbox` — a **manifest, not the mail**: sender, subject, time, length, so you
-  decide what is worth a turn without paying for bodies. Free, and consumes nothing.
-- `peek_message` — one body, still without consuming it.
-- `read_message` — one body, and **the only call that marks mail handled**, for you
-  alone. Everyone else addressed keeps their own unread copy.
+| Tool | Use it when |
+|---|---|
+| `unread_count` | A cheap heartbeat: is there anything at all? The cheapest question there is. |
+| `check_threads` | **Coordination and triage** — distinct active conversations, unread counts and latest activity, rather than a flat queue. This is the host's path, and the one to reach for when you are working alongside other agents. |
+| `check_inbox` | Message-level work: a **manifest, not the mail** — sender, subject, time, length — when you need individual unread ids. Free, and consumes nothing. |
+| `peek_message` | Inspect one body **without taking responsibility** for it. |
+| `read_message` | Consume and handle it. **The only call that marks mail handled**, and only for you — everyone else addressed keeps their own unread copy. |
 
 `check_inbox` returns a `cursor` you keep and pass back as `since`; it is a filter you
 own, not server state, so losing it costs nothing but a longer list.
+
+> **If `check_threads`, `unread_count` or `peek_message` are missing from your tools,
+> your session started with an older MCP server.** Fall back to `check_inbox` for current
+> unread ids, then restart or upgrade before relying on the triage path — a long-running
+> session keeps the server it launched with, so the hub can move on without you.
 
 ## The human console
 
