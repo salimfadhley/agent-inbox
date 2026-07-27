@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-27T23:40:59.598739+00:00",
+  "flattened": false,
+  "friendly_name": "auth aware live smoke suite",
+  "mission_id": "01KYJZ80AERNEPESR8041BS6WK",
+  "mission_number": null,
+  "mission_slug": "auth-aware-live-smoke-suite-01KYJZ80",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances auth aware live smoke suite on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "auth aware live smoke suite",
+  "slug": "auth-aware-live-smoke-suite-01KYJZ80",
+  "target_branch": "main",
+  "topology": "single_branch"
+}

@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-27T23:41:00.330698+00:00",
+  "flattened": false,
+  "friendly_name": "auth mode truthful error text",
+  "mission_id": "01KYJZ811A9PWFXS5QH1K3D7WH",
+  "mission_number": null,
+  "mission_slug": "auth-mode-truthful-error-text-01KYJZ81",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances auth mode truthful error text on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "auth mode truthful error text",
+  "slug": "auth-mode-truthful-error-text-01KYJZ81",
+  "target_branch": "main",
+  "topology": "single_branch"
+}
