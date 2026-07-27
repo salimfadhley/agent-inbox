@@ -70,11 +70,11 @@ task inside it needs none of that. FR-003 adds an operator-triggered path anyway
 | FR-001 | The hub runs expiry on a schedule while it is up, without being asked. | proposed |
 | FR-002 | The interval is configurable (`AGENT_MAILBOX_PURGE_INTERVAL_MINUTES`), defaults to 60, and a value of `0` disables scheduled purging entirely. | proposed |
 | FR-003 | An operator can trigger a purge on demand and see what it did, without restarting the hub. | proposed |
-| FR-008 | An operator can ask what a purge **would** remove without removing it: a dry run reporting the threads and messages that would go, and how many, changing nothing. | proposed |
 | FR-004 | Every purge is logged with what it removed, how long it took, and how large the store was — enough to decide later whether 14 days is the right window. | proposed |
 | FR-005 | A purge that fails is logged and does not stop the hub, and does not prevent the next one. | proposed |
 | FR-006 | Purging never runs inside a request. No agent's call pays for housekeeping. | proposed |
 | FR-007 | `retention_days = 0` continues to disable expiry, whatever the schedule says. | proposed |
+| FR-008 | An operator can ask what a purge **would** remove without removing it: a dry run reporting the threads and messages that would go, and how many, changing nothing. | proposed |
 
 ## Non-functional requirements
 

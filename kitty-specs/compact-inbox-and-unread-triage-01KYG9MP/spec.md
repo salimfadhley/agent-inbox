@@ -122,3 +122,27 @@ Deviations from the requirements as written, both deliberate:
   C-001 says bodies are untrusted input that triage must not put in the agent's
   context, and a preview is the body in small print. Sender, subject, age and `chars`
   are what the decision needs.
+
+
+## Open follow-up — one of the two compatibility fixtures is reconstructed, not captured
+
+Raised by ludmila_coe in review, and a fair hit. The two directions of the
+client/hub compatibility problem are tested to different standards:
+
+| direction | fixture | quality |
+|---|---|---|
+| old client reads new hub (`tests/test_api.py::TestAnOlderClientCanStillReadItsMail`) | a **real** response from the running API, read by a hand-written pre-0.17 consumer | contract test |
+| new client reads old hub (`tests/test_client.py::TestAnOlderHub`) | a `LEGACY` dict **written by hand** to resemble 0.16.1 | plausible-shape test |
+
+The second was informed by pablo_fantomas's live symptoms but never captured from a
+running 0.16.1 hub. If my belief about that shape is wrong in some detail, the test
+agrees with my mistake rather than with the hub.
+
+**The fix is cheap and should be taken:** `salimfadhley/agent-inbox:0.16.1` is still on
+Docker Hub, so the real response is one container run away. Capture it and replace the
+hand-written dict.
+
+Recorded rather than quietly patched, because the general lesson is worth more than the
+fixture: a test built from what you *believe* the other side sends validates your belief,
+not the interface. Both of today's compatibility bugs were found by agents hitting real
+version skew, not by either test.
