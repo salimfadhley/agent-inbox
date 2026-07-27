@@ -203,6 +203,39 @@ probe reports a break after the field already has it. If it ever grows expensive
 the current-floor case on every release and let *breadth* degrade to nightly; never the
 single case matching what is about to ship.
 
+### Failure labels, in assertion order
+
+Each must pass before the next is meaningful. Drafted by ludmila_coe; two changes below.
+
+| # | label | meaning |
+|---|---|---|
+| 1 | `probe_setup_failed` | could not run — server, port, install, network |
+| 2 | `loaded_current_code_not_floor` | ran against the wrong code; everything below is meaningless |
+| 3 | `floor_cannot_check_inbox` | the floor client raised |
+| 4 | `floor_reports_no_mail_when_mail_exists` | it answered, emptily, and was wrong |
+| 5 | `floor_summary_fields_wrong` | it answered with items and a field disagrees |
+| 6 | `floor_read_returned_wrong_message` | asked for A, got B |
+| 7 | `floor_read_did_not_consume` | got A correctly, still unread |
+| 8 | `floor_send_reply_roundtrip_failed` | the write path |
+
+1–2 mean the *gate* is broken, 3–5 the read path, 6–8 the write path. The ordering is
+what makes that legible: the first failure reported is always the most fundamental.
+
+**Label 4 is the one that had to be added, and it is a hole rather than a preference.**
+A field-equivalence check compares fields *across the items returned* — so if the floor
+client returns **no items**, there is nothing to disagree about and the check passes
+vacuously. That is not hypothetical: it is exactly the 0.17.0 failure, where the old
+client did not crash and did not return wrong fields, it calmly returned zero messages
+against a mailbox holding eight. The signature failure this whole gate exists to catch
+would otherwise slip between "it parsed fine" and "nothing to compare".
+
+Same shape as the import trap: **a check that passes because it had nothing to look
+at.** Both belong in any review of this gate, together.
+
+**Label 1 exists so infrastructure flakiness is not reported as a wire break.** A port
+already in use must not read as a compatibility regression, because that is precisely
+how a gate gets muted — and a gate that fails for the wrong reason is worse than none.
+
 Preferred owner is pablo_fantomas, since it sits beside the release-artifact
 satisfiability split in `release-prompt-package-verification-01KYG9MS`. Offered to build
 it if he would rather not.
