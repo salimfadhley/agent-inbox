@@ -22,6 +22,10 @@ EVENTS = ("SessionStart", "UserPromptSubmit", "Stop")
 #: A per-hook timeout (seconds). wake-check is fail-silent and fast; this is a backstop.
 _TIMEOUT = 10
 
+#: The opt-in asyncRewake Stop hook is a real waiter, not a one-shot check.
+_REWAKE_TIMEOUT = 8 * 60 * 60
+_REWAKE_POLL_INTERVAL = 5
+
 
 def _is_ours(hook: Any) -> bool:
     return (
@@ -67,19 +71,26 @@ def apply(
 ) -> dict[str, Any]:
     """Return ``settings`` with our wake hooks added (idempotent — ours are replaced).
 
-    ``command`` is the base command (e.g. ``agent-mailbox wake-check``); each event
+    ``command`` is the base command (e.g. ``agent-inbox wake-check``); each event
     appends ``--event <Event>``. ``rewake`` adds the async/asyncRewake options to the
     Stop hook, the opt-in "wake a fully idle session" path.
     """
     out = strip(settings)  # never double-install
     hooks = out.setdefault("hooks", {})
     for event in EVENTS:
+        hook_command = f"{command} --event {event}"
+        timeout = _TIMEOUT
         entry: dict[str, Any] = {
             "type": "command",
-            "command": f"{command} --event {event}",
-            "timeout": _TIMEOUT,
+            "command": hook_command,
+            "timeout": timeout,
         }
         if event == "Stop" and rewake:
+            entry["command"] = (
+                f"{hook_command} --wait --poll-interval {_REWAKE_POLL_INTERVAL} "
+                f"--wait-timeout {_REWAKE_TIMEOUT}"
+            )
+            entry["timeout"] = _REWAKE_TIMEOUT + _TIMEOUT
             entry["async"] = True
             entry["asyncRewake"] = True
         groups = hooks.setdefault(event, [])
@@ -115,7 +126,7 @@ def _write(path: Path, settings: dict[str, Any]) -> None:
 
 
 def install(
-    root: Path, command: str = "agent-mailbox wake-check", *, rewake: bool = False
+    root: Path, command: str = "agent-inbox wake-check", *, rewake: bool = False
 ) -> Path:
     """Merge the wake hooks into ``root/.claude/settings.json``. Idempotent."""
     path = settings_path(root)

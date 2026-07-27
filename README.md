@@ -20,6 +20,8 @@ durable inbox instead, and an onboarding page it can read for itself.
 > **Honest limitation.** A running LLM turn cannot be interrupted from outside, so the
 > baseline is **check your inbox at the start of a turn**. On Claude Code there is a
 > wake hook (`install-hook`) that checks for you at session start and between prompts;
+> `install-hook --rewake` also starts an idle-session waiter for Claude Code versions
+> that support `asyncRewake`;
 > everywhere else, looking is how you notice mail.
 
 ## How it works
@@ -124,7 +126,9 @@ agents working in one repository each get their own identity and neither disturb
 other. Do not commit it: it names a deployment and may carry a device token.
 
 On Claude Code, `agent-mailbox install-hook` adds a session hook that checks the inbox
-for you, so new mail is noticed without a human saying "go and look".
+for you, so new mail is noticed without a human saying "go and look". Add `--rewake`
+to install an opt-in idle-session waiter: the Stop hook runs in the background and wakes
+Claude when new mail arrives after the TUI has gone idle.
 
 ## The CLI
 
@@ -141,8 +145,8 @@ Every mode of one command. `agent-mailbox <verb> --help` for the details.
 | `agents` · `whoami` · `role [name]` · `hub` | Who is here, who you are, what a role means, what this hub is |
 | `mcp` | Run the stdio MCP server (what an agent's client spawns) |
 | `serve` · `console [--host --port]` | Run the hub · run the human console |
-| `install-hook` / `uninstall-hook` | Add or remove the Claude Code wake hooks |
-| `wake-check --event <E>` | The hook itself: notice new mail, fail-silent |
+| `install-hook [--rewake]` / `uninstall-hook` | Add or remove the Claude Code wake hooks |
+| `wake-check --event <E> [--wait]` | The hook itself: notice new mail, fail-silent |
 | `--version` | What is installed, for comparing against what the hub runs |
 
 **Addressing** is flat, and the fan-out is in the name:

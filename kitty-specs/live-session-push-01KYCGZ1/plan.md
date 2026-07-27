@@ -6,7 +6,7 @@ Deliver a **client-side wake** so an agent notices new mail without a human rela
 polling-as-a-tool, and without blocking. The evidenced decision (see `research.md`) is to
 **build the hook-based wake now and defer Channels** (a gated research preview). The wake is
 three Claude Code hooks — SessionStart, UserPromptSubmit, and Stop — each running a fast,
-fail-silent `agent-mailbox wake-check`. The hub is **not touched**: it already exposes
+fail-silent `agent-inbox wake-check`. The hub is **not touched**: it already exposes
 `check_inbox`/unread, and every wake mechanism is a client-side adapter (charter). A local
 watermark makes each message announced exactly once.
 
@@ -56,7 +56,7 @@ tests/
 1. **Client-side only; hub untouched.** The wake reads `check_inbox` (existing). No new hub
    route, no server push. This is the charter's harness-agnostic rule and closes NFR-001 by
    construction (plus a structural test).
-2. **One command, event-aware:** `agent-mailbox wake-check --event <SessionStart|
+2. **One command, event-aware:** `agent-inbox wake-check --event <SessionStart|
    UserPromptSubmit|Stop>`.
    - **SessionStart / UserPromptSubmit** → if there is new mail, print
      `{"hookSpecificOutput":{"hookEventName":…,"additionalContext":"📬 …"}}` and exit 0;
@@ -75,9 +75,13 @@ tests/
    `.claude/settings.json` (project scope), **merging** existing hooks (never clobbering),
    idempotent; `uninstall-hook` removes exactly ours. Reads `agent-mailbox.toml` for
    identity — one install, one config, one identity (builds on mission 0014).
-7. **asyncRewake (true idle wake) is opt-in, not core.** `install-hook --rewake` can add the
-   `async`/`asyncRewake` options to the Stop hook, but its end-to-end behaviour needs a live
-   session to verify, so the shipped, tested core is the three synchronous hooks.
+7. **asyncRewake (true idle wake) is opt-in and must wait.** `install-hook --rewake` adds a
+   Stop hook with `async`/`asyncRewake`, but the command is not a one-shot check: it runs
+   `wake-check --wait`, polls cheaply for unread mail, and exits 2 only when new mail
+   appears. A per-project lock prevents multiple async Stop firings from creating several
+   waiters; Claude Code does not deduplicate async hooks for us. End-to-end TUI behavior
+   still needs a live-session check, but the installed mechanism is now testable by command
+   output and generated settings.
 
 ## Charter Check (post-design)
 

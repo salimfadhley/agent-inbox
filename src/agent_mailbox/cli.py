@@ -1068,26 +1068,58 @@ def retention(ctx: click.Context) -> int:
     default="SessionStart",
     help="the hook event: SessionStart, UserPromptSubmit, or Stop",
 )
-def wake_check(event: str) -> int:
+@click.option(
+    "--wait",
+    is_flag=True,
+    help="poll until new mail arrives; intended for asyncRewake Stop hooks",
+)
+@click.option(
+    "--poll-interval",
+    type=float,
+    default=5.0,
+    show_default=True,
+    help="seconds between checks when --wait is active",
+)
+@click.option(
+    "--wait-timeout",
+    type=float,
+    default=8 * 60 * 60.0,
+    show_default=True,
+    help="maximum seconds to wait when --wait is active",
+)
+def wake_check(
+    event: str, wait: bool, poll_interval: float, wait_timeout: float
+) -> int:
     """Session hook: notice new mail (fail-silent)."""
     from agent_mailbox.wake import run
 
-    return run(event)
+    return run(
+        event,
+        wait=wait,
+        poll_interval=poll_interval,
+        wait_timeout=wait_timeout,
+    )
 
 
 @cli.command("install-hook")
 @click.option("--dir", "directory", help="project dir (default: this repo root)")
 @click.option(
+    "--command",
+    default="agent-inbox wake-check",
+    show_default=True,
+    help="base hook command; override for local source-tree testing",
+)
+@click.option(
     "--rewake",
     is_flag=True,
     help="also wake a fully idle session (async; needs a live-session check)",
 )
-def install_hook(directory: str | None, rewake: bool) -> int:
+def install_hook(directory: str | None, command: str, rewake: bool) -> int:
     """Add the wake hooks to .claude/settings.json."""
     from agent_mailbox import hookconfig
 
     root = Path(directory) if directory else project_root()
-    path = hookconfig.install(root, rewake=rewake)
+    path = hookconfig.install(root, command=command, rewake=rewake)
     extra = " (with async rewake)" if rewake else ""
     click.echo(f"wake hooks installed in {path}{extra}")
     click.echo("Restart your session so it picks up the hooks.")

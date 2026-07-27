@@ -25,21 +25,26 @@ def _count_ours(settings: dict) -> int:
 
 class TestApplyStrip:
     def test_apply_adds_three_events(self) -> None:
-        out = hookconfig.apply({}, "agent-mailbox wake-check")
+        out = hookconfig.apply({}, "agent-inbox wake-check")
         assert set(out["hooks"]) == set(hookconfig.EVENTS)
         assert _count_ours(out) == 3
 
     def test_stop_gets_rewake_when_asked(self) -> None:
-        out = hookconfig.apply({}, "agent-mailbox wake-check", rewake=True)
+        out = hookconfig.apply({}, "agent-inbox wake-check", rewake=True)
         stop = out["hooks"]["Stop"][0]["hooks"][0]
         assert stop.get("asyncRewake") is True and stop.get("async") is True
+        assert "--wait" in stop["command"]
+        assert "--poll-interval" in stop["command"]
+        assert "--wait-timeout" in stop["command"]
+        assert stop["timeout"] > 10
         # non-rewake events do not get it
         ss = out["hooks"]["SessionStart"][0]["hooks"][0]
         assert "asyncRewake" not in ss
+        assert "--wait" not in ss["command"]
 
     def test_reinstall_is_idempotent(self) -> None:
-        once = hookconfig.apply({}, "agent-mailbox wake-check")
-        twice = hookconfig.apply(once, "agent-mailbox wake-check")
+        once = hookconfig.apply({}, "agent-inbox wake-check")
+        twice = hookconfig.apply(once, "agent-inbox wake-check")
         assert _count_ours(twice) == 3  # not 6
 
     def test_a_users_existing_hook_survives(self) -> None:
@@ -49,7 +54,7 @@ class TestApplyStrip:
                 "PreToolUse": [{"hooks": [{"type": "command", "command": "guard.sh"}]}],
             }
         }
-        out = hookconfig.apply(existing, "agent-mailbox wake-check")
+        out = hookconfig.apply(existing, "agent-inbox wake-check")
         commands = [
             h["command"]
             for groups in out["hooks"].values()
@@ -63,7 +68,7 @@ class TestApplyStrip:
     def test_strip_removes_only_ours(self) -> None:
         installed = hookconfig.apply(
             {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine"}]}]}},
-            "agent-mailbox wake-check",
+            "agent-inbox wake-check",
         )
         stripped = hookconfig.strip(installed)
         assert _count_ours(stripped) == 0

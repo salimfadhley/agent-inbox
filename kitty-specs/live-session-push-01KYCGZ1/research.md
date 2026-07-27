@@ -75,3 +75,48 @@ but the reliable, verifiable core is the three synchronous hooks above.
 - **Untrusted bodies** (C-004, FR-005): the wake injects `sender + subject + id` and tells
   the agent to `check_inbox` — it never puts a message body into the session as an
   instruction. Sender identity comes from the hub's authenticated `attributedTo`.
+
+## 2026-07-27 follow-up: TUI idle interruption grey areas
+
+Verified against Claude Code `2.1.220` and the current official hooks/channels docs.
+
+### Finding: `--rewake` must be a real background waiter
+
+The previous implementation made the Stop hook `async` + `asyncRewake`, but the command was
+still a one-shot `wake-check`. That can wake Claude only when mail is already present at the
+moment the Stop hook fires. It cannot notice mail that arrives minutes later while the TUI is
+idle, because the process has already exited.
+
+Current hook docs make the missing piece explicit:
+
+- async hook output normally waits until the next conversation turn if the session is idle;
+- the exception is an `asyncRewake` hook that exits with code 2, which wakes Claude
+  immediately even while idle;
+- each async execution creates a separate background process, with no deduplication.
+
+Implementation consequence: `install-hook --rewake` must install a Stop hook that runs a
+long-lived `wake-check --wait` poller and exits 2 only when new mail appears. Because Claude
+does not deduplicate async hook firings, the wait mode also needs a per-project lock so
+multiple Stop events do not leave several background pollers racing to wake the same
+session.
+
+### Finding: Channels remain deferred
+
+Channels are still the right eventual primitive for protocol-level push, but the current
+docs still describe them as a research preview. The relevant flags do not appear in
+`claude --help` while previewed, and custom/non-allowlisted channels still depend on
+`--dangerously-load-development-channels` or organization allowlisting. That is not the path
+for tonight's unattended manual test. The live path remains the Claude Code hook with
+`asyncRewake`.
+
+### Manual-test contract
+
+1. Install the local-source hook from the repo root:
+   `uv run agent-inbox install-hook --rewake --command "uv run agent-inbox wake-check"`.
+2. Restart Claude Code in this project so it loads `.claude/settings.json`.
+3. Let the TUI reach a normal idle/Stop state.
+4. From another agent, send a direct message to the Claude session's mailbox identity.
+5. Success: the idle TUI wakes without a typed user prompt and receives a notice with sender
+   and subject, not the body; the message remains unread until the agent explicitly reads it.
+6. Stop/fail boundary: repeated wake loops, hook error notifications, a wedged prompt, or
+   any notice that injects a message body as instructions.

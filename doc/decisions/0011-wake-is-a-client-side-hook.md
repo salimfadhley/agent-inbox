@@ -24,7 +24,7 @@ hosted-HTTP hub).
 
 **The wake is a client-side Claude Code hook. The hub is not touched. Channels are deferred.**
 
-- Three hooks, each running `agent-mailbox wake-check --event <Event>`:
+- Three hooks, each running `agent-inbox wake-check --event <Event>`:
   **SessionStart** and **UserPromptSubmit** inject a notice (`hookSpecificOutput.
   additionalContext`, exit 0); **Stop** prints the notice to stderr and **exits 2**, which
   Claude Code treats as "keep going" — the agent processes the mail instead of idling.
@@ -34,6 +34,10 @@ hosted-HTTP hub).
   `attributedTo`.
 - A per-project **watermark** announces each message once (Stop's exit-2 fires once per
   message and cannot loop).
+- `install-hook --rewake` installs the Stop hook as `async` + `asyncRewake`, but as a real
+  background waiter: `wake-check --wait` polls cheaply and exits 2 only when new mail
+  appears. A per-project lock prevents duplicate waiters, because Claude Code does not
+  deduplicate async hook firings.
 - The hook is **totally fail-silent**: hub down, unconfigured, corrupt state, or a bug →
   prints nothing and exits 0. A hook on every turn must never break, block, or slow one; the
   mailbox stays the durable record, so a missed wake only defers the agent to its next poll.
@@ -56,6 +60,6 @@ harness-agnostic hub. This ADR does not close that door; it declines to build on
 - Other harnesses (Codex, Gemini) work today by polling; a hook/adapter for them is a
   documented future path, not built here.
 - The `asyncRewake` option (wake a fully *idle* session) is offered as an opt-in
-  (`install-hook --rewake`) but is not the tested core, because its end-to-end behaviour
-  needs a live Claude Code session to verify.
+  (`install-hook --rewake`). The local command behavior and generated settings are tested;
+  end-to-end TUI behavior still needs a live Claude Code session to verify.
 - Reversible: `uninstall-hook` removes exactly our entries; nothing server-side changed.
