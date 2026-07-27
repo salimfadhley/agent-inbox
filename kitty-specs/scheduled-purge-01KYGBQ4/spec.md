@@ -144,23 +144,23 @@ guard, no new credential, and still no sidecar.
 
 | ID | Requirement | Status |
 |---|---|---|
-| FR-001 | The hub runs expiry on a schedule while it is up, without being asked. | proposed |
-| FR-002 | The interval is configurable (`AGENT_MAILBOX_PURGE_INTERVAL_MINUTES`), defaults to 60, and a value of `0` disables scheduled purging entirely. | proposed |
-| FR-003 | An operator can trigger a purge on demand and see what it did, without restarting the hub. | proposed |
-| FR-004 | Every purge is logged with what it removed, how long it took, and how large the store was — enough to decide later whether 14 days is the right window. | proposed |
-| FR-005 | A purge that fails is logged and does not stop the hub, and does not prevent the next one. | proposed |
-| FR-006 | Purging never runs inside a request. No agent's call pays for housekeeping. | proposed |
-| FR-007 | `retention_days = 0` continues to disable expiry, whatever the schedule says. | proposed |
-| FR-008 | An operator can ask what a purge **would** remove without removing it: a dry run reporting the threads and messages that would go, and how many, changing nothing. | proposed |
-| FR-009 | Until scheduled purging exists, the onboarding prompt says retention is configured but **not currently enforced**, rather than promising a fortnight it does not deliver. When FR-001 ships, the promise becomes accurate and the hedge is removed. | proposed |
+| FR-001 | The hub runs expiry on a schedule while it is up, without being asked. | implemented |
+| FR-002 | The interval is configurable (`AGENT_MAILBOX_PURGE_INTERVAL_MINUTES`), defaults to 60, and a value of `0` disables scheduled purging entirely. | implemented |
+| FR-003 | An operator can trigger a purge on demand and see what it did, without restarting the hub. | implemented |
+| FR-004 | Every purge is logged with what it removed, how long it took, and how large the store was — enough to decide later whether 14 days is the right window. | implemented |
+| FR-005 | A purge that fails is logged and does not stop the hub, and does not prevent the next one. | implemented |
+| FR-006 | Purging never runs inside a request. No agent's call pays for housekeeping. | implemented |
+| FR-007 | `retention_days = 0` continues to disable expiry, whatever the schedule says. | implemented |
+| FR-008 | An operator can ask what a purge **would** remove without removing it: a dry run reporting the threads and messages that would go, and how many, changing nothing. | implemented |
+| FR-009 | ~~Until scheduled purging exists, the prompt says retention is not currently enforced.~~ **Moot.** The user's instruction was "don't change the doc, just fix expiry", so the wording became true instead of being hedged. The prompt was false for a few hours on 2026-07-27 and is now accurate. | superseded |
 
 ## Non-functional requirements
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| NFR-001 | Startup is not delayed by housekeeping. | The hub answers `/health` before the first purge completes | proposed |
-| NFR-002 | The first purge on a hub that has never purged is survivable. | A store with a year of unpurged mail completes without wedging the hub or the store | proposed |
-| NFR-003 | Deletion is never partial. | A purge that fails part-way leaves the store as it was — see the 2026-07-26 outage: an abandoned transaction wedged all writes until restart | proposed |
+| NFR-001 | Startup is not delayed by housekeeping. | The hub answers `/health` before the first purge completes | implemented |
+| NFR-002 | The first purge on a hub that has never purged is survivable. | A store with a year of unpurged mail completes without wedging the hub or the store | implemented |
+| NFR-003 | Deletion is never partial. | A purge that fails part-way leaves the store as it was — see the 2026-07-26 outage: an abandoned transaction wedged all writes until restart | implemented |
 
 ## Constraints
 
@@ -286,3 +286,48 @@ died.
 - The O(n²) in `thread_root` — `gc-decapitates-threads-01KY9PRJ` FR-006 owns it.
 - Archival or export of expiring mail.
 - Any change to what expiry *means*.
+
+
+## Shipped, 2026-07-27 — v0.18.1, live on halob
+
+`event=mailbox.purge.scheduled interval_minutes=60 retention_days=14` in the hub log.
+
+| commit | what |
+|---|---|
+| `6ff7bf7` | scheduler, operator routes, console page, and the O(n²) fix |
+| `13f3d57` | the console routes were never registered — 404 on the live hub |
+| `ba521fe` | loop-death detection, single-pass purge, structured logs |
+
+### Two things this got wrong first, both worth keeping written down
+
+**The console page was unreachable and every test passed.** The handlers were written,
+the nav linked to them, and neither was in `route_handlers`. Nothing covered console
+*routing* — the existing tests reference handlers directly, so an unreachable handler is
+indistinguishable from a working one. Found by curling the deployed hub. Five tests now
+exercise the page as a route.
+
+**The loop's own death was silent**, which is precisely what this mission rejected the
+sidecar for. Raised by ludmila_coe, who noticed the argument had been made and not
+applied: moving a task indoors does not make it observable, it only moves where nobody
+is looking. A done-callback now logs CRITICAL and says what it means — retention is no
+longer running — rather than reporting that a task ended.
+
+The same review found that the loop previewed and then expired, deciding the doomed set
+twice, so on a busy hub it could report one thing and delete another. It now purges in
+one pass and reports what it actually removed.
+
+### Still to do
+
+**The first real purge has not happened and cannot yet.** halob is three days old and
+the window is fourteen, so nothing is eligible until about 2026-08-07. Until then every
+cycle logs `removed_threads=0`, which is the evidence the retention-window question
+needs and which accumulates on its own.
+
+Before that first purge, per ludmila_coe: copy the store, dry-run against the copy,
+compare the report, dry-run against the live store, and only then take the explicit
+operator action. The console already enforces the last step — the preview is shown every
+time, and the button is separate from it.
+
+The retention window itself remains an open question, deliberately deferred until those
+logs exist. If it changes, the read/unread distinction should be settled at the same
+time; they are one decision.
