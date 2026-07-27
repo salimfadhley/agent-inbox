@@ -11,6 +11,10 @@ name: Docker image
 # point: **deploy pulls :latest (or a pinned :X.Y.Z), and those are only ever an
 # official release.** A merge to main gives you :edge to try, not something to ship.
 #
+# A release image serves the live onboarding prompt, so it also verifies PyPI can resolve
+# the prompt's install floor before pushing. Exact just-published artifacts are checked
+# by release.yaml after PyPI publish; the prompt floor is deliberately older and stable.
+#
 # Publishes to Docker Hub (docker.io/<user>/agent-inbox) and, for free, to GHCR
 # (ghcr.io/<owner>/agent-inbox). Docker Hub needs two repo secrets (Settings ->
 # Secrets and variables -> Actions); without them the Docker Hub push is skipped, not
@@ -73,6 +77,13 @@ jobs:
             v[0-9]*) echo "release=true"  >> "$GITHUB_OUTPUT" ;;
             *)       echo "release=false" >> "$GITHUB_OUTPUT" ;;
           esac
+
+      - name: Verify PyPI can satisfy the prompt floor
+        if: steps.kind.outputs.release == 'true'
+        run: >-
+          uv run python -m agent_mailbox.release_gate
+          --check prompt-floor
+          --version "${{ steps.version.outputs.pep440 }}"
 
       - name: Resolve target registries
         id: reg

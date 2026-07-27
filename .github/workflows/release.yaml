@@ -17,8 +17,9 @@ name: Release
 #        git tag v0.2.0 && git push origin v0.2.0
 #
 # With PUBLISH_PYPI unset, the build job still runs and uploads the wheel/sdist as
-# workflow artifacts, so a release is always downloadable — it just is not pushed to
-# PyPI.
+# workflow artifacts, so a release is downloadable from GitHub. When PyPI publishing is
+# enabled, this workflow verifies that the exact released package is visible to the same
+# resolver agents use before it declares the publish complete.
 
 # Gated on CI, exactly as docker.yml is. This used to trigger straight off the tag, so
 # PyPI published whether or not the code worked: 0.13.3 went out that way while CI was
@@ -70,6 +71,20 @@ jobs:
     permissions:
       id-token: write  # required for Trusted Publishing (OIDC)
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0  # full history + tags for hatch-vcs version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Compute version (hatch-vcs — the same one PyPI gets)
+        id: version
+        run: echo "pep440=$(uvx --with hatch-vcs hatch version)" >> "$GITHUB_OUTPUT"
+
       - name: Download built distributions
         uses: actions/download-artifact@v4
         with:
@@ -78,3 +93,9 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Verify PyPI can satisfy the exact release artifact
+        run: >-
+          uv run python -m agent_mailbox.release_gate
+          --check release-artifact
+          --version "${{ steps.version.outputs.pep440 }}"
