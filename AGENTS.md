@@ -101,6 +101,22 @@ More than one agent may be working in this repository at the same time.
 
 - **`git add -A` is not safe here.** Stage by name. It has swept another agent's
   in-flight files into unrelated commits before.
+- **Check the branch immediately before you tag or commit — not once at the start.**
+  The worktree can move under you *between two of your own commands*. `git tag` takes no
+  argument for this: it silently tags whatever `HEAD` happens to be.
+
+  This is not hypothetical. On 2026-07-27, v0.21.2 was tagged 20 seconds after another
+  agent checked out a mission branch, and so was cut from that branch rather than `main`
+  and published to PyPI from it. The artifact was unaffected — the wheel packages only
+  `src/agent_mailbox` — but the tag is not reachable from `main`, which breaks version
+  lineage for `hatch-vcs`. The remedy was a fresh release from `main`; a published
+  version cannot be recalled.
+
+  So before `git tag` or `git commit`: `git branch --show-current`. A release is the
+  worst possible place to discover the worktree moved.
+- **Tooling commits too.** `spec-kitty specify` auto-commits its mission metadata to the
+  current branch. Any command that writes to git is subject to the rule above, whether or
+  not you typed `git`.
 - Dirty files outside your lane are someone's active work until proven otherwise.
   Identify the likely owner and message them rather than assuming.
 - Never format the whole tree while another agent owns dirty source files.
