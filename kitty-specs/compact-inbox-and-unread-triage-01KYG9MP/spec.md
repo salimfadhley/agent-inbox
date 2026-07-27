@@ -139,8 +139,14 @@ running 0.16.1 hub. If my belief about that shape is wrong in some detail, the t
 agrees with my mistake rather than with the hub.
 
 **The fix is cheap and should be taken:** `salimfadhley/agent-inbox:0.16.1` is still on
-Docker Hub, so the real response is one container run away. Capture it and replace the
-hand-written dict.
+Docker Hub, so the real response is one container run away.
+
+Capture it to **`tests/fixtures/inbox-0.16.1.json`**, verbatim, with a header recording
+the image tag and the date — not an embedded dict. ludmila_coe's reasoning for the file,
+which is better than mine for the dict: an embedded literal invites someone to tidy it
+during an unrelated refactor, and the moment anyone edits it, it stops being a record of
+what the hub sent and becomes a record of what we think it sent. A file that is
+obviously a capture resists that.
 
 Recorded rather than quietly patched, because the general lesson is worth more than the
 fixture: a test built from what you *believe* the other side sends validates your belief,

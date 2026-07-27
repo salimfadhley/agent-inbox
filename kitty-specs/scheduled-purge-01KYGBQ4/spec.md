@@ -75,6 +75,7 @@ task inside it needs none of that. FR-003 adds an operator-triggered path anyway
 | FR-006 | Purging never runs inside a request. No agent's call pays for housekeeping. | proposed |
 | FR-007 | `retention_days = 0` continues to disable expiry, whatever the schedule says. | proposed |
 | FR-008 | An operator can ask what a purge **would** remove without removing it: a dry run reporting the threads and messages that would go, and how many, changing nothing. | proposed |
+| FR-009 | Until scheduled purging exists, the onboarding prompt says retention is configured but **not currently enforced**, rather than promising a fortnight it does not deliver. When FR-001 ships, the promise becomes accurate and the hedge is removed. | proposed |
 
 ## Non-functional requirements
 
@@ -91,7 +92,7 @@ task inside it needs none of that. FR-003 adds an operator-triggered path anyway
 | C-001 | The expiry *rule* is not touched. `rules.expired_object_ids` decides what dies; this mission only decides when it is asked. | accepted |
 | C-002 | No new container, no new credential, no new authenticated route whose purpose is deletion. | accepted |
 | C-003 | The hub is single-writer. If that ever changes, two hubs purging concurrently must be revisited — it is safe today only because there is one. | accepted |
-| C-004 | The prompt's "about a fortnight" wording becomes true when this ships. It should not be changed to hedge; it should be made accurate. | accepted |
+| C-004 | ~~The prompt's "about a fortnight" wording becomes true when this ships; do not hedge, make it accurate.~~ **Revised — see FR-009.** Correct only if this ships immediately. It is queued behind two other missions, so the prompt states a falsehood in the meantime. | superseded |
 
 ## Success criteria
 
@@ -125,6 +126,14 @@ purged thread is indistinguishable from one that never existed. There is no undo
 record. That is a deliberate property of the current design, not an oversight, but it
 means the dry run is the *only* opportunity anyone gets to disagree with a purge.
 
+### Reporting detail (FR-008)
+
+Per **thread**, with the reason, by default — *"idle since 3 July — 14 messages"*. The
+reason is what makes it checkable, and it is short because it is always the same shape.
+Message ids behind a flag: nobody can look at forty ids and tell whether the decision
+was right, so ids as the default would make the first run — the one that matters — less
+readable, not more. Settled with ludmila_coe.
+
 ### Acceptance for FR-008
 
 Against a fixture with messages on both sides of the retention boundary, and — the case
@@ -140,6 +149,29 @@ reply newer than it:
 That last one is the requirement that makes the feature worth having. A dry run whose
 answer differs from the real thing is worse than none, because it will be trusted.
 
+## Test matrix
+
+Largely ludmila_coe's, with four additions. The first six are the cases anyone would
+think of; the last four are the ones that bite.
+
+| case | expected |
+|---|---|
+| thread entirely older than the cutoff | purged whole |
+| thread entirely newer | kept |
+| **old root, fresh reply** | kept **in full**, including the old root — the case the GC mission exists for |
+| fresh root, old reply | kept in full |
+| direct message read by one recipient, unread by another | purged on the thread's age regardless — see below |
+| broadcast with read-state rows for several agents | purged with every one of those rows, none orphaned |
+| **newest message exactly at the cutoff** | kept — the rule is `last < cutoff`, and boundary equality is where rules like this fail |
+| **reply whose parent is already gone** | root resolution terminates on the orphan; nothing else in its thread is miscomputed |
+| **a cycle in `inReplyTo`** | terminates. Cannot arise from correct use, but `thread_root` guards it explicitly, which means someone thought it could — pin it so the guard is not optimised away |
+| **`retention_days = 0` with a schedule configured** | nothing is purged. The disable must win; a scheduler that ignores the off switch is the worst bug available in this mission |
+
+**Expiry is by age, not by read state.** A message unread by one recipient and read by
+another expires on its thread's age like any other. That is current behaviour and this
+mission does not change it — but it is exactly the property that makes shortening the
+window dangerous, so the matrix asserts it rather than assuming it.
+
 ## Notes for the implementer
 
 **Do this before FR-006 of `gc-decapitates-threads`, not after.** The quadratic is real
@@ -150,6 +182,14 @@ holds ~100 messages costs milliseconds. Switching it on in three months does not
 line that tells us the window is too long — and it is the only line that will exist for
 the first fortnight, since nothing is old enough to remove yet. A purge that logs only
 when it deletes something teaches us nothing during the period we most need to learn.
+
+**The entry point is a scheduled task plus an operator trigger — not mailbox open.**
+On-open ties an unbounded amount of deletion to a process restart: the one moment nobody
+is watching, and the moment the hub is least able to report what it did. It also puts
+the blast radius in the hands of whoever last restarted the container, who does not know
+they are deciding anything. The docstring's claim that purge "runs on every mailbox
+open" describes an operational shape we are deliberately not adopting, and it should be
+corrected when the caller is added rather than left to mislead the next reader.
 
 **Do not make the first run special.** It is tempting to add a "catch-up" mode for a hub
 that has never purged. Resist it: the same code path either works on a large store or
