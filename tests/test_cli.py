@@ -509,3 +509,39 @@ class TestRetentionCommand:
             },
         )
         assert "threads" not in out and "subject" not in out
+
+
+class TestTheSuiteCannotSeeTheRunningAgent:
+    """The guard that makes engine-marker contamination impossible, not merely rare.
+
+    Two red builds in one evening came from tests passing in a Claude Code shell (where
+    CLAUDECODE is set, so an engine resolves) and failing in CI (where none is set and
+    this project configures two engines, so the CLI correctly refuses to guess).
+
+    `tests/conftest.py` strips the markers for every test. This asserts the guard is
+    actually in force, because a fixture that silently stopped working would restore the
+    original problem while looking fine.
+    """
+
+    def test_no_engine_marker_survives_into_a_test(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        from agent_mailbox.client import ENGINE_MARKERS, detect_engine
+
+        present = [m for m, _ in ENGINE_MARKERS if os.environ.get(m)]
+        assert not present, (
+            f"the running agent's markers reached this test: {present} — "
+            "results here will differ between a local shell and CI"
+        )
+        assert detect_engine() is None
+
+    def test_a_test_can_still_ask_for_an_engine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Stripping must not stop a test setting a marker deliberately."""
+        from agent_mailbox.client import detect_engine
+
+        monkeypatch.setenv("CODEX_HOME", "/somewhere")
+        assert detect_engine() == "codex"
