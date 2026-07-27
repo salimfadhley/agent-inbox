@@ -24,6 +24,7 @@ from litestar.testing import TestClient
 from agent_mailbox import __version__
 from agent_mailbox.client import SESSION_COOKIE, ClientError, Config, HubClient
 from agent_mailbox.console import build_console
+from agent_mailbox.prompts import MINIMUM_CLIENT
 
 HUB = "http://mailbox.invalid:8081"
 
@@ -385,14 +386,19 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     """
     text = console.get("/prompts/agent").text
     assert "agent-inbox --version" in text
-    assert "1.2.3" in text, "the floor must be the version the hub reports"
+    assert "1.2.3" in text, "the reader should still be told what the hub is running"
     # --force because a plain install is a no-op when the tool is there; --refresh
     # because a hub is upgraded before its agents, so this is usually run in the window
     # where a cached index still lists only the previous release.
     assert "uv tool install --refresh --no-cache --force" in text
     # Pinned to the floor, so a resolver that cannot reach it fails loudly instead of
     # silently installing 0.10.2 — the superseded package, with different commands.
-    assert '"agent-inbox[clients]>=1.2.3"' in text
+    #
+    # The floor is MINIMUM_CLIENT, deliberately *not* the hub's own version. Pinning to
+    # the newest release made every release briefly unsatisfiable, because PyPI's
+    # install index trails a publish by minutes — three agents hit that window.
+    assert f'"agent-inbox[clients]>={MINIMUM_CLIENT}"' in text
+    assert "clients]>=1.2.3" not in text
 
 
 def test_an_unreachable_hub_does_not_invent_a_version_to_compare_against(

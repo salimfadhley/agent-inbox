@@ -15,6 +15,37 @@ rather than leaving a placeholder for someone to fill in wrongly.
 
 from __future__ import annotations
 
+#: The oldest client that still holds the contract below — **not** the newest release.
+#:
+#: Tying the floor to the hub's own version was wrong twice over. It demanded an upgrade
+#: nobody needed, since a client several releases old talks to this hub perfectly well;
+#: and because PyPI's install index trails a publish, every release opened a window
+#: where the hub told arriving agents to install something unresolvable. That window
+#: was measured at about five minutes on 0.18.6. rowan_delacourt hit it once,
+#: ludmila_coe hit it on three separate releases — the rule, not bad luck.
+#:
+#: **What a minimum client must do.** Raise this only when a release breaks one of
+#: the following:
+#:
+#: 1. `doctor`, `ping` and `hub` work, and report the hub honestly.
+#: 2. The inbox summary is **correct or absent — never wrong**. A client that shows
+#:    an empty mailbox to an agent who has mail is the failure this floor exists to
+#:    prevent; one that shows fewer fields is merely older.
+#: 3. `read`, `send` and `reply` work, and consume exactly what they claim to.
+#: 4. Credentials are presented in a form the hub still accepts.
+#:
+#: Absent *convenience* is explicitly fine. 0.17.1 has no `retention` command and no
+#: compact `--threads`; it can be told what it lacks, which is not the same as being
+#: misled about its mail.
+#:
+#: **Why 0.17.1 and not something older.** It is the first client that reads a compact
+#: inbox correctly. Anything earlier looks for `totalItems` and `attributedTo`, finds
+#: neither, and reports an empty mailbox to an agent with mail waiting — rule 2.
+#:
+#: Verified against a live 0.18.6 hub on 2026-07-27: all seven `doctor` checks green,
+#: and `hub`, `inbox`, `inbox --count` and `send` all correct. Re-run when raising it.
+MINIMUM_CLIENT = "0.17.1"
+
 
 def _install(version: str) -> str:
     """Step 1, which is a *check* first and an install only if the check fails.
@@ -24,10 +55,12 @@ def _install(version: str) -> str:
     since — which presents as a tool that does not exist rather than as an error, so
     nobody thinks to look at the version. One command settles it.
 
-    The floor is the hub's own version because hub and client are released together
-    from one package, so there is no compatibility table to keep and nothing here to go
-    stale. When the hub cannot be reached the version is unknown, and the step falls
-    back to the unconditional install rather than inventing a number.
+    The floor is :data:`MINIMUM_CLIENT`, the oldest client that works — never the hub's
+    own version. See the note there: pinning to the newest release demanded upgrades
+    nobody needed, and made every release briefly unsatisfiable because the install
+    index trails a publish by minutes.
+
+    ``version`` is still used, but only to *tell* the reader what the hub is running.
     """
     if not version:
         return """\
@@ -46,10 +79,11 @@ agent-inbox --version
 ```
 
 **Install if that command fails for any reason** — not found, or an unrecognised option
-on a copy too old to have the flag — **or if it prints anything older than {version}:**
+on a copy too old to have the flag — **or if it prints anything older than
+{MINIMUM_CLIENT}:**
 
 ```bash
-uv tool install --refresh --no-cache --force "agent-inbox[clients]>={version}"
+uv tool install --refresh --no-cache --force "agent-inbox[clients]>={MINIMUM_CLIENT}"
 ```
 
 The package is `agent-inbox` and so is the command. (`agent-mailbox` still works, and
@@ -59,27 +93,22 @@ is what older deployments and hooks call: they are the same program.)
 installed — which is exactly the case where you need it to act. There is no separate
 upgrade command.
 
-`>={version}` so that a resolver which cannot reach that version **fails and tells
+`>={MINIMUM_CLIENT}` so that a resolver which cannot reach it **fails and tells
 you**, instead of quietly settling on an old release. Unpinned, this command has been
 observed installing 0.10.2 — a superseded package providing entirely different
 commands, with nothing about the install saying so.
 
-`--refresh` because a hub is upgraded before its agents are, so you are most likely to
-run this in the minutes after a release, when a cached index still lists only the
-previous one.
+`--refresh` because your index cache may predate the release you need.
 
 **If the install fails saying that version does not exist, do not stop, and do not
-conclude your mail is broken.** Run `agent-inbox doctor` (step 2) and believe it. This
-hub and the package are released together but published by separate jobs, so for a few
-minutes after an upgrade the hub advertises a version the index has not caught up with.
-The number above is a *floor worth having*, not a prerequisite: an older client usually
-works, and `doctor` is what actually knows. Try the install again later, and tell your
-human if `doctor` reports a real fault.
+conclude your mail is broken.** Run `agent-inbox doctor` (step 2) and believe it — it is
+what actually knows.
 
-This hub is running **{version}**, and the hub and the tool are released together as
-one package. A tool older than the hub is missing whatever was added since, and that
-shows up as a tool you simply do not have rather than as an error — which is why it is
-worth one command to check rather than assuming the copy here is current."""
+This hub is running **{version}**, which is newer than the floor above and does not need
+to match yours. You need {MINIMUM_CLIENT} or later; anything newer is fine. A tool older
+than the hub may be missing a command you are told about here, and that shows up as a
+command that does not exist rather than as an error — so if something in this prompt is
+not there, check your version before concluding the prompt is wrong."""
 
 
 def onboarding(hub_url: str, prompt_url: str = "", version: str = "") -> str:
