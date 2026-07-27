@@ -988,11 +988,9 @@ class TestPurgeRoutes:
         house = House(Mailbox(InMemoryStore(), hub_name="testhub", retention_days=0))
         with TestClient(app=build_api(house, HUB)) as client:
             join(client, ROSEMARY)
-            assert client.get("/observe/purge", headers=as_(ROSEMARY)).json() == {
-                "threads": [],
-                "threadCount": 0,
-                "messageCount": 0,
-            }
+            body = client.get("/observe/purge", headers=as_(ROSEMARY)).json()
+            assert body["threads"] == []
+            assert body["threadCount"] == body["messageCount"] == 0
 
 
 class TestTheScheduler:
@@ -1232,3 +1230,68 @@ class TestFrequentRestartsDoNotStarveThePurge:
             asyncio.sleep = real_sleep  # type: ignore[assignment]
 
         assert slept[0] == 60, "a one-minute interval was stretched to the settle time"
+
+
+class TestThePurgeHeartbeat:
+    """Proof the loop reached its first cycle, not merely that it was started.
+
+    ludmila_coe's point after the 0.18.1 starvation bug: the CRITICAL log catches a loop
+    that dies, but nothing caught a loop that never arrived. The startup line said
+    "scheduled" for hours while retention did not run once. An absent timestamp is the
+    only thing that distinguishes scheduled-and-working from scheduled-and-starving.
+    """
+
+    async def test_a_completed_cycle_is_visible_to_an_operator(self) -> None:
+        import asyncio
+
+        from agent_mailbox.api import PurgeStatus, purge_forever
+
+        status = PurgeStatus()
+        assert status.as_dict()["lastCycle"] is None, "claimed a cycle before running"
+
+        class Idle:
+            async def purge(self) -> tuple[()]:
+                return ()
+
+        task = asyncio.create_task(purge_forever(Idle(), minutes=0.001, status=status))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        assert status.as_dict()["lastCycle"] is not None, (
+            "the loop ran and left no evidence — which is the 0.18.1 bug's signature"
+        )
+        assert status.as_dict()["cycles"] >= 1
+
+    async def test_a_failing_cycle_is_reported_not_hidden(self) -> None:
+        import asyncio
+
+        from agent_mailbox.api import PurgeStatus, purge_forever
+
+        status = PurgeStatus()
+
+        class Failing:
+            async def purge(self) -> tuple[()]:
+                raise RuntimeError("the store said no")
+
+        task = asyncio.create_task(
+            purge_forever(Failing(), minutes=0.001, status=status)
+        )
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        assert status.as_dict()["lastError"] is not None
+        assert "the store said no" in status.as_dict()["lastError"]
+        assert status.as_dict()["lastCycle"] is None, (
+            "a failed cycle must not look like a successful one"
+        )
+
+    def test_the_preview_route_carries_the_heartbeat(self, client: TestClient) -> None:
+        join(client, ROSEMARY)
+        body = client.get("/observe/purge", headers=as_(ROSEMARY)).json()
+        assert "schedule" in body
+        assert body["schedule"]["lastCycle"] is None
+        assert body["schedule"]["cycles"] == 0

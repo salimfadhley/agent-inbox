@@ -57,6 +57,13 @@ class StubHub(HubClient):
             ],
             "threadCount": 1,
             "messageCount": 4,
+            "schedule": {
+                "lastCycle": None,
+                "cycles": 0,
+                "lastRemovedThreads": 0,
+                "lastRemovedObjects": 0,
+                "lastError": None,
+            },
         }
 
     def hub_info(self) -> dict[str, Any]:
@@ -1004,3 +1011,43 @@ class TestMaintenance:
 
     def test_the_nav_offers_it(self, console: TestClient) -> None:
         assert "/maintenance" in console.get("/").text
+
+
+class TestTheMaintenanceHeartbeat:
+    """The page must say when retention last actually ran, or that it has not.
+
+    After the 0.18.1 starvation bug, "scheduled" in a startup log is not evidence the
+    loop ever reached a cycle. An operator needs to see the difference without reading
+    container logs.
+    """
+
+    def test_it_says_so_when_no_cycle_has_run(self, console: TestClient) -> None:
+        page = console.get("/maintenance").text
+        assert "No automatic check has completed yet" in page
+
+    def test_it_shows_when_the_last_cycle_was(self) -> None:
+        client, hub = make()
+        hub.purge_preview["schedule"] = {
+            "lastCycle": "2026-07-27T01:41:09+00:00",
+            "cycles": 3,
+            "lastRemovedThreads": 0,
+            "lastRemovedObjects": 0,
+            "lastError": None,
+        }
+        with client as c:
+            page = c.get("/maintenance").text
+        assert "2026-07-27 01:41:09" in page
+        assert "3 so far" in page
+
+    def test_a_failing_cycle_is_shown_not_swallowed(self) -> None:
+        client, hub = make()
+        hub.purge_preview["schedule"] = {
+            "lastCycle": None,
+            "cycles": 0,
+            "lastRemovedThreads": 0,
+            "lastRemovedObjects": 0,
+            "lastError": "OperationalError: database is locked",
+        }
+        with client as c:
+            page = c.get("/maintenance").text
+        assert "database is locked" in page

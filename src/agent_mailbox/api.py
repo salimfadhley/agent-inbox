@@ -25,6 +25,7 @@ import sqlite3
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from typing import Any
 
 import msgspec
@@ -138,6 +139,8 @@ class Api:
     ) -> None:
         self.house = house
         self.wire = Renderer(public_url)
+        #: Filled in by build_api; the scheduler writes to it, the preview reads it.
+        self.purge_status = PurgeStatus()
         #: True only under enforce — the hub reports its own posture honestly.
         self.authenticated = authenticated
 
@@ -386,7 +389,10 @@ class Api:
 
     async def purge_preview(self) -> dict[str, Any]:
         """What a purge would remove, described per conversation. Removes nothing."""
-        return self._describe(await self.house.expire_preview())
+        return {
+            **self._describe(await self.house.expire_preview()),
+            "schedule": self.purge_status.as_dict(),
+        }
 
     def _describe(self, doomed: tuple[Any, ...]) -> dict[str, Any]:
         return {
@@ -523,6 +529,49 @@ def decode_activity(raw: dict[str, Any]) -> Create:
     return Create(object=msgspec.convert(raw, Note, strict=False))
 
 
+class PurgeStatus:
+    """When the purge loop last actually completed a cycle, for anyone to look at.
+
+    The CRITICAL log covers a loop that *dies*. It does not cover a loop that never
+    reaches its first cycle, which is the failure that shipped in 0.18.1: every restart
+    pushed the first run another interval away, and the startup line said "scheduled"
+    the whole time. Nothing anywhere distinguished scheduled-and-working from
+    scheduled-and-starving.
+
+    A timestamp does. If it is absent long after startup, the loop is not running,
+    whatever the startup log claimed. Raised by ludmila_coe, who noticed that the fix
+    for that bug came with no way to tell it was working.
+    """
+
+    __slots__ = ("cycles", "last_cycle", "last_error", "removed_objects", "threads")
+
+    def __init__(self) -> None:
+        self.last_cycle: str | None = None
+        self.cycles = 0
+        self.threads = 0
+        self.removed_objects = 0
+        self.last_error: str | None = None
+
+    def completed(self, threads: int, objects: int) -> None:
+        self.last_cycle = datetime.now(UTC).isoformat()
+        self.cycles += 1
+        self.threads = threads
+        self.removed_objects = objects
+        self.last_error = None
+
+    def failed(self, error: BaseException) -> None:
+        self.last_error = f"{type(error).__name__}: {error}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "lastCycle": self.last_cycle,
+            "cycles": self.cycles,
+            "lastRemovedThreads": self.threads,
+            "lastRemovedObjects": self.removed_objects,
+            "lastError": self.last_error,
+        }
+
+
 #: How long after startup the first purge runs, when the interval is longer than this.
 #: Not zero — a restart must not delete anything — but far short of an hour, so a hub
 #: that is redeployed often still purges.
@@ -557,7 +606,9 @@ def _complain_if_it_died(task: asyncio.Task[None]) -> None:
         )
 
 
-async def purge_forever(house: House, minutes: int) -> None:
+async def purge_forever(
+    house: House, minutes: int, status: PurgeStatus | None = None
+) -> None:
     """Remove conversations that have gone quiet, for as long as the hub is up.
 
     Retention was written, tested and documented long before it had a caller: nothing
@@ -596,6 +647,8 @@ async def purge_forever(house: House, minutes: int) -> None:
             doomed = await house.purge()
             removed = sum(thread.messages for thread in doomed)
             took = (time.monotonic() - started) * 1000
+            if status is not None:
+                status.completed(len(doomed), removed)
             # Logged every cycle, including when nothing goes. For the first fortnight
             # of any hub that is the *only* line there will be — nothing is old enough
             # to remove yet — and it is what tells us whether the window is right. A
@@ -613,7 +666,9 @@ async def purge_forever(house: House, minutes: int) -> None:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - housekeeping must not stop the hub
+        except Exception as failure:  # noqa: BLE001 - must not stop the hub
+            if status is not None:
+                status.failed(failure)
             api_logger.exception(
                 "event=mailbox.purge.failed retrying_in_minutes=%d", minutes
             )
@@ -642,6 +697,8 @@ def build_api(
     """
     enforcing = auth is not None and auth_mode == "enforce"
     api = Api(house, public_url, authenticated=enforcing)
+    purge_status = PurgeStatus()
+    api.purge_status = purge_status
 
     async def resolve_verified_caller(conn: ASGIConnection) -> str | None:
         """A caller proven by a credential — a device token or a full session — or None.
@@ -1179,7 +1236,9 @@ def build_api(
             api_logger.info("scheduled purge is off (purge interval 0)")
             yield
             return
-        task = asyncio.create_task(purge_forever(house, purge_interval_minutes))
+        task = asyncio.create_task(
+            purge_forever(house, purge_interval_minutes, purge_status)
+        )
         task.add_done_callback(_complain_if_it_died)
         api_logger.info(
             "event=mailbox.purge.scheduled interval_minutes=%d retention_days=%d",

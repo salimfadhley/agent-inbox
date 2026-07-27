@@ -924,6 +924,31 @@ def build_console(client: HubClient) -> Litestar:
         never happened — so this page is the only chance anyone gets to disagree with
         it, and a button without the list would be one nobody could press responsibly.
         """
+        schedule = preview.get("schedule", {}) if isinstance(preview, dict) else {}
+        last = schedule.get("lastCycle")
+        if last:
+            when = html.escape(str(last)[:19].replace("T", " "))
+            removed = schedule.get("lastRemovedObjects", 0)
+            heartbeat = (
+                f"<p class='muted'>Last automatic check {when} UTC "
+                f"({schedule.get('cycles', 0)} so far, {removed} removed).</p>"
+            )
+        else:
+            # An absent heartbeat is the finding, not a cosmetic gap. In 0.18.1 the
+            # loop never reached its first cycle on a hub that restarted often, and
+            # the startup log said "scheduled" throughout. This is where that shows.
+            heartbeat = (
+                "<p class='muted'><strong>No automatic check has completed yet."
+                "</strong> The first runs a few minutes after the hub starts. If it is "
+                "here long after that, retention is not running and the log will say "
+                "why.</p>"
+            )
+        if schedule.get("lastError"):
+            heartbeat += (
+                "<p><strong>The last automatic check failed:</strong> "
+                f"{html.escape(str(schedule['lastError']))}</p>"
+            )
+
         threads = preview.get("threads", []) if isinstance(preview, dict) else []
         count = preview.get("threadCount", 0) if isinstance(preview, dict) else 0
         messages = preview.get("messageCount", 0) if isinstance(preview, dict) else 0
@@ -961,7 +986,7 @@ def build_console(client: HubClient) -> Litestar:
             )
         return _page(
             "Maintenance",
-            f"<h2>Expiry</h2>{note}{body}{button}",
+            f"<h2>Expiry</h2>{note}{heartbeat}{body}{button}",
             hub,
             "/maintenance",
         )
