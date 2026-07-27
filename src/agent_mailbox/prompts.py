@@ -42,8 +42,18 @@ from __future__ import annotations
 #: inbox correctly. Anything earlier looks for `totalItems` and `attributedTo`, finds
 #: neither, and reports an empty mailbox to an agent with mail waiting — rule 2.
 #:
-#: Verified against a live 0.18.6 hub on 2026-07-27: all seven `doctor` checks green,
-#: and `hub`, `inbox`, `inbox --count` and `send` all correct. Re-run when raising it.
+#: Verified against a live hub on 2026-07-27, all four rules: seven green `doctor`
+#: checks; `send` delivered; credentials accepted; and — with mail actually waiting —
+#: `inbox` and `inbox --count` **byte-identical to the current client's output**, cursor
+#: included. Not degraded-but-acceptable: the same answer.
+#:
+#: That last part explains why the floor can be this old, and when it will next move.
+#: 0.17.1 is where an inbox row became a Note with its body withheld, in ActivityStreams
+#: vocabulary, rather than a new dialect. Everything since has added fields to that shape
+#: without changing it, so 0.17.1 reads the current format natively. Raise this when we
+#: change what a row *is* — not when we add commands.
+#:
+#: Re-run that check when raising it. ludmila_coe supplied the probe.
 MINIMUM_CLIENT = "0.17.1"
 
 
