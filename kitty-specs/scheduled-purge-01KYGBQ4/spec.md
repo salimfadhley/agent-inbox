@@ -63,6 +63,83 @@ deletion. The hub is a long-running process that already owns the store; a sched
 task inside it needs none of that. FR-003 adds an operator-triggered path anyway, so the
 "run it on demand" capability a sidecar would give is kept without the sidecar.
 
+## How it runs
+
+**An asyncio task inside the hub process, started by Litestar's lifespan.** Not a
+sidecar, not a cron container, not a thread.
+
+```python
+@asynccontextmanager
+async def purge_loop(app: Litestar) -> AsyncIterator[None]:
+    task = asyncio.create_task(_purge_forever(house, interval, log))
+    try:
+        yield                       # the hub serves for its whole life here
+    finally:
+        task.cancel()               # and the loop stops with it
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+async def _purge_forever(house, minutes, log):
+    while True:
+        await asyncio.sleep(minutes * 60)   # sleep FIRST — see below
+        try:
+            removed = await house.expire()
+            log.info("purge: removed %d, store now %d, took %d ms", ...)
+        except Exception:                    # noqa: BLE001
+            log.exception("purge failed; retrying at the next interval")
+```
+
+Four properties fall out of this shape, and each answers something that would otherwise
+need designing:
+
+**It sleeps before its first run**, so nothing is deleted at startup. That matters more
+than it looks: on-startup deletion puts the blast radius in the hands of whoever last
+restarted the container, at the moment nobody is watching, and makes a routine restart
+into an unbounded irreversible action. A hub that has just come up should serve, not
+delete.
+
+**A failure is logged and the loop continues.** One bad purge must not stop the next
+one, and — the lesson of the 2026-07-26 outage — must not take the hub down with it. The
+`except` is deliberately broad: housekeeping is the one place where "keep serving mail"
+beats "fail loudly".
+
+**It is cancelled with the app.** No orphaned task, no purge running against a store
+that is closing.
+
+**It needs no credential, because it is not a caller.** It holds the `House` directly.
+There is no network hop to authenticate, no token to issue, no route to guard.
+
+### Why not a sidecar
+
+Considered seriously; rejected on four counts, of which the last is decisive:
+
+1. A second container and image to build, ship and version alongside the hub.
+2. **Its own device token — a standing credential whose only power is deleting mail.**
+   That is the most dangerous credential the hub could issue, and it would have to exist
+   permanently, in a config file, on the same machine.
+3. An authenticated deletion route on the API for it to call.
+4. **Its failures are invisible.** An in-process loop that dies takes its stack trace to
+   the hub's own log, where the operator is already looking. A sidecar that dies stops
+   purging silently, and the symptom — mail not expiring — is exactly the symptom we
+   have today and did not notice for the life of the project.
+
+A sidecar buys one thing: purging that survives the hub being down. But a hub that is
+down is not accumulating mail either, so there is nothing to purge.
+
+### What still wants a route, and what does not
+
+**v1 needs no deletion route.** The dry run (FR-008) is *read-only* — it reports what
+would go and changes nothing — so it is an operator-gated `GET`, guarded exactly like
+the existing `/auth/tokens` routes, and no more dangerous than the observation routes
+already there.
+
+The on-demand *trigger* (FR-003) is the only thing that would need a route capable of
+deleting. With an hourly schedule, "on demand" saves at most an hour, so it is
+**deferrable**: ship the loop and the dry run, and add the trigger only if waiting an
+hour turns out to matter. If it is added, it is an operator-gated `POST` — the same
+guard, no new credential, and still no sidecar.
+
 ## Functional requirements
 
 | ID | Requirement | Status |
@@ -90,7 +167,7 @@ task inside it needs none of that. FR-003 adds an operator-triggered path anyway
 | ID | Constraint | Status |
 |---|---|---|
 | C-001 | The expiry *rule* is not touched. `rules.expired_object_ids` decides what dies; this mission only decides when it is asked. | accepted |
-| C-002 | No new container, no new credential, no new authenticated route whose purpose is deletion. | accepted |
+| C-002 | No new container and no new standing credential. **Revised**: the original wording also forbade "any authenticated route whose purpose is deletion", which contradicted FR-003. See "How it runs" — v1 needs no deletion route at all. | accepted |
 | C-003 | The hub is single-writer. If that ever changes, two hubs purging concurrently must be revisited — it is safe today only because there is one. | accepted |
 | C-004 | ~~The prompt's "about a fortnight" wording becomes true when this ships; do not hedge, make it accurate.~~ **Revised — see FR-009.** Correct only if this ships immediately. It is queued behind two other missions, so the prompt states a falsehood in the meantime. | superseded |
 
