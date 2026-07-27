@@ -44,6 +44,20 @@ class StubHub(HubClient):
         #: Who the hub says a session belongs to, when a test wants one.
         self.operator: str | None = None
         self.acting: str | None = None
+        self.purged = False
+        self.purge_preview: dict[str, Any] = {
+            "threads": [
+                {
+                    "root": f"{HUB}/objects/abc",
+                    "subject": "DNS is still broken",
+                    "lastPublished": "2026-07-01T09:00:00Z",
+                    "messages": 4,
+                    "ids": [f"{HUB}/objects/abc"],
+                }
+            ],
+            "threadCount": 1,
+            "messageCount": 4,
+        }
 
     def hub_info(self) -> dict[str, Any]:
         return {
@@ -148,6 +162,14 @@ class StubHub(HubClient):
         session: str | None = None,
     ) -> tuple[int, Any, str | None]:
         self.calls.append(f"auth:{method}:{path}:{'sid' if session else 'nosid'}")
+        if path == "/observe/purge":
+            if method == "GET":
+                return 200, dict(self.purge_preview), None
+            removed = self.purge_preview["messageCount"]
+            self.purged = True
+            answer = {**self.purge_preview, "removed": removed}
+            self.purge_preview = {"threads": [], "threadCount": 0, "messageCount": 0}
+            return 200, answer, None
         if path == "/auth/login":
             nxt = "enrol" if body and body.get("username") == "admin" else "ok"
             return 200, {"next": nxt}, f"{SESSION_COOKIE}=sess-xyz; HttpOnly; Path=/"
@@ -939,3 +961,46 @@ def test_a_failed_install_routes_to_doctor_rather_than_reading_as_fatal(
     text = " ".join(console.get("/prompts/agent").text.split())
     assert "do not conclude your mail is broken" in text
     assert "Run `agent-inbox doctor`" in text.split("If the install fails")[1][:400]
+
+
+class TestMaintenance:
+    """The console's expiry page.
+
+    Added because it was missing entirely: the handlers were written and never put in
+    `route_handlers`, so `/maintenance` was a 404 on the live hub while every test
+    passed. Nothing here covered console *routing*, only console rendering.
+    """
+
+    def test_the_page_exists(self, console: TestClient) -> None:
+        assert console.get("/maintenance").status_code == 200
+
+    def test_it_shows_what_would_go_before_offering_to_do_it(
+        self, console: TestClient
+    ) -> None:
+        """The preview is the only chance to disagree: expiry leaves no tombstone."""
+        page = console.get("/maintenance").text
+        assert "DNS is still broken" in page, "the operator cannot see what would go"
+        assert "4 message(s)" in page
+        assert "no undo" in page
+
+    def test_looking_removes_nothing(self, console: TestClient) -> None:
+        client, hub = make()
+        with client as c:
+            c.get("/maintenance")
+        assert hub.purged is False, "viewing the page purged the hub"
+        assert any("GET:/observe/purge" in c for c in hub.calls)
+        assert not any("POST:/observe/purge" in c for c in hub.calls)
+
+    def test_purging_says_what_it_did_and_shows_what_is_left(self) -> None:
+        client, hub = make()
+        with client as c:
+            page = c.post("/maintenance/purge").text
+        assert hub.purged is True
+        assert "Removed 4 message(s)" in page
+        assert "DNS is still broken" not in page, (
+            "the purged conversation was still listed as pending — "
+            "a stale list beside 'removed' reads as a failure"
+        )
+
+    def test_the_nav_offers_it(self, console: TestClient) -> None:
+        assert "/maintenance" in console.get("/").text

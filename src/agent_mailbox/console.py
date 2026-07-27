@@ -1458,6 +1458,8 @@ def build_console(client: HubClient) -> Litestar:
             do_read,
             compose_form,
             do_compose,
+            maintenance,
+            maintenance_purge,
             token_index,
             tokens,
             mint,
