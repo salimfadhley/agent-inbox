@@ -1158,3 +1158,77 @@ class TestTheSchedulerDoesNotDieQuietly:
             _complain_if_it_died(task)
 
         assert not caplog.records, "a normal shutdown logged a crisis"
+
+
+class TestFrequentRestartsDoNotStarveThePurge:
+    """A hub restarted more often than its interval must still purge.
+
+    Found by asking why no scheduled cycle had appeared in production. The hub had been
+    redeployed roughly every fifteen minutes that evening, and the loop slept a full
+    hour before its first run — so retention would have run exactly never, while the
+    startup log cheerfully reported it as scheduled. That is the silent non-expiry this
+    mission exists to end, rebuilt inside the fix for it.
+    """
+
+    async def test_the_first_cycle_does_not_wait_a_whole_interval(self) -> None:
+        import asyncio
+
+        from agent_mailbox.api import SETTLE_MINUTES, purge_forever
+
+        slept: list[float] = []
+        real_sleep = asyncio.sleep
+
+        async def record(seconds: float) -> None:
+            slept.append(seconds)
+            await real_sleep(0)
+
+        class Idle:
+            async def purge(self) -> tuple[()]:
+                return ()
+
+        asyncio.sleep = record  # type: ignore[assignment]
+        try:
+            task = asyncio.create_task(purge_forever(Idle(), minutes=60))
+            await real_sleep(0.05)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        finally:
+            asyncio.sleep = real_sleep  # type: ignore[assignment]
+
+        assert slept, "the loop never slept at all"
+        assert slept[0] == SETTLE_MINUTES * 60, (
+            f"the first cycle waited {slept[0] / 60:.0f} minutes; a hub redeployed "
+            "more often than that would never purge"
+        )
+        assert slept[0] > 60, "the first cycle is close enough to startup to be startup"
+        assert slept[1] == 60 * 60, "later cycles should use the configured interval"
+
+    async def test_a_short_interval_is_not_lengthened(self) -> None:
+        """An operator asking for every minute must not silently get every five."""
+        import asyncio
+
+        from agent_mailbox.api import purge_forever
+
+        slept: list[float] = []
+        real_sleep = asyncio.sleep
+
+        async def record(seconds: float) -> None:
+            slept.append(seconds)
+            await real_sleep(0)
+
+        class Idle:
+            async def purge(self) -> tuple[()]:
+                return ()
+
+        asyncio.sleep = record  # type: ignore[assignment]
+        try:
+            task = asyncio.create_task(purge_forever(Idle(), minutes=1))
+            await real_sleep(0.05)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        finally:
+            asyncio.sleep = real_sleep  # type: ignore[assignment]
+
+        assert slept[0] == 60, "a one-minute interval was stretched to the settle time"

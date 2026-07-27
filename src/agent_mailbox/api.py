@@ -523,6 +523,12 @@ def decode_activity(raw: dict[str, Any]) -> Create:
     return Create(object=msgspec.convert(raw, Note, strict=False))
 
 
+#: How long after startup the first purge runs, when the interval is longer than this.
+#: Not zero — a restart must not delete anything — but far short of an hour, so a hub
+#: that is redeployed often still purges.
+SETTLE_MINUTES = 5
+
+
 def _complain_if_it_died(task: asyncio.Task[None]) -> None:
     """Say so, loudly, if the purge loop ever stops on its own.
 
@@ -569,8 +575,22 @@ async def purge_forever(house: House, minutes: int) -> None:
     abandoned transaction and took the hub's mail down for eleven minutes, and a purge
     that kills the hub it maintains would be the same mistake wearing a different hat.
     """
+    # The first cycle comes sooner than the rest, and that is not a compromise of the
+    # no-deletion-at-startup rule — it is what makes the rule survivable.
+    #
+    # A hub that is restarted more often than its own interval would otherwise *never*
+    # purge: every restart puts the first cycle another full hour away, and it never
+    # arrives. This is not hypothetical — the hub this shipped on was redeployed roughly
+    # every fifteen minutes on the evening it was written, so with a sixty-minute sleep
+    # it would have run retention exactly never while reporting itself as scheduled.
+    # That is the silent non-expiry this whole mission exists to end, rebuilt.
+    #
+    # Five minutes is long past startup, so nothing is deleted by the act of restarting,
+    # and short enough that no plausible restart cadence can starve it.
+    delay = min(minutes, SETTLE_MINUTES)
     while True:
-        await asyncio.sleep(minutes * 60)
+        await asyncio.sleep(delay * 60)
+        delay = minutes
         try:
             started = time.monotonic()
             doomed = await house.purge()
