@@ -70,6 +70,7 @@ task inside it needs none of that. FR-003 adds an operator-triggered path anyway
 | FR-001 | The hub runs expiry on a schedule while it is up, without being asked. | proposed |
 | FR-002 | The interval is configurable (`AGENT_MAILBOX_PURGE_INTERVAL_MINUTES`), defaults to 60, and a value of `0` disables scheduled purging entirely. | proposed |
 | FR-003 | An operator can trigger a purge on demand and see what it did, without restarting the hub. | proposed |
+| FR-008 | An operator can ask what a purge **would** remove without removing it: a dry run reporting the threads and messages that would go, and how many, changing nothing. | proposed |
 | FR-004 | Every purge is logged with what it removed, how long it took, and how large the store was — enough to decide later whether 14 days is the right window. | proposed |
 | FR-005 | A purge that fails is logged and does not stop the hub, and does not prevent the next one. | proposed |
 | FR-006 | Purging never runs inside a request. No agent's call pays for housekeeping. | proposed |
@@ -101,6 +102,43 @@ task inside it needs none of that. FR-003 adds an operator-triggered path anyway
 | SC-003 | The logs, after a week, are enough to say whether 14 days is too long. |
 | SC-004 | A hub whose store has never been purged survives its first purge. |
 | SC-005 | The promise in the onboarding prompt is true. |
+
+## FR-008 — dry run before the first real one
+
+Proposed by ludmila_coe in review, and better than what this mission originally asked
+for. FR-003 lets an operator see what a purge *did*; FR-008 lets them see what one
+*would* do, before anything is gone.
+
+The case it exists for is the one that should worry us most: **the first purge on a hub
+that has never purged.** Its blast radius is unknown by definition — no hub has ever run
+this code, so nobody has ever seen what it removes. A dry run turns an irreversible
+first step into a readable one.
+
+It should report, per thread rather than per message, because the decision is per thread:
+the thread's subject, its most recent activity, how many messages would go with it, and
+the total. A list of message ids is not something anyone can sanity-check; "this
+conversation, idle since 3 July, 14 messages" is.
+
+**There are no tombstones**, and the dry run is the only place that matters. Expiry is
+real removal — objects go and their read-state rows go with them — so afterwards a
+purged thread is indistinguishable from one that never existed. There is no undo and no
+record. That is a deliberate property of the current design, not an oversight, but it
+means the dry run is the *only* opportunity anyone gets to disagree with a purge.
+
+### Acceptance for FR-008
+
+Against a fixture with messages on both sides of the retention boundary, and — the case
+that matters — **one thread that straddles it**, with a root older than the cutoff and a
+reply newer than it:
+
+- the dry run reports the straddling thread as **kept**, in full, including its old root
+- it reports a fully idle thread as **going**, with all of its messages counted
+- running it twice changes nothing and reports the same thing both times
+- a real purge immediately afterwards removes exactly what the dry run named — no more,
+  and nothing it did not mention
+
+That last one is the requirement that makes the feature worth having. A dry run whose
+answer differs from the real thing is worse than none, because it will be trusted.
 
 ## Notes for the implementer
 
