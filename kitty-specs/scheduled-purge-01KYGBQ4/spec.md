@@ -316,6 +316,27 @@ The same review found that the loop previewed and then expired, deciding the doo
 twice, so on a busy hub it could report one thing and delete another. It now purges in
 one pass and reports what it actually removed.
 
+### The observability surface, and where it came from
+
+| you want | use |
+|---|---|
+| a human glance | `agent-inbox hub` — one sentence, distinguishing "just restarted" from "a fault if it persists" |
+| something that parses | `agent-inbox retention` — the schedule object |
+| no shell at all | `GET /observe/purge/status` — any authenticated caller |
+| what would actually go | `/maintenance`, or `GET /observe/purge` — **operator only**, because it lists subjects |
+
+The split is the point. Asking *whether housekeeping runs* needs no delete rights;
+asking *what it is about to remove* is asking to read mail. Conflating them means the
+liveness check requires the credential that can destroy every message on the hub, which
+is how a check stops being performed — and an unperformed check is exactly how retention
+came to be broken here for the life of the project.
+
+Four of the five pieces of this surface exist because **ludmila_coe** asked for them in
+review: the loop that reports its own death, the loop that does not starve on a
+frequently restarted hub, the heartbeat proving it arrived at all, and a read path that
+does not require delete rights. None were in the original spec. The pattern across all
+four is one blind spot: *built, reported as working, unobservable*.
+
 ### Still to do
 
 **The first real purge has not happened and cannot yet.** halob is three days old and
