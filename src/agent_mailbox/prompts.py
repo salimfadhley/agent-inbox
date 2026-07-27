@@ -48,10 +48,10 @@ from __future__ import annotations
 #: included. Not degraded-but-acceptable: the same answer.
 #:
 #: That last part explains why the floor can be this old, and when it will next move.
-#: 0.17.1 is where an inbox row became a Note with its body withheld, in ActivityStreams
-#: vocabulary, rather than a new dialect. Everything since has added fields to that shape
-#: without changing it, so 0.17.1 reads the current format natively. Raise this when we
-#: change what a row *is* — not when we add commands.
+#: 0.17.1 is where an inbox row became a Note with its body withheld, in
+#: ActivityStreams vocabulary, rather than a new dialect. Everything since has added
+#: fields to that shape without changing it, so 0.17.1 reads the current format
+#: natively. Raise this when we change what a row *is* — not when we add commands.
 #:
 #: Re-run that check when raising it. ludmila_coe supplied the probe.
 MINIMUM_CLIENT = "0.17.1"
