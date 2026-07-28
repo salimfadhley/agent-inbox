@@ -70,7 +70,7 @@ src/agent_inbox/
 
 tests/
 ├── test_store_contract.py   # MODIFIED — settings behave the same on both stores
-├── test_serve.py            # MODIFIED — precedence, including unset-after-override
+├── test_hub_settings.py     # NEW — precedence, including unset-after-override
 ├── test_api.py              # MODIFIED — descriptor fields, operator gating
 └── test_console.py          # MODIFIED — the tab, and the disabled-field rendering
 ```
@@ -100,7 +100,7 @@ hub, so they belong in the store the hub already owns rather than in a new compo
 - **Purpose**: environment over stored, always; and the ability to say *which*, because
   the console cannot render a disabled field without knowing.
 - **Relevant requirements**: FR-004, FR-005
-- **Affected surfaces**: `serve.py`, `test_serve.py`
+- **Affected surfaces**: `serve.py`, `test_hub_settings.py`
 - **Sequencing/depends-on**: IC-01
 - **Risks**: **the one that matters.** Overriding must not erase. An operator who sets an
   environment variable, restarts, then unsets it must get their configured value back — if

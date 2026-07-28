@@ -9,6 +9,7 @@
   "purpose_context": "This mission advances a hub has a name of its own on main so stakeholders can track the work from mission creation onward.",
   "purpose_tldr": "a hub has a name of its own",
   "slug": "a-hub-has-a-name-of-its-own-01KYMD90",
-  "target_branch": "main",
-  "topology": "single_branch"
+  "target_branch": "feat/hub-identity",
+  "topology": "coord",
+  "coordination_branch": "kitty/mission-a-hub-has-a-name-of-its-own-01KYMD90"
 }
