@@ -37,7 +37,7 @@ tags: []
 task_type: implement
 ---
 
-# Work Package Prompt: WP04 – The Federation tab, with governed fields shown not offered
+# Work Package Prompt: WP04 – The Settings tab, with a Federation section
 
 ## ⚡ Do This First: Load Agent Profile
 
@@ -121,13 +121,19 @@ spec-kitty agent action implement WP04 --agent <name>
 
 ## Subtasks & Detailed Guidance
 
-### T017 — A Federation tab and its navigation entry
+### T017 — A Settings tab, with sections, the first being Federation
 
-- **Purpose**: a home for hub identity, and later for federation itself.
+- **Purpose**: a container for everything an operator configures — federation first,
+  retention and expiry next ([#21](https://github.com/salimfadhley/agent-inbox/issues/21)).
 - **Files**: `src/agent_inbox/console.py`
 - **Steps**:
+  0. **Build the container, not just the section.** The operator's decision on 2026-07-28
+     was a Settings tab with multiple sub-sections. A Federation tab would be renamed
+     within the week, and renaming a tab costs code, tests and docs.
   1. Add the tab alongside the existing ones, using whatever mechanism they already use.
-     Consistency with the existing console matters more than any improvement to it.
+     Consistency with the existing console matters more than any improvement to it. Give
+     sections a shape the next one can be dropped into without restructuring — a heading
+     and a block, not a bespoke layout for the only section that exists today.
   2. Apply `_gate` exactly as the neighbouring tabs do. Where the hub authenticates, an
      operator session is required; where it does not, the console is already open and this
      changes nothing.
