@@ -4,7 +4,8 @@
 - Raised by: `ludmila_coe` (host), **#2** on her revised list, 2026-07-27
 - Evidence from: `nicole_ruzickova`, validating the v0.21.1 deploy on halob
 - Related: [`auth-mode-truthful-error-text-01KYJZ81`](../auth-mode-truthful-error-text-01KYJZ81/spec.md) — same `auth-mode truthfulness` theme, deliberately separate mission
-- Status: **specified, not started.** Awaiting human prioritisation.
+- Status: **specified, decisions taken, not started.** The operator selected both-modes-in-CI
+  on 2026-07-28; two open questions remain, both narrow.
 
 ## What this is
 
@@ -66,31 +67,72 @@ So the suite reads that first and asserts what is true for the hub in front of i
 This has a second benefit worth stating: a suite that reads the advertised mode can also
 check the advertisement is *honest*, which is a defect class nothing currently covers.
 
+**Both modes run in CI** (operator decision, 2026-07-28).
+
+A correction to an earlier draft of this spec, which claimed CI had no deployment to test
+against. It does, and has all along — the `smoke` job builds the image, runs the real
+compose topology, and already executes `tests/live`:
+
+```yaml
+- name: Run the live smoke tests
+  env:
+    LIVE_HUB_URL: http://localhost:8080
+    LIVE_CONSOLE_URL: http://localhost:8082
+  run: uv run pytest tests/live -v
+```
+
+So the **open** path has continuous cover. The **enforcing** path — what halob and every
+production hub actually run — has none. That is the gap, and it is the more valuable half:
+an auth regression today reaches production without any test having a chance to see it.
+
+Running both also makes the suite prove its own mode detection, by exercising both
+branches on every push. A mode-aware suite that only ever meets one mode is a mode-aware
+suite in name.
+
+### Getting a credential in CI, unattended
+
+The enforcing pass needs a device token, and minting one requires an **operator** session
+(`provide_operator`), which means password plus TOTP. That is automatable today with no
+product change, using only public surface:
+
+1. Start the hub with `AGENT_MAILBOX_AUTH_MODE=enforce`.
+2. Take the initial admin password from the container log — the hub emits
+   `initial admin password: …` on first run.
+3. `GET /auth/enrol` for a TOTP secret and recovery codes.
+4. Compute a code with `agent_mailbox.auth.totp`.
+5. `POST /auth/enrol` to finish first-run and obtain a session.
+6. `POST /auth/agents/{name}/tokens` to mint the device token.
+
+Worth noticing what that buys beyond a credential: it exercises the **entire operator
+bootstrap chain** — first-run password, enrolment, 2FA, session, token mint — live, on the
+shipped image. Nothing tests that today, and it is the path every new deployment takes
+exactly once, at the moment when getting it wrong is most expensive.
+
+Step 2 is the weak link: scraping a log line is fragile, and the line is not a contract.
+See open question 1.
+
 ## Functional requirements
 
-- **FR-001** — The suite fetches `GET /` first and records the advertised auth mode. If
-  that fetch fails, the suite fails immediately with a clear message rather than
-  proceeding to produce misleading per-test failures.
-- **FR-002** — Every live assertion is expressed against the recorded mode: expected
-  status codes and expected console copy both follow from it.
-- **FR-003** — **Negative check:** if the hub advertises `authenticated: true` but a
-  protected route answers unauthenticated, that is a failure. This is the check that only
-  becomes possible once the suite reads the advertisement, and it catches a hub whose
-  claims and behaviour disagree.
-- **FR-004** — Auth-relevant tests are named or marked so `-k auth` selects them rather
-  than deselecting everything.
-- **FR-005** — Credentials come from the environment, never from repo files, and the
-  suite skips with a clear reason when an enforcing hub is named without a credential —
-  distinguishing "cannot test this" from "this failed".
-- **FR-006** — The suite reports what it did not run. A run where everything skipped must
-  not look like a clean pass.
+| ID | Requirement | Status |
+|---|---|---|
+| FR-001 | The suite fetches `GET /` first and records the advertised auth mode. If that fetch fails it stops immediately with a clear message, rather than proceeding to produce misleading per-test failures. | planned |
+| FR-002 | Every live assertion is expressed against the recorded mode: expected status codes and expected console copy both follow from it. | planned |
+| FR-003 | **Negative check:** a hub advertising `authenticated: true` while a protected route answers unauthenticated is a failure. Only possible once the suite reads the advertisement, and it catches a hub whose claims and behaviour disagree. | planned |
+| FR-004 | Auth-relevant tests are named or marked so `-k auth` selects them, rather than deselecting all 11 as it does today. | planned |
+| FR-005 | Credentials come from the environment, never from repo files. Against an enforcing hub with no credential the suite skips with a stated reason — distinguishing "cannot test this" from "this failed". | planned |
+| FR-006 | The suite reports what it did not run. A run where everything skipped must not look like a clean pass. | planned |
+| FR-007 | CI runs the suite twice: against the existing open hub, and against one started with `AGENT_MAILBOX_AUTH_MODE=enforce`. Both must pass for the job to pass. | planned |
+| FR-008 | The enforcing pass obtains its own credential unattended by the bootstrap chain above. No secret in the repository, and none configured as a CI secret — the hub is created fresh for the run and destroyed with it. | planned |
+| FR-009 | The bootstrap is asserted, not merely used. If first-run enrolment or token minting breaks, the job fails *saying so*, rather than surfacing as a confusing auth failure in an unrelated live test. | planned |
+| FR-010 | The enforcing pass fails if it ends up running unauthenticated. A credential that turns out not to be needed would make the entire second pass vacuous — the failure shape this mission exists to remove from live validation. | planned |
 
 ## Non-functional requirements
 
-- **NFR-001** — No deployment hostnames in the repo. Hub and console come from
-  `LIVE_HUB_URL` / `LIVE_CONSOLE_URL`, per the generic-only rule in `AGENTS.md`.
-- **NFR-002** — Failure output must name the mode it assumed, so a wrong assumption is
-  diagnosable from the failure alone.
+| ID | Requirement | Threshold | Status |
+|---|---|---|---|
+| NFR-001 | No deployment hostnames in the repo. | Hub and console come from `LIVE_HUB_URL` / `LIVE_CONSOLE_URL`, per the generic-only rule in `AGENTS.md` | planned |
+| NFR-002 | A failure is diagnosable from its own output. | The failure names the mode the suite assumed, so a wrong assumption is visible without re-running | planned |
+| NFR-003 | The second CI pass does not materially slow the job. | The enforcing pass reuses the built image; no second build | planned |
 
 ## Test matrix
 
@@ -104,15 +146,24 @@ check the advertisement is *honest*, which is a defect class nothing currently c
 | `pytest tests/live -k auth` | selects the auth cases |
 | Console copy, enforcing hub | asserts the authenticated copy; does not require the warning |
 | Console copy, open hub | asserts the `does not authenticate` warning is present |
+| CI, open pass | passes, as today |
+| CI, enforcing pass | passes, having minted its own token |
+| CI, enforcing pass with the credential removed | **fails** — proves the pass is not vacuous |
+| CI, first-run bootstrap broken | fails naming the bootstrap, not some downstream test |
 
 ## Open questions for the human
 
-1. **Should CI run this against a real hub?** Today it cannot — CI has no deployment. The
-   `smoke` job runs the compose topology, so an enforcing hub could be stood up there.
-   That would be a larger change and is not assumed by this spec.
-2. **Credential shape for the suite** — device token via environment is the obvious
-   answer, but this should match whatever the operator flow actually is rather than
-   inventing a test-only path.
+1. **Is scraping the initial admin password from the log acceptable, or should the hub
+   gain a documented bootstrap?** The chain above works today with no product change, but
+   it depends on a log line that is not a contract — reword it and CI breaks somewhere
+   unrelated-looking. The alternatives are to treat that line as a contract and test it,
+   or to add a first-run admin secret read from the environment. The latter is real
+   product surface with security consequences on a hub exposed to a network, so it should
+   not be added casually as a side effect of wanting a test. **Recommendation: treat the
+   log line as a contract and assert it, then revisit if it proves annoying.**
+2. **Should the enforcing pass use its own compose file or the existing one with an
+   override?** An override keeps one topology definition, which matters because the
+   compose file is itself part of what the smoke job validates.
 
 ## Out of scope
 
