@@ -20,10 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox import rules
-from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
-from agent_mailbox.sqlite_store import SqliteStore
-from agent_mailbox.store import InMemoryStore, MessageStore
+from agent_inbox import rules
+from agent_inbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_inbox.sqlite_store import SqliteStore
+from agent_inbox.store import InMemoryStore, MessageStore
 
 
 @asynccontextmanager

@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from agent_mailbox import api as api_module
+from agent_inbox import api as api_module
 
 #: Hub / engine modules — the harness-agnostic core. None of these may mention the wake.
 _HUB_MODULES = (

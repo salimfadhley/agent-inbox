@@ -23,9 +23,9 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from agent_mailbox import __version__
-from agent_mailbox.exceptions import ReleaseGateError
-from agent_mailbox.prompts import MINIMUM_CLIENT, onboarding
+from agent_inbox import __version__
+from agent_inbox.exceptions import ReleaseGateError
+from agent_inbox.prompts import MINIMUM_CLIENT, onboarding
 
 LOGGER = logging.getLogger(__name__)
 

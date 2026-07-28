@@ -1,6 +1,6 @@
 """ActivityStreams on the wire, and the only place that maps it to records.
 
-Two shapes, deliberately not one. :mod:`agent_mailbox.records` is storage; these structs
+Two shapes, deliberately not one. :mod:`agent_inbox.records` is storage; these structs
 are what goes over HTTP. They differ in ways that matter — the wire nests a ``Note``
 inside a ``Create``, uses camelCase, and renders identifiers as absolute URIs — so a
 single model would serve neither well.
@@ -23,8 +23,8 @@ from typing import Any
 
 import msgspec
 
-from agent_mailbox.records import ActorRecord, ObjectRecord
-from agent_mailbox.vocabulary import AS2_CONTEXT
+from agent_inbox.records import ActorRecord, ObjectRecord
+from agent_inbox.vocabulary import AS2_CONTEXT
 
 #: Properties we model. Anything else in an inbound document is unknown to us and is
 #: kept verbatim rather than dropped.

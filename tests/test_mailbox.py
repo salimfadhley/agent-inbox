@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox.exceptions import NameUnavailable, NoSuchMessage, UnknownActor
-from agent_mailbox.mailbox import Mailbox
-from agent_mailbox.records import ActorRecord
-from agent_mailbox.sqlite_store import SqliteStore
-from agent_mailbox.store import InMemoryStore, MessageStore
-from agent_mailbox.vocabulary import ActorType
+from agent_inbox.exceptions import NameUnavailable, NoSuchMessage, UnknownActor
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.records import ActorRecord
+from agent_inbox.sqlite_store import SqliteStore
+from agent_inbox.store import InMemoryStore, MessageStore
+from agent_inbox.vocabulary import ActorType
 
 ROSEMARY = "rosemary_nasrin"
 TREVOR = "trevor_mahmood"
@@ -351,8 +351,8 @@ class TestRetroactiveMembership:
     async def test_a_late_joiner_cannot_read_the_groups_past(
         self, mailbox: Mailbox
     ) -> None:
-        from agent_mailbox.records import ActorRecord as _Actor
-        from agent_mailbox.vocabulary import ActorType as _Type
+        from agent_inbox.records import ActorRecord as _Actor
+        from agent_inbox.vocabulary import ActorType as _Type
 
         await joined(mailbox, ROSEMARY, TREVOR)
         await mailbox._store.claim_name(_Actor(name="ops", actor_type=_Type.GROUP))
@@ -370,8 +370,8 @@ class TestRetroactiveMembership:
     async def test_a_late_joiner_cannot_attach_to_the_groups_past(
         self, mailbox: Mailbox
     ) -> None:
-        from agent_mailbox.records import ActorRecord as _Actor
-        from agent_mailbox.vocabulary import ActorType as _Type
+        from agent_inbox.records import ActorRecord as _Actor
+        from agent_inbox.vocabulary import ActorType as _Type
 
         await joined(mailbox, ROSEMARY, TREVOR)
         await mailbox._store.claim_name(_Actor(name="ops", actor_type=_Type.GROUP))
@@ -388,8 +388,8 @@ class TestRetroactiveMembership:
         self, mailbox: Mailbox
     ) -> None:
         """The fix must not break the point of groups."""
-        from agent_mailbox.records import ActorRecord as _Actor
-        from agent_mailbox.vocabulary import ActorType as _Type
+        from agent_inbox.records import ActorRecord as _Actor
+        from agent_inbox.vocabulary import ActorType as _Type
 
         await joined(mailbox, ROSEMARY, YITZHAK)
         await mailbox._store.claim_name(_Actor(name="ops", actor_type=_Type.GROUP))

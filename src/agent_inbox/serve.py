@@ -18,14 +18,14 @@ from datetime import timedelta
 
 from litestar import Litestar
 
-from agent_mailbox.api import build_api
-from agent_mailbox.auth import secrets as auth_secrets
-from agent_mailbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
-from agent_mailbox.auth.store import SqliteAuthStore
-from agent_mailbox.auth.throttle import LoginThrottle
-from agent_mailbox.house import House
-from agent_mailbox.mailbox import Mailbox
-from agent_mailbox.sqlite_store import SqliteStore
+from agent_inbox.api import build_api
+from agent_inbox.auth import secrets as auth_secrets
+from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
+from agent_inbox.auth.store import SqliteAuthStore
+from agent_inbox.auth.throttle import LoginThrottle
+from agent_inbox.house import House
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.sqlite_store import SqliteStore
 
 logger = logging.getLogger(__name__)
 

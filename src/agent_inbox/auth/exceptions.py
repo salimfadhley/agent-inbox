@@ -1,6 +1,6 @@
 """What the auth layer raises.
 
-Separate from :mod:`agent_mailbox.exceptions` on purpose — the auth package
+Separate from :mod:`agent_inbox.exceptions` on purpose — the auth package
 does not import the messaging engine and vice-versa. Same discipline, though:
 every error carries a stable ``code`` the edge maps to an HTTP status without
 pattern-matching on English.

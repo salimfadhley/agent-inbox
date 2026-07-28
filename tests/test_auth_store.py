@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
-from agent_mailbox.auth.records import DeviceToken, EnrolmentState, Session, User
-from agent_mailbox.auth.store import InMemoryAuthStore, SqliteAuthStore
+from agent_inbox.auth.records import DeviceToken, EnrolmentState, Session, User
+from agent_inbox.auth.store import InMemoryAuthStore, SqliteAuthStore
 
 
 @pytest_asyncio.fixture(params=["memory", "sqlite"])

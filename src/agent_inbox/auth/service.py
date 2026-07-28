@@ -18,16 +18,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from agent_mailbox.auth import secrets, totp
-from agent_mailbox.auth.exceptions import (
+from agent_inbox.auth import secrets, totp
+from agent_inbox.auth.exceptions import (
     BadCredentials,
     EnrolmentRequired,
     TokenRevoked,
 )
-from agent_mailbox.auth.records import DeviceToken, EnrolmentState, Session, User
-from agent_mailbox.auth.store import AuthStore
+from agent_inbox.auth.records import DeviceToken, EnrolmentState, Session, User
+from agent_inbox.auth.store import AuthStore
 
-logger = logging.getLogger("agent_mailbox.auth")
+logger = logging.getLogger("agent_inbox.auth")
 
 #: **A contract, not a log message.** An unattended setup — CI standing up an enforcing
 #: hub, or an operator scripting a deployment — has no other way to learn the password

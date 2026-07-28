@@ -31,8 +31,8 @@ from typing import Any
 
 import click
 
-from agent_mailbox import __version__
-from agent_mailbox.client import (
+from agent_inbox import __version__
+from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
     ClientError,
@@ -244,7 +244,7 @@ def cli(ctx: click.Context, engine: str | None) -> None:
 )
 def mcp(project: str | None) -> int:
     """Run as an MCP server over stdio (for an agent)."""
-    from agent_mailbox.mcp_client import main as run_mcp
+    from agent_inbox.mcp_client import main as run_mcp
 
     run_mcp(Path(project).expanduser() if project else None)
     return 0
@@ -258,7 +258,7 @@ def console(host: str, port: int) -> int:
     try:
         import uvicorn
 
-        from agent_mailbox.console import build_console
+        from agent_inbox.console import build_console
     except ImportError as exc:  # pragma: no cover - only without server extras
         _err(f"the console needs the server dependencies: {exc}")
         return 1
@@ -281,7 +281,7 @@ def console(host: str, port: int) -> int:
 def serve(reset_user_table: bool) -> int:
     """Run the hub."""
     try:
-        from agent_mailbox.serve import main as run_hub
+        from agent_inbox.serve import main as run_hub
     except ImportError as exc:  # pragma: no cover - only without server extras
         _err(f"the hub needs the server dependencies: {exc}")
         return 1
@@ -304,9 +304,9 @@ def reset_admin(username: str) -> int:
     try:
         import anyio
 
-        from agent_mailbox.auth.service import AuthService
-        from agent_mailbox.auth.store import SqliteAuthStore
-        from agent_mailbox.serve import Settings
+        from agent_inbox.auth.service import AuthService
+        from agent_inbox.auth.store import SqliteAuthStore
+        from agent_inbox.serve import Settings
     except ImportError as exc:  # pragma: no cover - only without server extras
         _err(f"this runs on the hub and needs its dependencies: {exc}")
         return 1
@@ -1115,7 +1115,7 @@ def wake_check(
     event: str, wait: bool, poll_interval: float, wait_timeout: float
 ) -> int:
     """Session hook: notice new mail (fail-silent)."""
-    from agent_mailbox.wake import run
+    from agent_inbox.wake import run
 
     return run(
         event,
@@ -1140,7 +1140,7 @@ def wake_check(
 )
 def install_hook(directory: str | None, command: str, rewake: bool) -> int:
     """Add the wake hooks to .claude/settings.json."""
-    from agent_mailbox import hookconfig
+    from agent_inbox import hookconfig
 
     root = Path(directory) if directory else project_root()
     path = hookconfig.install(root, command=command, rewake=rewake)
@@ -1154,7 +1154,7 @@ def install_hook(directory: str | None, command: str, rewake: bool) -> int:
 @click.option("--dir", "directory", help="project dir (default: this repo root)")
 def uninstall_hook(directory: str | None) -> int:
     """Remove the wake hooks from .claude/settings.json."""
-    from agent_mailbox import hookconfig
+    from agent_inbox import hookconfig
 
     root = Path(directory) if directory else project_root()
     click.echo(f"wake hooks removed from {hookconfig.uninstall(root)}")

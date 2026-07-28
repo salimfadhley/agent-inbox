@@ -31,10 +31,10 @@ from typing import Any, Self
 
 import aiosqlite
 
-from agent_mailbox.exceptions import StoreNotOpen
-from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
-from agent_mailbox.store import MessageStore
-from agent_mailbox.vocabulary import ActorType, ObjectType
+from agent_inbox.exceptions import StoreNotOpen
+from agent_inbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_inbox.store import MessageStore
+from agent_inbox.vocabulary import ActorType, ObjectType
 
 #: Bumped when the schema changes shape. There is nothing to migrate *from* yet: this
 #: package is a fresh start, and the superseded implementation's data is not carried

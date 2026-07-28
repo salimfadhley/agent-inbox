@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from agent_mailbox import __version__
-from agent_mailbox.cli import force_utf8, main
-from agent_mailbox.client import CONFIG_NAME, ClientError, Config
+from agent_inbox import __version__
+from agent_inbox.cli import force_utf8, main
+from agent_inbox.client import CONFIG_NAME, ClientError, Config
 
 
 def test_version_is_asked_for_without_a_subcommand(
@@ -44,7 +44,7 @@ def test_every_documented_command_exists() -> None:
     A command named in text and missing from the program is a dead end an agent cannot
     diagnose, and the two drift apart silently.
     """
-    from agent_mailbox.cli import cli
+    from agent_inbox.cli import cli
 
     names = set(cli.commands)
     assert {"doctor", "join", "config", "mcp", "serve", "console", "ping"} <= names
@@ -117,7 +117,7 @@ def test_doctor_keeps_the_global_token_when_identity_is_unresolved(
     monkeypatch.delenv("CODEX_MANAGED_BY_NPM", raising=False)
     monkeypatch.delenv("CODEX_CI", raising=False)
     monkeypatch.delenv("AGENT_MAILBOX_TOKEN", raising=False)
-    monkeypatch.setattr("agent_mailbox.cli.HubClient", FakeHubClient)
+    monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
 
     assert main(["doctor"]) == 2
 
@@ -370,7 +370,7 @@ class TestExplicitEngine:
             def remote_doctor(self) -> dict[str, Any]:
                 return {"you": {"token": "not presented"}, "verdict": "no token needed"}
 
-        monkeypatch.setattr("agent_mailbox.cli.HubClient", Reachable)
+        monkeypatch.setattr("agent_inbox.cli.HubClient", Reachable)
         main(["doctor"])
         assert "join --engine <engine>" in capsys.readouterr().out
 
@@ -387,7 +387,7 @@ class TestHubReportsRetentionLiveness:
     def _run(self, monkeypatch: pytest.MonkeyPatch, status: dict[str, Any]) -> str:
         from click.testing import CliRunner
 
-        from agent_mailbox import cli as cli_module
+        from agent_inbox import cli as cli_module
 
         class Fake:
             def __init__(self, config: Any) -> None:
@@ -464,7 +464,7 @@ class TestRetentionCommand:
     def _run(self, monkeypatch: pytest.MonkeyPatch, status: dict[str, Any]) -> str:
         from click.testing import CliRunner
 
-        from agent_mailbox import cli as cli_module
+        from agent_inbox import cli as cli_module
 
         class Fake:
             def __init__(self, config: Any) -> None:
@@ -527,7 +527,7 @@ class TestTheSuiteCannotSeeTheRunningAgent:
     ) -> None:
         import os
 
-        from agent_mailbox.client import ENGINE_MARKERS, detect_engine
+        from agent_inbox.client import ENGINE_MARKERS, detect_engine
 
         present = [m for m, _ in ENGINE_MARKERS if os.environ.get(m)]
         assert not present, (
@@ -540,7 +540,7 @@ class TestTheSuiteCannotSeeTheRunningAgent:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Stripping must not stop a test setting a marker deliberately."""
-        from agent_mailbox.client import detect_engine
+        from agent_inbox.client import detect_engine
 
         monkeypatch.setenv("CODEX_HOME", "/somewhere")
         assert detect_engine() == "codex"
@@ -572,7 +572,7 @@ class TestDoctorExitCodes:
             return {"you": "rosemary_nasrin"}
 
     def _patch(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("agent_mailbox.cli.HubClient", self._Hub)
+        monkeypatch.setattr("agent_inbox.cli.HubClient", self._Hub)
         for var in (
             "AGENT_MAILBOX_HUB",
             "AGENT_MAILBOX_NAME",
@@ -655,7 +655,7 @@ class TestDoctorExitCodes:
         failure — the same inference the exit code got wrong."""
         from click.testing import CliRunner
 
-        from agent_mailbox.cli import cli
+        from agent_inbox.cli import cli
 
         text = CliRunner().invoke(cli, ["doctor", "--help"]).output
         for marker in ("ok", "--", "FAIL"):

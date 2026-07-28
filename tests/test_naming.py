@@ -6,9 +6,9 @@ from collections import Counter
 
 import pytest
 
-from agent_mailbox.exceptions import NameUnavailable
-from agent_mailbox.name_pool import FAMILY_NAMES, GIVEN_NAMES, NAME_POOL
-from agent_mailbox.naming import (
+from agent_inbox.exceptions import NameUnavailable
+from agent_inbox.name_pool import FAMILY_NAMES, GIVEN_NAMES, NAME_POOL
+from agent_inbox.naming import (
     RESERVED_NAMES,
     Name,
     generate,

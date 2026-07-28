@@ -1,7 +1,7 @@
 """The hub's one machine interface.
 
 ActivityStreams on the wire, ActivityPub's route shape, served over a
-:class:`~agent_mailbox.house.House` so that house rules apply to everything reachable
+:class:`~agent_inbox.house.House` so that house rules apply to everything reachable
 from outside.
 
 **This module adds no messaging logic.** Who receives a copy, which turns of a
@@ -37,19 +37,19 @@ from litestar.exceptions import HTTPException
 from litestar.handlers.base import BaseRouteHandler
 from litestar.openapi import OpenAPIConfig
 
-from agent_mailbox import __version__
-from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
-from agent_mailbox.auth.records import SHARED_ACTOR
-from agent_mailbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
-from agent_mailbox.auth.throttle import LoginThrottle
-from agent_mailbox.errors import (
+from agent_inbox import __version__
+from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
+from agent_inbox.auth.records import SHARED_ACTOR
+from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
+from agent_inbox.auth.throttle import LoginThrottle
+from agent_inbox.errors import (
     auth_error_handler,
     mailbox_error_handler,
     store_busy_handler,
 )
-from agent_mailbox.exceptions import MailboxError
-from agent_mailbox.house import House
-from agent_mailbox.wire import (
+from agent_inbox.exceptions import MailboxError
+from agent_inbox.house import House
+from agent_inbox.wire import (
     BLIND_FIELDS,
     Actor,
     Collection,
@@ -64,12 +64,12 @@ from agent_mailbox.wire import (
 IDENTITY_HEADER = "X-Agent-Name"
 
 #: The human session cookie set by /auth/login and carried by the console.
-SESSION_COOKIE = "agent_mailbox_session"
+SESSION_COOKIE = "agent_inbox_session"
 
 #: ActivityStreams asks for this; plain JSON clients are not refused for lacking it.
 ACTIVITY_JSON = "application/activity+json"
 
-api_logger = logging.getLogger("agent_mailbox.api")
+api_logger = logging.getLogger("agent_inbox.api")
 
 
 def caller_name(request: Request) -> str:
@@ -143,7 +143,7 @@ def unmangled_timestamp(value: str) -> str:
     have been a ``+``. **Timestamps only** — never an id, which is hex and could in
     principle carry a space meaningfully in some future format.
 
-    `agent_mailbox.client` escapes correctly and always did, so this repairs nothing
+    `agent_inbox.client` escapes correctly and always did, so this repairs nothing
     that was broken for it. It is for the clients ADR 0005 and the published OpenAPI
     schema invite, which will reasonably treat an opaque string as opaque.
     """

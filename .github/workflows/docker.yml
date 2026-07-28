@@ -81,7 +81,7 @@ jobs:
       - name: Verify PyPI can satisfy the prompt floor
         if: steps.kind.outputs.release == 'true'
         run: >-
-          uv run python -m agent_mailbox.release_gate
+          uv run python -m agent_inbox.release_gate
           --check prompt-floor
           --version "${{ steps.version.outputs.pep440 }}"
 

@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox.addressing import LOCAL, Address, local_name, parse
-from agent_mailbox.exceptions import (
+from agent_inbox.addressing import LOCAL, Address, local_name, parse
+from agent_inbox.exceptions import (
     AddressError,
     DeliversToNobody,
     MailboxError,
@@ -24,9 +24,9 @@ from agent_mailbox.exceptions import (
     UnknownActor,
     UnknownRecipient,
 )
-from agent_mailbox.mailbox import Mailbox
-from agent_mailbox.sqlite_store import SqliteStore
-from agent_mailbox.store import InMemoryStore
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.sqlite_store import SqliteStore
+from agent_inbox.store import InMemoryStore
 
 
 @pytest.fixture(params=("in_memory", "sqlite"))

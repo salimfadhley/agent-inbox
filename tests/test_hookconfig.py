@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_mailbox import hookconfig
+from agent_inbox import hookconfig
 
 
 def _count_ours(settings: dict) -> int:

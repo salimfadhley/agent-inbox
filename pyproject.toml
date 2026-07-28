@@ -65,10 +65,10 @@ ui = [
 
 [project.scripts]
 # One command, several modes: `agent-mailbox mcp`, `serve`, `join`, `inbox`, …
-agent-mailbox = "agent_mailbox.cli:main"
+agent-mailbox = "agent_inbox.cli:main"
 # The project's true name, and increasingly what people type. Both names run the same
 # program; `agent-mailbox` stays because it is wired into deployments and hooks.
-agent-inbox = "agent_mailbox.cli:main"
+agent-inbox = "agent_inbox.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/salimfadhley/agent-inbox"
@@ -83,7 +83,7 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_mailbox"]
+packages = ["src/agent_inbox", "src/agent_mailbox"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "doc", "README.md", "LICENSE"]  # not agent-mailbox-old

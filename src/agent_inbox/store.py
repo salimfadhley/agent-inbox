@@ -2,7 +2,7 @@
 
 **This interface deliberately knows nothing about messaging.** It has no `send`,
 no `inbox`, no `thread` — those are rules, and rules live in
-:mod:`agent_mailbox.rules` as pure functions. If a domain verb ever appears here,
+:mod:`agent_inbox.rules` as pure functions. If a domain verb ever appears here,
 logic has leaked into the adapter and the abstraction has stopped earning its
 keep. The test: could a new backend be written by someone who has never read the
 messaging rules?
@@ -26,7 +26,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
-from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_inbox.records import ActorRecord, ObjectRecord, ReadRecord
 
 
 @runtime_checkable

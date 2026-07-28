@@ -16,11 +16,11 @@ from pathlib import Path
 import pytest
 from litestar.testing import TestClient
 
-from agent_mailbox import api as api_module
-from agent_mailbox.api import IDENTITY_HEADER, build_api
-from agent_mailbox.house import House
-from agent_mailbox.mailbox import Mailbox
-from agent_mailbox.store import InMemoryStore
+from agent_inbox import api as api_module
+from agent_inbox.api import IDENTITY_HEADER, build_api
+from agent_inbox.house import House
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.store import InMemoryStore
 
 HUB = "http://hub.invalid"
 ROSEMARY = "rosemary_nasrin"
@@ -628,10 +628,10 @@ class TestSecondReviewFindings:
         enumerate with GET instead of POST and stay invisible — contradicting
         ProbeDetector's own docstring.
         """
-        from agent_mailbox.house import House
-        from agent_mailbox.mailbox import Mailbox
-        from agent_mailbox.policy import ProbeDetector, StandingResidents
-        from agent_mailbox.store import InMemoryStore
+        from agent_inbox.house import House
+        from agent_inbox.mailbox import Mailbox
+        from agent_inbox.policy import ProbeDetector, StandingResidents
+        from agent_inbox.store import InMemoryStore
 
         detector = ProbeDetector(threshold=99)
         house = House(Mailbox(InMemoryStore()), [StandingResidents(), detector])
@@ -848,7 +848,7 @@ class TestCompactInboxPaging:
         lost. `unread` still reports the true backlog, because a count that quietly
         meant "up to fifty" would let a pile-up look handled.
         """
-        from agent_mailbox.api import PAGE
+        from agent_inbox.api import PAGE
 
         join(client, ROSEMARY)
         join(client, TREVOR)
@@ -1052,7 +1052,7 @@ class TestTheScheduler:
         """
         import asyncio
 
-        from agent_mailbox.api import purge_forever
+        from agent_inbox.api import purge_forever
 
         purges = 0
 
@@ -1079,7 +1079,7 @@ class TestTheScheduler:
         """
         import asyncio
 
-        from agent_mailbox.api import purge_forever
+        from agent_inbox.api import purge_forever
 
         attempts = 0
 
@@ -1102,7 +1102,7 @@ class TestTheScheduler:
         """Nothing should be left purging a store that is closing."""
         import asyncio
 
-        from agent_mailbox.api import purge_forever
+        from agent_inbox.api import purge_forever
 
         class Idle:
             async def purge(self) -> tuple[()]:
@@ -1142,7 +1142,7 @@ class TestTheSchedulerDoesNotDieQuietly:
         import asyncio
         import logging
 
-        from agent_mailbox.api import _complain_if_it_died
+        from agent_inbox.api import _complain_if_it_died
 
         async def dies() -> None:
             raise RuntimeError("the event loop went away")
@@ -1150,7 +1150,7 @@ class TestTheSchedulerDoesNotDieQuietly:
         task = asyncio.create_task(dies())
         with contextlib.suppress(RuntimeError):
             await task
-        with caplog.at_level(logging.CRITICAL, logger="agent_mailbox.api"):
+        with caplog.at_level(logging.CRITICAL, logger="agent_inbox.api"):
             _complain_if_it_died(task)
 
         assert caplog.records, "the purge loop died and nothing said anything"
@@ -1165,14 +1165,14 @@ class TestTheSchedulerDoesNotDieQuietly:
         import asyncio
         import logging
 
-        from agent_mailbox.api import _complain_if_it_died
+        from agent_inbox.api import _complain_if_it_died
 
         async def returns() -> None:
             return None
 
         task = asyncio.create_task(returns())
         await task
-        with caplog.at_level(logging.CRITICAL, logger="agent_mailbox.api"):
+        with caplog.at_level(logging.CRITICAL, logger="agent_inbox.api"):
             _complain_if_it_died(task)
 
         assert caplog.records
@@ -1184,7 +1184,7 @@ class TestTheSchedulerDoesNotDieQuietly:
         import asyncio
         import logging
 
-        from agent_mailbox.api import _complain_if_it_died
+        from agent_inbox.api import _complain_if_it_died
 
         async def forever() -> None:
             await asyncio.sleep(3600)
@@ -1194,7 +1194,7 @@ class TestTheSchedulerDoesNotDieQuietly:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-        with caplog.at_level(logging.CRITICAL, logger="agent_mailbox.api"):
+        with caplog.at_level(logging.CRITICAL, logger="agent_inbox.api"):
             _complain_if_it_died(task)
 
         assert not caplog.records, "a normal shutdown logged a crisis"
@@ -1213,7 +1213,7 @@ class TestFrequentRestartsDoNotStarveThePurge:
     async def test_the_first_cycle_does_not_wait_a_whole_interval(self) -> None:
         import asyncio
 
-        from agent_mailbox.api import SETTLE_MINUTES, purge_forever
+        from agent_inbox.api import SETTLE_MINUTES, purge_forever
 
         slept: list[float] = []
         real_sleep = asyncio.sleep
@@ -1248,7 +1248,7 @@ class TestFrequentRestartsDoNotStarveThePurge:
         """An operator asking for every minute must not silently get every five."""
         import asyncio
 
-        from agent_mailbox.api import purge_forever
+        from agent_inbox.api import purge_forever
 
         slept: list[float] = []
         real_sleep = asyncio.sleep
@@ -1286,7 +1286,7 @@ class TestThePurgeHeartbeat:
     async def test_a_completed_cycle_is_visible_to_an_operator(self) -> None:
         import asyncio
 
-        from agent_mailbox.api import PurgeStatus, purge_forever
+        from agent_inbox.api import PurgeStatus, purge_forever
 
         status = PurgeStatus()
         assert status.as_dict()["lastCycle"] is None, "claimed a cycle before running"
@@ -1309,7 +1309,7 @@ class TestThePurgeHeartbeat:
     async def test_a_failing_cycle_is_reported_not_hidden(self) -> None:
         import asyncio
 
-        from agent_mailbox.api import PurgeStatus, purge_forever
+        from agent_inbox.api import PurgeStatus, purge_forever
 
         status = PurgeStatus()
 
@@ -1429,7 +1429,7 @@ class TestThePublishedSchema:
         )
 
     def test_it_names_the_running_version(self, client: TestClient) -> None:
-        from agent_mailbox import __version__
+        from agent_inbox import __version__
 
         assert self._schema(client)["info"]["version"] == __version__
 

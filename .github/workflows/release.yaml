@@ -96,6 +96,6 @@ jobs:
 
       - name: Verify PyPI can satisfy the exact release artifact
         run: >-
-          uv run python -m agent_mailbox.release_gate
+          uv run python -m agent_inbox.release_gate
           --check release-artifact
           --version "${{ steps.version.outputs.pep440 }}"

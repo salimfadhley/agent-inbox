@@ -22,15 +22,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_mailbox.auth import secrets, totp
-from agent_mailbox.auth.exceptions import BadCredentials
-from agent_mailbox.auth.records import EnrolmentState
-from agent_mailbox.auth.service import (
+from agent_inbox.auth import secrets, totp
+from agent_inbox.auth.exceptions import BadCredentials
+from agent_inbox.auth.records import EnrolmentState
+from agent_inbox.auth.service import (
     INITIAL_PASSWORD_LOG_PREFIX,
     INSECURE_ADMIN_WARNING,
     AuthService,
 )
-from agent_mailbox.auth.store import InMemoryAuthStore
+from agent_inbox.auth.store import InMemoryAuthStore
 
 KEY = secrets.generate_key()
 OVERRIDE = "let-me-in-please"
@@ -63,7 +63,7 @@ class TestTheLoggedPassword:
         anything scraping it. Change it deliberately, and say so.
         """
         svc = service()
-        with caplog.at_level(logging.WARNING, logger="agent_mailbox.auth"):
+        with caplog.at_level(logging.WARNING, logger="agent_inbox.auth"):
             password = await svc.bootstrap()
 
         assert password
@@ -157,7 +157,7 @@ class TestTheAdminOverrideWorks:
         """
         svc = service(OVERRIDE)
         await svc.bootstrap()
-        with caplog.at_level(logging.WARNING, logger="agent_mailbox.auth"):
+        with caplog.at_level(logging.WARNING, logger="agent_inbox.auth"):
             await svc.login("admin", OVERRIDE)
 
         logged = " ".join(r.getMessage() for r in caplog.records)

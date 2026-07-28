@@ -22,7 +22,7 @@ from typing import Any, Protocol, Self, runtime_checkable
 
 import aiosqlite
 
-from agent_mailbox.auth.records import DeviceToken, EnrolmentState, Session, User
+from agent_inbox.auth.records import DeviceToken, EnrolmentState, Session, User
 
 #: Bumped when the auth schema changes. Independent of the mailbox schema.
 SCHEMA_VERSION = 1

@@ -23,10 +23,10 @@ from typing import Any
 import pytest
 from litestar.testing import TestClient
 
-from agent_mailbox import __version__
-from agent_mailbox.client import SESSION_COOKIE, ClientError, Config, HubClient
-from agent_mailbox.console import _freshness, build_console
-from agent_mailbox.prompts import MINIMUM_CLIENT
+from agent_inbox import __version__
+from agent_inbox.client import SESSION_COOKIE, ClientError, Config, HubClient
+from agent_inbox.console import _freshness, build_console
+from agent_inbox.prompts import MINIMUM_CLIENT
 
 HUB = "http://mailbox.invalid:8081"
 
@@ -659,7 +659,7 @@ def test_account_without_a_session_asks_to_sign_in(console: TestClient) -> None:
 def test_the_console_holds_no_password() -> None:
     """The console relays credentials; it must never store one. A crude but real check:
     the module source contains no password constant or field."""
-    import agent_mailbox.console as con
+    import agent_inbox.console as con
 
     src = con.__file__
     text = open(src).read()  # noqa: SIM115, PTH123 - a test reading its own source
@@ -1065,7 +1065,7 @@ class TestTheInsecureAdminBanner:
     """The console is where a human notices. It must not be reassuring by omission."""
 
     def _page(self, hub_extra: dict[str, Any]) -> str:
-        from agent_mailbox.console import _page
+        from agent_inbox.console import _page
 
         hub = {"id": HUB, "name": "testhub", "version": "1.2.3", "authenticated": True}
         return _page("Overview", "<p>body</p>", {**hub, **hub_extra})

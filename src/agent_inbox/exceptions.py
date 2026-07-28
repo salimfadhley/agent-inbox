@@ -104,7 +104,7 @@ class DeliversToNobody(AddressError):
     experiment built on it produces a confident false negative.
 
     Addressing **yourself by name** is not this error: see
-    :meth:`~agent_mailbox.mailbox.Mailbox.send`. It is a deliberate act with real uses,
+    :meth:`~agent_inbox.mailbox.Mailbox.send`. It is a deliberate act with real uses,
     so it delivers.
     """
 

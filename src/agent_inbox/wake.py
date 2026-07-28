@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_mailbox.client import HubClient, load_config, project_root
+from agent_inbox.client import HubClient, load_config, project_root
 
 #: Where the announce-once watermark lives — one file per project, beside the config.
 WATERMARK_NAME = ".agent-mailbox-seen.json"

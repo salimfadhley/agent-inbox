@@ -18,7 +18,7 @@ from __future__ import annotations
 import pyotp
 import segno
 
-from agent_mailbox.auth import secrets as _secrets
+from agent_inbox.auth import secrets as _secrets
 
 #: How many steps either side of now a code is accepted. 1 step = 30s.
 _VALID_WINDOW = 1

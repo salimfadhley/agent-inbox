@@ -23,7 +23,7 @@ from urllib.parse import unquote, urlparse
 from anyio.to_thread import run_sync
 from mcp.server.fastmcp import FastMCP
 
-from agent_mailbox.client import (
+from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
     ClientError,
@@ -168,7 +168,7 @@ def _instructions() -> str:
     return text[:INSTRUCTION_BUDGET]
 
 
-logger = logging.getLogger("agent_mailbox.mcp")
+logger = logging.getLogger("agent_inbox.mcp")
 
 mcp = FastMCP("agent-mailbox", instructions=_instructions())
 

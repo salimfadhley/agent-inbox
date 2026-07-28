@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox import wake
-from agent_mailbox.wake import wake_response
+from agent_inbox import wake
+from agent_inbox.wake import wake_response
 
 
 def _msg(mid: str, sender: str, subject: str, body: str = "SECRET BODY") -> dict:
@@ -190,7 +190,7 @@ class TestTheWaiterSurvivesTheHubGoingAway:
     def test_a_transient_failure_does_not_end_the_wait(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from agent_mailbox import wake
+        from agent_inbox import wake
 
         attempts = {"n": 0}
 
@@ -221,7 +221,7 @@ class TestTheWaiterSurvivesTheHubGoingAway:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """The point of surviving: it must still do its job afterwards."""
-        from agent_mailbox import wake
+        from agent_inbox import wake
 
         attempts = {"n": 0}
 

@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox.exceptions import MailboxError, StoreNotOpen
-from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
-from agent_mailbox.sqlite_store import SCHEMA_VERSION, SqliteStore
+from agent_inbox.exceptions import MailboxError, StoreNotOpen
+from agent_inbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_inbox.sqlite_store import SCHEMA_VERSION, SqliteStore
 
 
 class TestPersistence:

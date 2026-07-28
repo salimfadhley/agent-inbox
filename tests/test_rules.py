@@ -7,8 +7,8 @@ most in production are the ones that can now be checked by reading.
 
 from __future__ import annotations
 
-from agent_mailbox.records import ActorRecord, ObjectRecord
-from agent_mailbox.rules import (
+from agent_inbox.records import ActorRecord, ObjectRecord
+from agent_inbox.rules import (
     EVERYONE,
     expired_object_ids,
     expiring_threads,
@@ -22,7 +22,7 @@ from agent_mailbox.rules import (
     unread,
     visible_turns,
 )
-from agent_mailbox.vocabulary import ActorType
+from agent_inbox.vocabulary import ActorType
 
 ROSEMARY = "rosemary_nasrin"
 TREVOR = "trevor_mahmood"
@@ -310,7 +310,7 @@ class TestObservationRules:
     """
 
     def test_traffic_is_counted_per_day(self) -> None:
-        from agent_mailbox.rules import traffic_by_day
+        from agent_inbox.rules import traffic_by_day
 
         msgs = (
             note("a", ROSEMARY, (TREVOR,), when="2026-07-24T09:00:00Z"),
@@ -320,7 +320,7 @@ class TestObservationRules:
         assert traffic_by_day(msgs) == (("2026-07-24", 2), ("2026-07-25", 1))
 
     def test_since_excludes_older_traffic(self) -> None:
-        from agent_mailbox.rules import traffic_by_day
+        from agent_inbox.rules import traffic_by_day
 
         msgs = (
             note("a", ROSEMARY, (TREVOR,), when="2026-07-01T00:00:00Z"),
@@ -332,7 +332,7 @@ class TestObservationRules:
 
     def test_flow_counts_one_edge_per_recipient(self) -> None:
         """A fan-out to three is three edges, not one — the honest reading."""
-        from agent_mailbox.rules import flow_edges
+        from agent_inbox.rules import flow_edges
 
         msgs = (note("a", ROSEMARY, (TREVOR, YITZHAK), cc=(SAL,)),)
         edges = dict(((frm, to), n) for frm, to, n in flow_edges(msgs))
@@ -344,13 +344,13 @@ class TestObservationRules:
 
     def test_flow_ignores_a_copy_of_your_own_broadcast(self) -> None:
         """Self-exclusion holds here too: talking to yourself is not correspondence."""
-        from agent_mailbox.rules import flow_edges
+        from agent_inbox.rules import flow_edges
 
         msgs = (note("a", ROSEMARY, (ROSEMARY, TREVOR)),)
         assert flow_edges(msgs) == ((ROSEMARY, TREVOR, 1),)
 
     def test_flow_orders_busiest_first(self) -> None:
-        from agent_mailbox.rules import flow_edges
+        from agent_inbox.rules import flow_edges
 
         msgs = (
             note("a", ROSEMARY, (TREVOR,)),
@@ -360,7 +360,7 @@ class TestObservationRules:
         assert flow_edges(msgs)[0] == (ROSEMARY, TREVOR, 2)
 
     def test_correspondents_count_both_directions_as_one_relationship(self) -> None:
-        from agent_mailbox.rules import correspondents
+        from agent_inbox.rules import correspondents
 
         msgs = (
             note("a", ROSEMARY, (TREVOR,)),

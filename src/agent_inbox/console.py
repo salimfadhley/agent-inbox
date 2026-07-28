@@ -37,11 +37,11 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Body
 from litestar.response import Redirect, Response
 
-from agent_mailbox import __version__
-from agent_mailbox.auth.records import SHARED_ACTOR
-from agent_mailbox.auth.service import INSECURE_ADMIN_WARNING
-from agent_mailbox.client import SESSION_COOKIE, ClientError, HubClient
-from agent_mailbox.prompts import bootstrap, onboarding, role_note
+from agent_inbox import __version__
+from agent_inbox.auth.records import SHARED_ACTOR
+from agent_inbox.auth.service import INSECURE_ADMIN_WARNING
+from agent_inbox.client import SESSION_COOKIE, ClientError, HubClient
+from agent_inbox.prompts import bootstrap, onboarding, role_note
 
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
 #: three POST handlers from each repeating the annotation.

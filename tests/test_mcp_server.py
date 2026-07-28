@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("mcp", reason="the MCP server lives in the [clients] extra")
 
-from agent_mailbox import mcp_client  # noqa: E402
+from agent_inbox import mcp_client  # noqa: E402
 
 
 def test_the_module_imports_and_builds_its_server() -> None:

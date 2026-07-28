@@ -26,7 +26,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from agent_mailbox.client import ENGINE_MARKERS
+from agent_inbox.client import ENGINE_MARKERS
 
 
 @pytest.fixture(autouse=True)

@@ -1,8 +1,8 @@
 """What the store persists.
 
 Plain frozen data. No behaviour, no storage knowledge, no network — these cross the
-boundary between the pure messaging rules (:mod:`agent_mailbox.rules`) and whatever is
-keeping the bytes (:mod:`agent_mailbox.store`).
+boundary between the pure messaging rules (:mod:`agent_inbox.rules`) and whatever is
+keeping the bytes (:mod:`agent_inbox.store`).
 
 Each record follows ADR 0006: **typed fields for everything we route on, plus
 the whole document.** That is not redundancy: ActivityStreams requires an
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from agent_mailbox.vocabulary import ActorType, ObjectType
+from agent_inbox.vocabulary import ActorType, ObjectType
 
 
 def _frozen(mapping: Mapping[str, Any] | None) -> Mapping[str, Any]:

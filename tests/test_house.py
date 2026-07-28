@@ -7,10 +7,10 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from agent_mailbox.exceptions import NameUnavailable, NoSuchMessage
-from agent_mailbox.house import House
-from agent_mailbox.mailbox import Mailbox
-from agent_mailbox.policy import (
+from agent_inbox.exceptions import NameUnavailable, NoSuchMessage
+from agent_inbox.house import House
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.policy import (
     ADMIN,
     HOST,
     Attempt,
@@ -23,7 +23,7 @@ from agent_mailbox.policy import (
     ProbeDetector,
     StandingResidents,
 )
-from agent_mailbox.store import InMemoryStore
+from agent_inbox.store import InMemoryStore
 
 ROSEMARY = "rosemary_nasrin"
 TREVOR = "trevor_mahmood"

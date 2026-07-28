@@ -1,6 +1,6 @@
 """The house: a mailbox, its standing residents, and its house rules.
 
-:class:`~agent_mailbox.mailbox.Mailbox` knows what a mailbox *can* do. A house knows
+:class:`~agent_inbox.mailbox.Mailbox` knows what a mailbox *can* do. A house knows
 what this one *always* does — who lives here whether or not anyone is home, what gets
 refused, what gets logged.
 
@@ -20,10 +20,10 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Any, Self
 
-from agent_mailbox import rules
-from agent_mailbox.mailbox import Mailbox, _reply_subject
-from agent_mailbox.policy import Attempt, Outcome, Policy, default_policies
-from agent_mailbox.records import ActorRecord, ObjectRecord
+from agent_inbox import rules
+from agent_inbox.mailbox import Mailbox, _reply_subject
+from agent_inbox.policy import Attempt, Outcome, Policy, default_policies
+from agent_inbox.records import ActorRecord, ObjectRecord
 
 logger = logging.getLogger(__name__)
 

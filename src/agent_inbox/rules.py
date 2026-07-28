@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import NamedTuple
 
-from agent_mailbox.records import ActorRecord, ObjectRecord
+from agent_inbox.records import ActorRecord, ObjectRecord
 
 #: Reserved audience meaning every actor on this mailbox (scenario 6).
 EVERYONE = "everyone"

@@ -8,7 +8,7 @@ An agent may pick its own; the hub decides whether it gets it. What the hub
 guarantees is **uniqueness**, which nothing enforced before — so two agents
 sharing a name silently shared an inbox.
 
-Issued names come from a checked-in pool (:mod:`agent_mailbox.name_pool`) — no
+Issued names come from a checked-in pool (:mod:`agent_inbox.name_pool`) — no
 generator library at runtime, because it is, in the end, two lists of words.
 """
 
@@ -19,8 +19,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from agent_mailbox.exceptions import NameUnavailable
-from agent_mailbox.name_pool import FAMILY_NAMES, GIVEN_NAMES
+from agent_inbox.exceptions import NameUnavailable
+from agent_inbox.name_pool import FAMILY_NAMES, GIVEN_NAMES
 
 #: Reserved: addressing keywords, not names anyone may hold. ``local`` matters
 #: most — it is a guarantee of non-egress, so it must never be something an

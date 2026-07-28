@@ -243,9 +243,9 @@ def load_global(env: dict[str, str] | None = None) -> dict[str, Any]:
 #: engine to join without a name cannot squat it and lock everyone else out.
 UNNAMED = "unnamed"
 
-#: Must match the hub's cookie name (agent_mailbox.api.SESSION_COOKIE). Defined here too
+#: Must match the hub's cookie name (agent_inbox.api.SESSION_COOKIE). Defined here too
 #: so the stdlib client stays free of any dependency on the Litestar app module.
-SESSION_COOKIE = "agent_mailbox_session"
+SESSION_COOKIE = "agent_inbox_session"
 DEFAULT_TIMEOUT = 10.0
 
 #: Which engine am I? Markers checked most-specific first.

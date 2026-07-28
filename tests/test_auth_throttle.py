@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from agent_mailbox.auth.throttle import LoginThrottle
+from agent_inbox.auth.throttle import LoginThrottle
 
 
 class Clock:

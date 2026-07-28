@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_mailbox.auth import secrets, totp
+from agent_inbox.auth import secrets, totp
 
 
 class TestPasswords:

@@ -1,8 +1,8 @@
 """The mailbox: the primitives everything else is built on.
 
 This is the application layer. It holds no rules of its own — every decision is made by
-a pure function in :mod:`agent_mailbox.rules` — and it holds no storage knowledge; it
-talks to a :class:`~agent_mailbox.store.MessageStore`. What it does is *orchestrate*:
+a pure function in :mod:`agent_inbox.rules` — and it holds no storage knowledge; it
+talks to a :class:`~agent_inbox.store.MessageStore`. What it does is *orchestrate*:
 fetch, decide, persist.
 
 **These method names are a public contract.** They become HTTP routes, and then MCP tool
@@ -24,18 +24,18 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from agent_mailbox import addressing, naming, rules
-from agent_mailbox.addressing import LOCAL
-from agent_mailbox.exceptions import (
+from agent_inbox import addressing, naming, rules
+from agent_inbox.addressing import LOCAL
+from agent_inbox.exceptions import (
     DeliversToNobody,
     NameUnavailable,
     NoSuchMessage,
     UnknownActor,
     UnknownRecipient,
 )
-from agent_mailbox.records import ActorRecord, ObjectRecord, ReadRecord
-from agent_mailbox.store import MessageStore
-from agent_mailbox.vocabulary import ActorType
+from agent_inbox.records import ActorRecord, ObjectRecord, ReadRecord
+from agent_inbox.store import MessageStore
+from agent_inbox.vocabulary import ActorType
 
 #: How many attempts to find a free generated name before giving up. The pool is around
 #: 340,000 combinations, so this only matters for absurdly full mailboxes.

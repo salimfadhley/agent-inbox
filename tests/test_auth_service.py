@@ -12,11 +12,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_mailbox.auth import secrets, totp
-from agent_mailbox.auth.exceptions import BadCredentials, TokenRevoked
-from agent_mailbox.auth.records import EnrolmentState
-from agent_mailbox.auth.service import AuthService
-from agent_mailbox.auth.store import InMemoryAuthStore
+from agent_inbox.auth import secrets, totp
+from agent_inbox.auth.exceptions import BadCredentials, TokenRevoked
+from agent_inbox.auth.records import EnrolmentState
+from agent_inbox.auth.service import AuthService
+from agent_inbox.auth.store import InMemoryAuthStore
 
 KEY = secrets.generate_key()
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_mailbox.exceptions import MalformedAddress, RemoteMailbox
+from agent_inbox.exceptions import MalformedAddress, RemoteMailbox
 
 #: The reserved alias for this mailbox, and the non-egress guarantee.
 LOCAL = "local"

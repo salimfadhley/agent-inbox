@@ -20,8 +20,8 @@ from typing import Any
 
 from litestar import Request, Response
 
-from agent_mailbox.auth.exceptions import AuthError
-from agent_mailbox.exceptions import MailboxError
+from agent_inbox.auth.exceptions import AuthError
+from agent_inbox.exceptions import MailboxError
 
 #: code -> HTTP status. Anything unmapped is a bug in *our* code, not the caller's,
 #: so it becomes a 500 rather than being guessed at.
@@ -95,7 +95,7 @@ def auth_error_handler(request: Request, exc: AuthError) -> Response:
 
 #: Logged rather than returned: a wedged store is the operator's problem to see, and
 #: the agent that happened to be next in the queue cannot fix it.
-store_logger = logging.getLogger("agent_mailbox.store")
+store_logger = logging.getLogger("agent_inbox.store")
 
 
 def store_busy_handler(request: Request, exc: sqlite3.OperationalError) -> Response:

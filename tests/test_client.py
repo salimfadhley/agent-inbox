@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox.client import (
+from agent_inbox.client import (
     CONFIG_NAME,
     LEGACY_CONFIG_NAME,
     UNNAMED,
@@ -334,7 +334,7 @@ class TestAnOlderHub:
 
     def test_a_current_hub_is_left_alone(self) -> None:
         """The shim must not touch an answer that is already in the right shape."""
-        from agent_mailbox.client import Config, HubClient
+        from agent_inbox.client import Config, HubClient
 
         client = HubClient(Config(hub="http://hub.invalid", name="trevor_mahmood"))
         modern = {"unread": 1, "cursor": "t|abc", "items": []}

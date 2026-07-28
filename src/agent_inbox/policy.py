@@ -1,6 +1,6 @@
 """House rules: what a *deployment* insists on, above what messaging *means*.
 
-Not to be confused with :mod:`agent_mailbox.rules`, and the distinction is the reason
+Not to be confused with :mod:`agent_inbox.rules`, and the distinction is the reason
 this module exists:
 
 * **Rules** are what messaging means. You see only the turns you are party to; a thread
@@ -31,10 +31,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from agent_mailbox.exceptions import MailboxError
+from agent_inbox.exceptions import MailboxError
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the type checker
-    from agent_mailbox.mailbox import Mailbox
+    from agent_inbox.mailbox import Mailbox
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +277,7 @@ class ProbeDetector(BasePolicy):
 
 
 def _is_denial(error: BaseException | None) -> bool:
-    from agent_mailbox.exceptions import NoSuchMessage
+    from agent_inbox.exceptions import NoSuchMessage
 
     return isinstance(error, NoSuchMessage)
 

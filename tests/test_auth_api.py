@@ -18,15 +18,15 @@ from pathlib import Path
 import pytest
 from litestar.testing import TestClient
 
-from agent_mailbox import api as api_module
-from agent_mailbox.api import IDENTITY_HEADER, SESSION_COOKIE, build_api
-from agent_mailbox.auth import secrets, totp
-from agent_mailbox.auth.records import SHARED_ACTOR
-from agent_mailbox.auth.service import AuthService
-from agent_mailbox.auth.store import InMemoryAuthStore
-from agent_mailbox.house import House
-from agent_mailbox.mailbox import Mailbox
-from agent_mailbox.store import InMemoryStore
+from agent_inbox import api as api_module
+from agent_inbox.api import IDENTITY_HEADER, SESSION_COOKIE, build_api
+from agent_inbox.auth import secrets, totp
+from agent_inbox.auth.records import SHARED_ACTOR
+from agent_inbox.auth.service import AuthService
+from agent_inbox.auth.store import InMemoryAuthStore
+from agent_inbox.house import House
+from agent_inbox.mailbox import Mailbox
+from agent_inbox.store import InMemoryStore
 
 HUB = "http://hub.invalid"
 KEY = secrets.generate_key()
@@ -141,7 +141,7 @@ class TestWarn:
                 records.append(record)
 
         handler = _Capture()
-        logger = logging.getLogger("agent_mailbox.api")
+        logger = logging.getLogger("agent_inbox.api")
         logger.addHandler(handler)
         try:
             client, _ = _build("warn")
@@ -201,7 +201,7 @@ class TestLoginThrottle:
     """Brute-force protection on /auth/login, end to end."""
 
     def test_repeated_failures_are_locked_out_with_retry_after(self) -> None:
-        from agent_mailbox.auth.throttle import LoginThrottle
+        from agent_inbox.auth.throttle import LoginThrottle
 
         throttle = LoginThrottle(max_failures=3)
         client, _ = _build("enforce", throttle=throttle)
@@ -218,7 +218,7 @@ class TestLoginThrottle:
     def test_lockout_is_by_source_not_username(self) -> None:
         """The throttle keys on source, not username, so it cannot be used to DoS a
         named account, and its 429 names no user."""
-        from agent_mailbox.auth.throttle import LoginThrottle
+        from agent_inbox.auth.throttle import LoginThrottle
 
         # max_failures=3, but all these come from the same test client (one source), so
         # this really checks the response stays generic — a 429 that never names a user.
@@ -261,7 +261,7 @@ class TestStructuralBoundary:
             leaked = {
                 i
                 for i in imports
-                if any(i.endswith(f"agent_mailbox.{e}") for e in engine)
+                if any(i.endswith(f"agent_inbox.{e}") for e in engine)
             }
             assert not leaked, f"{path.name} imports the engine: {leaked}"
 

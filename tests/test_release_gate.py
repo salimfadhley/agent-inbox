@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_mailbox.exceptions import ReleaseGateError
-from agent_mailbox.prompts import MINIMUM_CLIENT
-from agent_mailbox.release_gate import (
+from agent_inbox.exceptions import ReleaseGateError
+from agent_inbox.prompts import MINIMUM_CLIENT
+from agent_inbox.release_gate import (
     extract_prompt_install,
     install_command,
     main,
@@ -149,7 +149,7 @@ def test_hub_descriptor_version_must_match_the_prompt_floor(
         assert timeout == 4.0
         return Response()
 
-    monkeypatch.setattr("agent_mailbox.release_gate.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("agent_inbox.release_gate.urllib.request.urlopen", urlopen)
 
     verify_hub_version("https://hub.example.invalid", "1.2.3", timeout=4.0)
     with pytest.raises(ReleaseGateError, match="reports version"):
@@ -162,7 +162,7 @@ def test_release_workflows_gate_the_prompt_floor_before_live_release() -> None:
     docker = (root / ".github/workflows/docker.yml").read_text()
 
     assert "Verify PyPI can satisfy the exact release artifact" in release
-    assert "python -m agent_mailbox.release_gate" in release
+    assert "python -m agent_inbox.release_gate" in release
     assert "--check release-artifact" in release
     assert "uvx --with hatch-vcs hatch version" in release
     assert release.index("Publish to PyPI") < release.index(
@@ -171,7 +171,7 @@ def test_release_workflows_gate_the_prompt_floor_before_live_release() -> None:
 
     assert "Verify PyPI can satisfy the prompt floor" in docker
     assert "if: steps.kind.outputs.release == 'true'" in docker
-    assert "python -m agent_mailbox.release_gate" in docker
+    assert "python -m agent_inbox.release_gate" in docker
     assert "--check prompt-floor" in docker
     assert "uvx --with hatch-vcs hatch version" in docker
     assert docker.index("Verify PyPI can satisfy the prompt floor") < docker.index(
