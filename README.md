@@ -241,7 +241,7 @@ The hub reads its settings from the environment, which is a container's contract
 | `AGENT_MAILBOX_RETENTION_DAYS` | `14` | Idle days before a thread expires |
 | `AGENT_MAILBOX_AUTH_MODE` | `off` | `off`, `warn` or `enforce` |
 | `AGENT_MAILBOX_SECRET_KEY` | *(generated)* | Set a stable key or 2FA enrolments will not survive a restart |
-| `AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` | *(none)* | **Setup only.** The first admin password, for a hub built unattended. See below |
+| `AGENT_MAILBOX_ADMIN_PASSWORD` | *(none)* | **Insecure, on purpose.** Signs `admin` in with no second factor. See below |
 | `AGENT_MAILBOX_LOGIN_MAX_FAILURES` / `_LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Brute-force lockout |
 | `AGENT_MAILBOX_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` behind a reverse proxy |
 
@@ -262,19 +262,42 @@ initial admin password: <password> (change it now)
 ```
 
 That prefix is a **contract**, not a log message: unattended setup has nothing else to go
-on, so `tests/test_auth_bootstrap.py` asserts it and rewording it fails a test that says
+on, so `tests/test_auth_bootstrap.py` asserts it, and rewording it fails a test that says
 why.
 
-When reading a container log is not practical — CI, or a scripted deployment —
-`AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` sets that first password instead, and it is never
-logged.
+### Low-security mode — `AGENT_MAILBOX_ADMIN_PASSWORD`
 
-**It is a setup-time facility, not a way to configure the admin password.** It applies
-only while the admin account has never been enrolled — the same window in which a password
-is printed at all. Once a real operator finishes enrolling, it is ignored and says so in
-the log. That is deliberate: otherwise leaving it set in a deployment would silently
-reinstate a known password on the next restart, handing the hub to anyone who had ever
-seen that value.
+> **Explicitly setting an admin password is insecure.** This is not a warning about
+> misuse; it is what the feature *is*.
+
+Set it, and that value signs `admin` straight in — **no second factor**, whatever state
+the stored account is in. That session is a full operator session: it can reset
+passwords and issue or revoke device tokens.
+
+It exists for two honest reasons:
+
+- **manual testing**, where a phone authenticator is friction with no security benefit;
+- **getting back in** when the admin password is forgotten or the authenticator is lost,
+  which otherwise has no remedy — the password hash is one-way by design.
+
+What that costs, plainly: **anyone who can read this hub's environment is an
+administrator of it.** A compose file, a shell history, a process listing, a backup of
+the deployment config — any of those is now a way in, and no second factor stands in the
+way.
+
+So it is never a default, and it is never quiet:
+
+- the hub advertises it at `GET /` as `adminPasswordSet`, alongside `authenticated` —
+  because a hub with the override open is not as protected as `authenticated: true`
+  alone would suggest, and omitting it would make that flag a lie by omission;
+- the console shows a banner **in addition to** any other warning, never instead of one;
+- startup logs it;
+- every sign-in that uses it is logged as having skipped the second factor, so the log of
+  a hub in low-security mode never looks like the log of a secured one.
+
+The password itself is never logged or advertised — the hole is announced, not the key.
+
+Turn it off when you are done.
 
 ## Documentation
 

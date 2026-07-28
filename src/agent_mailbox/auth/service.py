@@ -12,6 +12,7 @@ session expiry, the TOTP window — is deterministic in tests.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -44,6 +45,13 @@ INITIAL_PASSWORD_LOG_PREFIX = "initial admin password: "
 #: A throwaway hash to verify against when the user does not exist, so a wrong username
 #: costs the same time as a wrong password — no user-enumeration by timing (FR-017).
 _DUMMY_HASH = secrets.hash_password("this password matches nobody")
+
+#: The single operator account this hub seeds and the only one the override applies to.
+ADMIN_USERNAME = "admin"
+
+#: Shown wherever the low-security mode is surfaced — descriptor, console, startup log.
+#: One sentence, one wording, so it is recognisable in a log and in a browser alike.
+INSECURE_ADMIN_WARNING = "Explicitly setting an admin password is insecure"
 
 #: Length of a generated session / token id.
 _ID_BYTES = 16
@@ -91,6 +99,7 @@ class AuthService:
         session_ttl: timedelta = timedelta(hours=12),
         clock: Callable[[], datetime] = _utcnow,
         hub_name: str = "",
+        admin_password: str = "",
     ) -> None:
         self._store = store
         self._key = secret_key
@@ -98,27 +107,30 @@ class AuthService:
         self._clock = clock
         #: Shown in the authenticator entry, so one phone can hold several hubs.
         self._hub_name = hub_name
+        #: **A deliberate hole in the front door.** See :meth:`login`. Empty means off,
+        #: which is the only safe value and the default.
+        self._admin_password = admin_password.strip()
+
+    @property
+    def admin_password_set(self) -> bool:
+        """Whether the low-security admin override is active.
+
+        Public because it must be *visible*: the hub reports it in its own descriptor
+        and the console shows a banner. A hole in the front door that nobody can see
+        from outside is the worst version of this feature.
+        """
+        return bool(self._admin_password)
 
     def _now(self) -> str:
         return self._clock().isoformat()
 
     # -- bootstrap ---------------------------------------------------------
 
-    async def bootstrap(self, initial_password: str | None = None) -> str | None:
+    async def bootstrap(self) -> str | None:
         """Make sure someone can get in, and say how. Returns a password if it set one.
 
         Jenkins-style: a random password, only ever stored hashed, printed to the log
         for the operator to use once.
-
-        ``initial_password`` is the operator's own choice instead of a random one — set
-        from ``AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD``, for setting a hub up
-        unattended, where reading a password back out of a log is not possible. It is a
-        **setup-time** facility and deliberately not a way to configure the admin
-        password: it applies only while the account has never been enrolled, which is
-        the same window in which a password is printed at all. Once a real operator
-        finishes enrolling, the variable does nothing — so leaving it set cannot
-        silently reinstate a known password on the next restart, and cannot be used to
-        take an account back from whoever holds it.
 
         **It keeps printing — a fresh password each boot — until that account has
         actually been set up.** Printing only at the instant of seeding was a trap:
@@ -138,8 +150,7 @@ class AuthService:
             # Someone renamed or replaced the seed account. Not ours to second-guess.
             return None
 
-        chosen = (initial_password or "").strip()
-        password = chosen or secrets.generate_token()
+        password = secrets.generate_token()
         if existing is None:
             await self._store.add_user(
                 User(
@@ -165,26 +176,7 @@ class AuthService:
                 "the admin account has never been set up — issuing a new password"
             )
         else:
-            if chosen:
-                # Say so, or an operator who left the variable set would believe it is
-                # still governing the password. It is not, and has not been since
-                # enrolment — that is the safety property, and silence about it would
-                # make the variable look like a backdoor that had merely failed.
-                logger.warning(
-                    "AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD is set but ignored: the "
-                    "admin account is already enrolled. It applies only before "
-                    "first-run enrolment. Remove it."
-                )
             return None  # set up properly; never print again
-
-        if chosen:
-            # Never log the password itself in this branch: the operator already knows
-            # it, and it came from somewhere durable rather than from a container log.
-            logger.warning(
-                "initial admin password taken from "
-                "AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD (change it now)"
-            )
-            return password
 
         # CONTRACT: this exact prefix is depended upon. `tests/test_auth_bootstrap.py`
         # asserts it, because an unattended setup reads the password back out of the
@@ -245,6 +237,18 @@ class AuthService:
     ) -> LoginResult:
         """Verify a password and, if enrolled, a second factor. Returns a session.
 
+        **Except in low-security mode.** When ``AGENT_MAILBOX_ADMIN_PASSWORD`` is set,
+        that value logs `admin` straight in — no second factor, no enrolment, whatever
+        state the stored account is in. That is the point of it: it is the way back into
+        a hub whose password is forgotten or whose authenticator is gone, and the way a
+        test drives a hub without a phone.
+
+        It is insecure and is meant to be. Anyone who can read the environment — or a
+        compose file, or a shell history, or a process listing — is an administrator of
+        this hub, and no second factor stands in their way. It is never a default, the
+        hub says so in its own descriptor, and the console shows a banner while it is
+        set. Do not leave it on.
+
         A wrong username and a wrong password are indistinguishable and take the
         same time (FR-017). An account still in first-run state gets a *limited*
         session that may only reach the enrolment endpoints.
@@ -255,6 +259,23 @@ class AuthService:
         username or password" with no way to know whether to retype their password or
         their phone. Whoever reads the log already controls the deployment.
         """
+        if self._admin_password and username == ADMIN_USERNAME:
+            # THE OVERRIDE. Deliberately low-security, and deliberately first: it must
+            # work when the stored account is unusable, because recovering from exactly
+            # that is what it is for — a forgotten password, a lost authenticator, a
+            # hub being driven by a test.
+            #
+            # `compare_digest` because there is no reason to leak the password through
+            # timing even in a mode that has already given up on secrecy.
+            if hmac.compare_digest(password, self._admin_password):
+                logger.warning(
+                    "admin signed in with AGENT_MAILBOX_ADMIN_PASSWORD — no second "
+                    "factor was required. This hub is in low-security mode."
+                )
+                session = await self._new_session(username, limited=False)
+                return LoginResult(session=session, enrolment_required=False)
+            # Fall through: a wrong override attempt may still be a right stored one.
+
         user = await self._store.get_user(username)
         if user is None:
             secrets.verify_password(_DUMMY_HASH, password)  # equalise timing

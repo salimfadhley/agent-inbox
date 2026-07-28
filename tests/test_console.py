@@ -1057,3 +1057,34 @@ class TestTheMaintenanceHeartbeat:
         with client as c:
             page = c.get("/maintenance").text
         assert "database is locked" in page
+
+
+class TestTheInsecureAdminBanner:
+    """The console is where a human notices. It must not be reassuring by omission."""
+
+    def _page(self, hub_extra: dict[str, Any]) -> str:
+        from agent_mailbox.console import _page
+
+        hub = {"id": HUB, "name": "testhub", "version": "1.2.3", "authenticated": True}
+        return _page("Overview", "<p>body</p>", {**hub, **hub_extra})
+
+    def test_the_banner_appears_when_the_override_is_set(self) -> None:
+        html_out = self._page({"adminPasswordSet": True})
+        assert "Explicitly setting an admin password is insecure" in html_out
+        assert "AGENT_MAILBOX_ADMIN_PASSWORD" in html_out
+        assert "without a second factor" in html_out
+
+    def test_no_banner_on_an_ordinary_hub(self) -> None:
+        assert "insecure" not in self._page({"adminPasswordSet": False}).lower()
+
+    def test_it_is_shown_alongside_the_unauthenticated_warning_not_instead(
+        self,
+    ) -> None:
+        """Both facts or neither.
+
+        A hub can be unauthenticated *and* have the override set. Showing only one
+        banner would let the page tell a reassuring half-truth about the other.
+        """
+        html_out = self._page({"authenticated": False, "adminPasswordSet": True})
+        assert "This hub does not authenticate" in html_out
+        assert "Explicitly setting an admin password is insecure" in html_out

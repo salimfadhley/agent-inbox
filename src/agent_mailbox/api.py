@@ -40,7 +40,7 @@ from litestar.openapi import OpenAPIConfig
 from agent_mailbox import __version__
 from agent_mailbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
 from agent_mailbox.auth.records import SHARED_ACTOR
-from agent_mailbox.auth.service import AuthService
+from agent_mailbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
 from agent_mailbox.auth.throttle import LoginThrottle
 from agent_mailbox.errors import (
     auth_error_handler,
@@ -177,7 +177,12 @@ class Api:
     """Routes over a house. Holds the house and the renderer; decides nothing."""
 
     def __init__(
-        self, house: House, public_url: str, *, authenticated: bool = False
+        self,
+        house: House,
+        public_url: str,
+        *,
+        authenticated: bool = False,
+        admin_password_set: bool = False,
     ) -> None:
         self.house = house
         self.wire = Renderer(public_url)
@@ -185,6 +190,10 @@ class Api:
         self.purge_status = PurgeStatus()
         #: True only under enforce — the hub reports its own posture honestly.
         self.authenticated = authenticated
+        #: True when the low-security admin override is active. Advertised for the same
+        #: reason `authenticated` is: a hub's posture should never be a surprise, and a
+        #: hole in the front door that cannot be seen from outside is the worst kind.
+        self.admin_password_set = admin_password_set
 
     # -- hub ---------------------------------------------------------------
 
@@ -209,6 +218,16 @@ class Api:
             # Said out loud, either way — a hub's posture should never be a surprise.
             "authenticated": self.authenticated,
             "note": note,
+            # Advertised so the console can warn and a caller can tell. A hub running
+            # with the admin override is not as authenticated as `authenticated: true`
+            # would otherwise suggest, and hiding that would make the flag above a lie
+            # by omission.
+            "adminPasswordSet": self.admin_password_set,
+            **(
+                {"adminPasswordWarning": INSECURE_ADMIN_WARNING}
+                if self.admin_password_set
+                else {}
+            ),
             "policies": [getattr(p, "name", "?") for p in self.house.policies],
             "federates": False,
         }
@@ -738,7 +757,12 @@ def build_api(
     the header used to be (ADR 0007, ADR 0010).
     """
     enforcing = auth is not None and auth_mode == "enforce"
-    api = Api(house, public_url, authenticated=enforcing)
+    api = Api(
+        house,
+        public_url,
+        authenticated=enforcing,
+        admin_password_set=auth is not None and auth.admin_password_set,
+    )
     purge_status = PurgeStatus()
     api.purge_status = purge_status
 

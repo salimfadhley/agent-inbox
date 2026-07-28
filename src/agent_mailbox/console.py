@@ -38,6 +38,7 @@ from litestar.response import Redirect, Response
 
 from agent_mailbox import __version__
 from agent_mailbox.auth.records import SHARED_ACTOR
+from agent_mailbox.auth.service import INSECURE_ADMIN_WARNING
 from agent_mailbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_mailbox.prompts import bootstrap, onboarding, role_note
 
@@ -181,6 +182,19 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
         if unauthenticated
         else ""
     )
+    # Shown *in addition* to the above, never instead of it: a hub can be enforcing
+    # authentication and still have the override open, and that combination is exactly
+    # the one where a single banner would tell a reassuring half-truth.
+    if (hub or {}).get("adminPasswordSet"):
+        warning += (
+            f'<p class="warn"><strong>{html.escape(INSECURE_ADMIN_WARNING)}.</strong> '
+            "<code>AGENT_MAILBOX_ADMIN_PASSWORD</code> is set, so <code>admin</code> "
+            "can sign in with it <strong>without a second factor</strong> and then "
+            "reset passwords and issue or revoke device tokens. Anyone who can read "
+            "this hub's environment controls it. Intended for manual testing and for "
+            "recovering a hub whose password or authenticator is lost — unset it "
+            "afterwards.</p>"
+        )
 
     def link(href: str, text: str) -> str:
         cls = " class='on'" if href == here else ""

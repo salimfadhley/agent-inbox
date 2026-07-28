@@ -20,7 +20,7 @@ from litestar import Litestar
 
 from agent_mailbox.api import build_api
 from agent_mailbox.auth import secrets as auth_secrets
-from agent_mailbox.auth.service import AuthService
+from agent_mailbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
 from agent_mailbox.auth.store import SqliteAuthStore
 from agent_mailbox.auth.throttle import LoginThrottle
 from agent_mailbox.house import House
@@ -61,12 +61,15 @@ class Settings:
     #: Fernet key for encrypting TOTP secrets at rest. Needed once 2FA is
     #: enrolled; never a default (charter: no secrets in the repo).
     secret_key: str = ""
-    #: The first admin password, for a hub being set up **unattended** — CI, or a
-    #: scripted deployment — where reading it back out of a container log is not
-    #: possible. Setup-time only: it applies while the admin account has never been
-    #: enrolled, and is ignored (loudly) afterwards, so leaving it set cannot reinstate
-    #: a known password on a later restart. Not a way to configure the admin password.
-    initial_admin_password: str = ""
+    #: **Low-security mode.** When set, this value logs `admin` in directly — no second
+    #: factor, whatever state the stored account is in — and that session can reset
+    #: passwords and issue or revoke device tokens. It exists for manual testing and for
+    #: getting back into a hub whose password or authenticator is lost.
+    #:
+    #: Anyone who can read the environment is then an administrator of this hub. It is
+    #: never a default; the hub advertises it; the console shows a banner. Do not ship
+    #: with it set.
+    admin_password: str = ""
     #: Failed logins from one source before it is locked out for a while.
     login_max_failures: int = 5
     #: The lockout / sliding-window length, in minutes.
@@ -97,7 +100,7 @@ class Settings:
             log_level=_env("LOG_LEVEL", "INFO").upper(),
             auth_mode=auth_mode,
             secret_key=_env("SECRET_KEY", ""),
-            initial_admin_password=_env("INITIAL_ADMIN_PASSWORD", ""),
+            admin_password=_env("ADMIN_PASSWORD", ""),
             login_max_failures=int(_env("LOGIN_MAX_FAILURES", "5")),
             login_lockout_minutes=int(_env("LOGIN_LOCKOUT_MINUTES", "15")),
             trust_proxy=_env("TRUST_PROXY", "").lower() in ("1", "true", "yes"),
@@ -150,7 +153,24 @@ def build_app(
                     "enrolment would fail later with an unexplained error."
                 ) from exc
         auth_store = SqliteAuthStore(config.db)
-        auth = AuthService(auth_store, secret_key=key, hub_name=config.hub_name)
+        auth = AuthService(
+            auth_store,
+            secret_key=key,
+            hub_name=config.hub_name,
+            admin_password=config.admin_password,
+        )
+        if config.admin_password:
+            # Said at startup as well as in the descriptor and the console, because
+            # these are different audiences: whoever deploys the hub reads the log, and
+            # may never open the console at all.
+            logger.warning(
+                "%s. AGENT_MAILBOX_ADMIN_PASSWORD is set: `admin` can sign in with it "
+                "WITHOUT a second factor, and can then reset passwords and issue or "
+                "revoke device tokens. Anyone who can read this hub's environment "
+                "controls it. Intended for manual testing and for recovering a hub "
+                "whose password or authenticator is lost — unset it afterwards.",
+                INSECURE_ADMIN_WARNING,
+            )
 
     throttle = LoginThrottle(
         max_failures=config.login_max_failures,
@@ -194,9 +214,7 @@ def build_app(
                 "and session. Device tokens and mail are untouched. REMOVE THE FLAG "
                 "NOW — with it set, this happens on every start."
             )
-        # Logs a password when the table is empty or unused — unless the operator
-        # supplied one, in which case it is used and never logged.
-        await auth.bootstrap(config.initial_admin_password or None)
+        await auth.bootstrap()  # logs a password when the table is empty or unused
 
     async def close_store(_: Litestar) -> None:
         if auth_store is not None:

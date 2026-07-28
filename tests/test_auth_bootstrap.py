@@ -1,13 +1,18 @@
-"""First-run bootstrap: the log line tools read, and the password an operator sets.
+"""First-run bootstrap, and the low-security admin override.
 
-Two ways to get into a hub that has just been created, and both are load-bearing for
-unattended setup — CI standing up an enforcing hub, or a scripted deployment.
+Two ways into a hub, with very different characters.
 
-The log prefix is asserted here because it is **a contract, not a log message**. Callers
-scrape it to learn the password of a hub they have just built, and there is nothing else
-for them to go on. Reword it in `service.py` and this test fails saying so — which is
-the point, because the alternative is discovering it later as a failure to authenticate
-somewhere unrelated, with the search starting in the wrong place.
+The log prefix is asserted because it is **a contract, not a log message**. Unattended
+setup scrapes it to learn the password of a hub it has just built, and has nothing else
+to go on. Reword it in `service.py` and this test fails saying so — which is the point,
+because the alternative is discovering it later as a failure to authenticate somewhere
+unrelated, with the search starting in the wrong place.
+
+`AGENT_MAILBOX_ADMIN_PASSWORD` is the other way, and it is **deliberately insecure**.
+The tests below pin the behaviour that makes it survivable: it is never on by default,
+the hub advertises it, and it is announced in the log every time it is used. What they
+do *not* do is pretend it is safe. It hands anyone who can read the environment an
+administrator's session with no second factor — that is the feature, not a defect.
 """
 
 from __future__ import annotations
@@ -20,18 +25,24 @@ import pytest
 from agent_mailbox.auth import secrets, totp
 from agent_mailbox.auth.exceptions import BadCredentials
 from agent_mailbox.auth.records import EnrolmentState
-from agent_mailbox.auth.service import INITIAL_PASSWORD_LOG_PREFIX, AuthService
+from agent_mailbox.auth.service import (
+    INITIAL_PASSWORD_LOG_PREFIX,
+    INSECURE_ADMIN_WARNING,
+    AuthService,
+)
 from agent_mailbox.auth.store import InMemoryAuthStore
 
 KEY = secrets.generate_key()
+OVERRIDE = "let-me-in-please"
 
 
-def service() -> AuthService:
+def service(admin_password: str = "") -> AuthService:
     return AuthService(
         InMemoryAuthStore(),
         secret_key=KEY,
         session_ttl=timedelta(hours=12),
         clock=lambda: datetime(2026, 7, 28, 12, 0, 0, tzinfo=UTC),
+        admin_password=admin_password,
     )
 
 
@@ -49,8 +60,7 @@ class TestTheLoggedPassword:
         """Unattended setup reads the password back out of the container log.
 
         If you are here because you changed the wording: that is a breaking change for
-        anything scraping it, and `AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` is the
-        supported alternative for those callers. Change it deliberately, and say so.
+        anything scraping it. Change it deliberately, and say so.
         """
         svc = service()
         with caplog.at_level(logging.WARNING, logger="agent_mailbox.auth"):
@@ -63,7 +73,6 @@ class TestTheLoggedPassword:
             f"no log line began with {INITIAL_PASSWORD_LOG_PREFIX!r}; "
             f"saw {lines!r}. This prefix is a contract — see service.py."
         )
-        # A scraper takes everything after the prefix up to the trailing advice.
         scraped = matching[0][len(INITIAL_PASSWORD_LOG_PREFIX) :].split(" ")[0]
         assert scraped == password, "the scraped value must be the usable password"
 
@@ -73,69 +82,105 @@ class TestTheLoggedPassword:
         password = await svc.bootstrap()
         assert password
         result = await svc.login("admin", password)
-        assert result.enrolment_required, (
-            "first-run login reaches enrolment and no more"
+        assert result.enrolment_required, "first-run login reaches enrolment, no more"
+
+
+class TestTheAdminOverrideIsOffUnlessAskedFor:
+    async def test_off_by_default(self) -> None:
+        svc = service()
+        assert svc.admin_password_set is False
+        await svc.bootstrap()
+        with pytest.raises(BadCredentials):
+            await svc.login("admin", OVERRIDE)
+
+    async def test_whitespace_only_is_not_a_password(self) -> None:
+        """An unset variable arrives as an empty string; it must not open the door."""
+        for blank in ("", "   "):
+            svc = service(blank)
+            assert svc.admin_password_set is False
+            await svc.bootstrap()
+            with pytest.raises(BadCredentials):
+                await svc.login("admin", blank)
+
+
+class TestTheAdminOverrideWorks:
+    async def test_it_signs_admin_in_with_no_second_factor(self) -> None:
+        """The whole point: a way in that does not need the phone."""
+        svc = service(OVERRIDE)
+        await svc.bootstrap()
+        await _enrol(svc, "the-real-password")
+
+        result = await svc.login("admin", OVERRIDE)
+        assert result.enrolment_required is False
+        assert result.session is not None
+        assert result.session.limited is False, "a full session, not an enrolment stub"
+
+    async def test_it_works_even_before_anyone_enrols(self) -> None:
+        """Recovering a hub nobody ever finished setting up is a real case."""
+        svc = service(OVERRIDE)
+        await svc.bootstrap()
+        result = await svc.login("admin", OVERRIDE)
+        assert result.enrolment_required is False
+
+    async def test_the_stored_password_still_works_alongside_it(self) -> None:
+        """The override is an extra door, not a replacement for the real one."""
+        svc = service(OVERRIDE)
+        await svc.bootstrap()
+        await _enrol(svc, "the-real-password")
+        offer_secret = await _secret_of(svc)
+
+        result = await svc.login(
+            "admin", "the-real-password", totp.current_code(offer_secret)
+        )
+        assert result.enrolment_required is False
+
+    async def test_a_wrong_override_is_still_refused(self) -> None:
+        svc = service(OVERRIDE)
+        await svc.bootstrap()
+        with pytest.raises(BadCredentials):
+            await svc.login("admin", "not-the-override")
+
+    async def test_it_does_not_apply_to_other_usernames(self) -> None:
+        """It is a way back into `admin`, not a skeleton key for the hub."""
+        svc = service(OVERRIDE)
+        await svc.bootstrap()
+        with pytest.raises(BadCredentials):
+            await svc.login("someone_else", OVERRIDE)
+
+    async def test_every_use_is_announced(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A sign-in that skipped 2FA must never be indistinguishable from one that did.
+
+        This is the audit trail. Without it, the log of a hub running in low-security
+        mode looks exactly like the log of a properly secured one.
+        """
+        svc = service(OVERRIDE)
+        await svc.bootstrap()
+        with caplog.at_level(logging.WARNING, logger="agent_mailbox.auth"):
+            await svc.login("admin", OVERRIDE)
+
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "AGENT_MAILBOX_ADMIN_PASSWORD" in logged
+        assert "second factor" in logged
+        assert OVERRIDE not in logged, "announce the use, never the value"
+
+
+class TestItIsVisibleFromOutside:
+    async def test_the_service_reports_it(self) -> None:
+        assert service(OVERRIDE).admin_password_set is True
+        assert service().admin_password_set is False
+
+    def test_the_warning_wording_is_the_agreed_one(self) -> None:
+        """One sentence, one wording — recognisable in a log and in a browser alike."""
+        assert INSECURE_ADMIN_WARNING == (
+            "Explicitly setting an admin password is insecure"
         )
 
 
-class TestAnOperatorSuppliedPassword:
-    async def test_a_supplied_password_is_used(self) -> None:
-        svc = service()
-        returned = await svc.bootstrap("correct horse battery staple")
-        assert returned == "correct horse battery staple"
-        result = await svc.login("admin", "correct horse battery staple")
-        assert result.enrolment_required
-
-    async def test_a_supplied_password_is_never_logged(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """It came from somewhere durable, so putting it in the log only spreads it."""
-        svc = service()
-        with caplog.at_level(logging.WARNING, logger="agent_mailbox.auth"):
-            await svc.bootstrap("hunter2-but-longer")
-
-        logged = " ".join(r.getMessage() for r in caplog.records)
-        assert "hunter2-but-longer" not in logged
-        assert INITIAL_PASSWORD_LOG_PREFIX not in logged
-
-    async def test_blank_and_whitespace_fall_back_to_a_random_password(self) -> None:
-        """An unset variable arrives as empty string; it must not be the password."""
-        for blank in ("", "   "):
-            svc = service()
-            returned = await svc.bootstrap(blank)
-            assert returned
-            assert returned.strip() not in ("", *([blank] if blank.strip() else []))
-
-    async def test_it_is_ignored_once_the_account_is_enrolled(self) -> None:
-        """The safety property. Setup-time only, or it is a permanent backdoor.
-
-        An operator who leaves the variable set in their deployment must not have their
-        chosen password silently reinstated on the next restart — which would hand the
-        hub back to anyone who ever saw that value.
-        """
-        svc = service()
-        await svc.bootstrap("setup-time-password")
-        await _enrol(svc, "the-real-password")
-
-        assert await svc.bootstrap("setup-time-password") is None
-
-        user = await svc._store.get_user("admin")
-        assert user is not None
-        assert user.enrolment_state is EnrolmentState.ACTIVE
-        with pytest.raises(BadCredentials):
-            await svc.login("admin", "setup-time-password")
-
-    async def test_being_ignored_is_said_out_loud(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Silence would make a disarmed variable look like a backdoor that misfired."""
-        svc = service()
-        await svc.bootstrap("setup-time-password")
-        await _enrol(svc, "the-real-password")
-
-        with caplog.at_level(logging.WARNING, logger="agent_mailbox.auth"):
-            await svc.bootstrap("setup-time-password")
-
-        logged = " ".join(r.getMessage() for r in caplog.records)
-        assert "INITIAL_ADMIN_PASSWORD" in logged and "ignored" in logged
-        assert "setup-time-password" not in logged
+async def _secret_of(svc: AuthService) -> str:
+    """The enrolled TOTP secret, recovered the way the enrolment flow hands it over."""
+    user = await svc._store.get_user("admin")
+    assert user is not None and user.totp_secret_enc
+    assert user.enrolment_state is EnrolmentState.ACTIVE
+    return secrets.decrypt_secret(user.totp_secret_enc, KEY)

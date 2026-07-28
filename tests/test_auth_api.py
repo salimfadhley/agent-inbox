@@ -415,3 +415,40 @@ class TestSharedToken:
                 },
             )
             assert got.status_code == 200
+
+
+class TestTheAdminOverrideIsAdvertised:
+    """A hole in the front door that cannot be seen from outside is the worst kind.
+
+    `authenticated: true` on a hub running the override is a half-truth: the hub does
+    authenticate, and also has a way in that skips the second factor. So the descriptor
+    carries both facts, and the console shows both banners.
+    """
+
+    def test_the_descriptor_says_so(self) -> None:
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        auth = AuthService(
+            InMemoryAuthStore(), secret_key=KEY, admin_password="let-me-in"
+        )
+        with TestClient(app=build_api(house, HUB, auth=auth, auth_mode="enforce")) as c:
+            body = c.get("/").json()
+
+        assert body["authenticated"] is True
+        assert body["adminPasswordSet"] is True
+        assert "insecure" in body["adminPasswordWarning"].lower()
+
+    def test_an_ordinary_hub_says_the_opposite(self) -> None:
+        client, _ = _build("enforce")
+        with client as c:
+            body = c.get("/").json()
+        assert body["adminPasswordSet"] is False
+        assert "adminPasswordWarning" not in body
+
+    def test_the_password_itself_is_never_advertised(self) -> None:
+        """Announce the hole, never the key that opens it."""
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        auth = AuthService(
+            InMemoryAuthStore(), secret_key=KEY, admin_password="sekrit-value"
+        )
+        with TestClient(app=build_api(house, HUB, auth=auth, auth_mode="enforce")) as c:
+            assert "sekrit-value" not in c.get("/").text
