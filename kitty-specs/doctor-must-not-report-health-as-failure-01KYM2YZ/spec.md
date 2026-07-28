@@ -68,28 +68,68 @@ not follow from the evidence.
 
 ## Decisions taken
 
-**`0` for "healthy, action suggested".** The not-joined-yet case exits 0. It is the state
-the comment already calls a good outcome, and the state every new agent passes through.
+### Correction found while clarifying: the contract is not what this spec first assumed
 
-**`2` stays for genuine blockers.** No hub url, and an ambiguous engine, both keep their
-current code. They are real: something must change before the tool can proceed.
+An earlier draft said "`2` stays for genuine blockers", framing the change as a `0`/`2`
+split. That was wrong. `doctor` **already uses both 1 and 2**, and nothing documents the
+difference:
 
-**No new exit codes in this mission.** The issue suggests distinct codes per case, and
-that is deliberately *not* adopted here. Exit codes are a contract: anything currently
-treating non-zero as "look at this" keeps working under a `0`/`2` split, but a
-`0`/`2`/`3`/`4` split invites callers to branch on numbers nobody has written down. If
-finer granularity is wanted it should be its own decision, with the codes documented as
-an interface. Fixing the false failure does not require it.
+| Situation | Exit today |
+|---|---|
+| No hub url | `2` |
+| Credentials rejected by the hub | **`1`** |
+| Ambiguous engine | `2` |
+| Not joined yet (healthy) | `2` |
+
+So a genuine blocker — the hub refusing your credentials — already exits `1`, while
+ambiguity exits `2`. The earlier draft declined to invent an undocumented contract without
+noticing there was already an undocumented contract, and not the one it described.
+
+### The traffic light already exists in the output
+
+`cli.py:654`:
+
+```python
+ok, bad, todo = "ok  ", "FAIL", "--  "
+```
+
+That is green, red and **amber** — a vocabulary the command has printed all along. Amber
+is the operator's word for it: *an unusual case, but not a systematic problem.* Nothing
+connected yet, no entry for this engine, nothing joined — noteworthy, worth showing, and
+not a fault.
+
+**The defect, stated precisely: the exit code never respected the markers the command was
+already printing.** A run of `ok` and `--` lines reported itself as a failure. The fix is
+not a new classification, it is making the exit code agree with a classification that is
+already on screen.
+
+### What this mission changes
+
+**Add `0`. Leave `1` and `2` exactly as they are.** Operator decision.
+
+- **Green and amber both exit `0`.** No `FAIL` line means nothing failed, whether or not
+  there is an outstanding step.
+- **Red exits non-zero**, keeping whatever code it returns today. A credentials failure
+  continues to exit `1`; the other blockers continue to exit `2`.
+- The contract is **documented as it actually is** — including, honestly, that `1` and `2`
+  are both failures with no defined distinction. Recording an inconsistency is more useful
+  than quietly rationalising it, because a caller distinguishing them today would break
+  silently if we collapsed them, and we cannot see those callers.
+
+Rationalising `1` versus `2`, or giving each blocker its own code, both remain open and
+deliberately out of scope. Fixing the false failure does not require either, and each
+would change a value some external script may already depend on.
 
 ## Functional requirements
 
 | ID | Requirement | Status |
 |---|---|---|
 | FR-001 | A `doctor` run where every executed check passed and the only outstanding step is `join` exits **0**. | planned |
-| FR-002 | No hub url configured continues to exit **2**. | planned |
+| FR-002 | No hub url configured continues to exit **2**; a rejected credential continues to exit **1**. Existing failure codes are untouched. | planned |
 | FR-003 | An ambiguous engine (several configured, none selected) continues to exit **2**. | planned |
-| FR-004 | The human-readable output is unchanged. This mission changes an exit code, not a report — the text already says the right thing. | planned |
-| FR-005 | The exit-code contract is documented where `doctor` is described, so the meaning of 0 and 2 is stated rather than discovered. | planned |
+| FR-004 | The per-check output lines are unchanged. This mission changes an exit code, not the report — `ok` / `--` / `FAIL` already say the right thing. | planned |
+| FR-005 | The exit-code contract is documented in **`doctor`'s own help text** and in the README command table: `0` means nothing failed (green or amber), non-zero means something did, and `1` versus `2` carries no defined meaning today. Scripts are written from the README; the help text is what someone reads when the exit code surprises them. | planned |
+| FR-007 | `doctor`'s help text says **what the command does and how to read it** — that it walks config, connectivity, credentials and API in order and stops at the first break, and that `ok` / `--` / `FAIL` mean fine, worth knowing, and broken. The amber marker is currently unexplained anywhere, so a reader has to infer that `--` is not a failure. | planned |
 | FR-006 | The comments at `cli.py:657` and `cli.py:842` are reconciled with the code — kept and made true, not deleted to end the disagreement. | planned |
 
 ## Non-functional requirements
@@ -110,6 +150,8 @@ an interface. Fixing the false failure does not require it.
 | Hub unreachable | non-zero (unchanged) |
 | Hub reachable but rejects credentials | non-zero (unchanged) |
 | Any run containing a `FAIL` line | non-zero — NFR-002 |
+| A run of only `ok` and `--` lines | **0**, whatever the `--` lines are about |
+| `doctor --help` | names the check order, and explains `ok` / `--` / `FAIL` and the exit codes |
 
 The last row is the one that stops this fix from becoming the opposite defect. Widening
 "exit 0" is exactly the change that could make a real failure silent, and that would be
