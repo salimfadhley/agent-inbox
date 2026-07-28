@@ -34,6 +34,10 @@ STATUS_BY_CODE: dict[str, int] = {
     "remote_mailbox": 422,
     # every name was real; together they resolve to nobody
     "delivers_to_nobody": 422,
+    # a hub name that is not an address component — fix the value, not the collision
+    "invalid_hub_name": 422,
+    # the environment fixes this setting; a write here would be silently overridden
+    "hub_setting_governed": 409,
     # the caller has not joined
     "unknown_actor": 404,
     # absent, or not yours — deliberately the same answer

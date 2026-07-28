@@ -20,10 +20,11 @@ visibility rules hold however the caller was identified.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import sqlite3
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
@@ -47,9 +48,16 @@ from agent_inbox.errors import (
     mailbox_error_handler,
     store_busy_handler,
 )
-from agent_inbox.exceptions import MailboxError
+from agent_inbox.exceptions import (
+    HubSettingGoverned,
+    InvalidHubName,
+    MailboxError,
+    MalformedAddress,
+    NameUnavailable,
+)
 from agent_inbox.house import House
-from agent_inbox.hub_settings import resolve_hub_settings
+from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
+from agent_inbox.naming import validate_hub_name
 from agent_inbox.wire import (
     BLIND_FIELDS,
     Actor,
@@ -220,6 +228,20 @@ in `GET /`, and `authenticated: false` means the header is taken at face value.
 """
 
 
+def _settings_version(resolved: Mapping[str, Any]) -> str:
+    """A token for the state a client read, so a stale write can be spotted.
+
+    Covers value **and source**, because the risk here is not two operators racing —
+    it is one operator submitting a page rendered while the environment governed a
+    field. The value alone would not change when a variable is removed; the source does.
+    """
+    material = "|".join(
+        f"{key}={resolved[key].value!r}:{resolved[key].source}"
+        for key in sorted(resolved)
+    )
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
 class Api:
     """Routes over a house. Holds the house and the renderer; decides nothing."""
 
@@ -294,6 +316,105 @@ class Api:
             "policies": [getattr(p, "name", "?") for p in self.house.policies],
             "federates": False,
         }
+
+    async def hub_settings(self) -> dict[str, Any]:
+        """Each setting with its value, its source, and what governs it.
+
+        Operator-gated, as the contract settles: `GET /` is public and says what the hub
+        *is*, while this says how the deployment is *configured*, which is
+        administrative and sits in `revoke_token`'s neighbourhood.
+
+        An unset `title` is `null` with source `default` here, and omitted entirely from
+        `GET /`. A client rendering the field needs to know it exists and is unset; a
+        reader of the descriptor does not.
+        """
+        mailbox = self.house.mailbox
+        resolved = resolve_hub_settings(
+            await mailbox.hub_settings(), default_name=mailbox.hub_name
+        )
+        return {
+            **{
+                key: {
+                    "value": setting.value,
+                    "source": setting.source,
+                    **({"variable": setting.variable} if setting.variable else {}),
+                }
+                for key, setting in resolved.items()
+            },
+            "version": _settings_version(resolved),
+        }
+
+    async def set_hub_settings(self, changes: Mapping[str, Any]) -> dict[str, Any]:
+        """Change what the operator controls, and refuse what they do not.
+
+        Two refusals, and the second is the one an outside review found.
+
+        A field the environment governs is refused with `409` rather than stored: the
+        next read would override it, so accepting would be a write that reports success
+        and changes nothing.
+
+        **A value that came from the environment is never written back** (FR-011). A
+        client that rendered a governed field and submits it later — after the variable
+        has gone, or from a page rendered before it did — would persist the deployment's
+        value over the operator's own. Startup was guarded against that; this path was
+        not, and it is the path an operator actually uses.
+        """
+        mailbox = self.house.mailbox
+        stored = await mailbox.hub_settings()
+        resolved = resolve_hub_settings(stored, default_name=mailbox.hub_name)
+
+        # FR-011. The client states which state it read; if that is no longer the
+        # state, what it is submitting was rendered under different rules and must not
+        # be stored. This is the stale-page erasure an outside review found: a field
+        # rendered while the environment governed it, submitted after the variable was
+        # removed, would otherwise persist the deployment's value over the operator's.
+        #
+        # It protects a client that participates. A client that sends no version gets
+        # no protection, which is why the console is required to send one (WP04 T022)
+        # and why it also declines to submit governed fields at all.
+        seen = changes.get("version")
+        if seen is not None and seen != _settings_version(resolved):
+            raise HubSettingGoverned(
+                "these settings changed since you read them — reload before writing. "
+                "A value rendered under different configuration must not be stored, "
+                "because it may be the deployment's value rather than yours"
+            )
+        changes = {k: v for k, v in changes.items() if k != "version"}
+
+        unknown = set(changes) - set(HUB_SETTING_KEYS)
+        if unknown:
+            raise MalformedAddress(
+                f"not hub settings: {', '.join(sorted(unknown))}; "
+                f"settable: {', '.join(HUB_SETTING_KEYS)}"
+            )
+
+        for key, value in changes.items():
+            current = resolved[key]
+            if current.source == "environment":
+                raise HubSettingGoverned(
+                    f"{key!r} is set by this deployment through {current.variable} and "
+                    "cannot be changed here — change the variable, or unset it to use "
+                    "the stored value"
+                )
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise MalformedAddress(
+                    f"{key!r} must be text, not {type(value).__name__}"
+                )
+            if key == "name":
+                try:
+                    validate_hub_name(value)
+                except NameUnavailable as refusal:
+                    raise InvalidHubName(str(refusal)) from refusal
+
+        for key, value in changes.items():
+            await mailbox.set_hub_setting(key, value)
+
+        # Report what actually took effect, not what was asked for. They differ whenever
+        # the environment governs, and showing the submission would tell an operator a
+        # change landed when it did not.
+        return await self.hub_settings()
 
     async def health(self) -> dict[str, str]:
         """Liveness only — deliberately does not touch the store.
@@ -1148,6 +1269,28 @@ def build_api(
         return api.purge_status.as_dict()
 
     @get(
+        "/hub/settings",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def hub_settings_route(operator: str) -> dict[str, Any]:
+        """What is set, and by whom. Operator-gated: deployment configuration."""
+        return await api.hub_settings()
+
+    @put(
+        "/hub",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def set_hub_route(data: dict[str, Any], operator: str) -> dict[str, Any]:
+        """Change name, title or description. Administrative, so operator-only.
+
+        Omitted fields are left alone — a partial body is the normal case. An explicit
+        `null` clears a field, which is different from never having set it.
+        """
+        return await api.set_hub_settings(data)
+
+    @get(
         "/observe/purge",
         guards=[guard_enforce],
         dependencies={"operator": Provide(provide_operator)},
@@ -1367,6 +1510,8 @@ def build_api(
     handlers = [
         hub,
         health,
+        hub_settings_route,
+        set_hub_route,
         purge_preview,
         purge_status_route,
         purge_now,

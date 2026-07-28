@@ -40,6 +40,28 @@ class NameUnavailable(MailboxError):
     code = "name_unavailable"
 
 
+class InvalidHubName(MailboxError):
+    """A proposed hub name is not an address component.
+
+    Distinct from :class:`NameUnavailable`, which is about *agent* names and answers
+    409 because the usual cause is a collision. A hub name is refused because it is
+    malformed, and the caller must fix the value rather than pick another — 422.
+    """
+
+    code = "invalid_hub_name"
+
+
+class HubSettingGoverned(MailboxError):
+    """A write named a setting the environment fixes.
+
+    Refused rather than accepted-and-ignored. Accepting a write that the next read
+    would override is a change that reports success and does nothing — the same family
+    as a send that succeeds and reaches nobody.
+    """
+
+    code = "hub_setting_governed"
+
+
 class UnknownActor(MailboxError):
     """The **caller** has not joined this mailbox.
 

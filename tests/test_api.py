@@ -1601,3 +1601,184 @@ class TestACursorSurvivesBeingPutInAUrl:
         assert raw["messages_since"] == escaped["messages_since"], (
             "a raw timestamp counted differently from an escaped one"
         )
+
+
+class TestHubSettings:
+    """Name, title and description: reported, changed, and refused.
+
+    The hub here does not authenticate, so `provide_operator` admits the caller — the
+    same posture the console's `_gate` already has. Operator gating under `enforce` is
+    covered in the auth suite; what is asserted here is the behaviour of the routes.
+    """
+
+    def test_unset_fields_are_absent_from_the_descriptor(
+        self, client: TestClient
+    ) -> None:
+        """Every hub in existence looked like this before these fields, so it is the
+        base case, not the edge case. `""` would be a value someone chose."""
+        body = client.get("/").json()
+        assert "title" not in body
+        assert "description" not in body
+
+    def test_settings_report_value_and_source(self, client: TestClient) -> None:
+        body = client.get("/hub/settings").json()
+        assert body["name"] == {"value": "testhub", "source": "default"}
+        assert body["title"] == {"value": None, "source": "default"}
+
+    def test_a_write_takes_effect_and_shows_in_the_descriptor(
+        self, client: TestClient
+    ) -> None:
+        r = client.put("/hub", json={"title": "The Salt Club"})
+        assert r.status_code == 200, r.text
+        assert r.json()["title"] == {"value": "The Salt Club", "source": "stored"}
+        assert client.get("/").json()["title"] == "The Salt Club"
+
+    def test_an_omitted_field_is_left_alone(self, client: TestClient) -> None:
+        """A partial body is the normal case, not an edge case."""
+        client.put("/hub", json={"title": "The Salt Club"})
+        client.put("/hub", json={"description": "Rare and obscure salts"})
+        body = client.get("/").json()
+        assert body["title"] == "The Salt Club"
+        assert body["description"] == "Rare and obscure salts"
+
+    def test_an_explicit_null_clears(self, client: TestClient) -> None:
+        client.put("/hub", json={"title": "The Salt Club"})
+        client.put("/hub", json={"title": None})
+        assert "title" not in client.get("/").json()
+
+    def test_an_invalid_name_is_refused_with_422(self, client: TestClient) -> None:
+        """Asserted at the wire, not on the exception type. A code missing from
+        STATUS_BY_CODE becomes a 500 and the generic handler makes it look handled —
+        this repo has shipped exactly that."""
+        r = client.put("/hub", json={"name": "The Salt Club"})
+        assert r.status_code == 422, r.text
+        assert "saltclub" in r.text
+
+    def test_a_hostname_is_refused_as_a_name(self, client: TestClient) -> None:
+        r = client.put("/hub", json={"name": "hub.thesaltclub.xyz"})
+        assert r.status_code == 422, r.text
+        assert "address" in r.text
+
+    def test_a_valid_name_is_accepted(self, client: TestClient) -> None:
+        r = client.put("/hub", json={"name": "saltclub"})
+        assert r.status_code == 200, r.text
+        assert client.get("/").json()["name"] == "saltclub"
+
+    def test_unknown_keys_are_refused(self, client: TestClient) -> None:
+        r = client.put("/hub", json={"public_url": "https://elsewhere.invalid"})
+        assert r.status_code == 400, r.text
+
+
+class TestIdentitySurvivesTheAddress:
+    """NFR-003, and the mission in one line.
+
+    Two agents on one hub, reaching it by different addresses, concluded they were on
+    different hubs. That is what this mission exists to prevent, so it is asserted
+    rather than stated.
+    """
+
+    def test_changing_the_public_url_does_not_change_the_name(self) -> None:
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        with TestClient(app=build_api(house, "http://one.invalid")) as first:
+            first.put("/hub", json={"name": "saltclub"})
+            before = first.get("/").json()
+
+        # Same store, same hub — a different address. This is a proxy being added, a
+        # port changing, a machine being renamed.
+        with TestClient(app=build_api(house, "http://two.invalid:8081")) as second:
+            after = second.get("/").json()
+
+        assert before["id"] != after["id"], "the premise: the address really changed"
+        assert before["name"] == after["name"] == "saltclub"
+
+    def test_two_addresses_one_hub_report_the_same_name(self) -> None:
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        with TestClient(app=build_api(house, "http://machine.invalid")) as a:
+            a.put("/hub", json={"name": "saltclub"})
+            by_short = a.get("/").json()["name"]
+        with TestClient(app=build_api(house, "http://machine.example:8081")) as b:
+            by_long = b.get("/").json()["name"]
+        assert by_short == by_long == "saltclub"
+
+
+class TestTheEnvironmentGoverns:
+    """Precedence at the wire, and the two ways a stored value could be destroyed."""
+
+    def test_a_governed_field_reports_its_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_INBOX_HUB_TITLE", "Set By Deployment")
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        with TestClient(app=build_api(house, HUB)) as c:
+            title = c.get("/hub/settings").json()["title"]
+        assert title == {
+            "value": "Set By Deployment",
+            "source": "environment",
+            "variable": "AGENT_INBOX_HUB_TITLE",
+        }
+
+    def test_writing_a_governed_field_is_refused_with_409(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refused, not accepted-and-ignored. Accepting a write the next read would
+        override is a change that reports success and does nothing."""
+        monkeypatch.setenv("AGENT_INBOX_HUB_TITLE", "Set By Deployment")
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        with TestClient(app=build_api(house, HUB)) as c:
+            # The premise: it really is governed before we assert the refusal.
+            assert c.get("/hub/settings").json()["title"]["source"] == "environment"
+            r = c.put("/hub", json={"title": "Something Else"})
+        assert r.status_code == 409, r.text
+        assert "AGENT_INBOX_HUB_TITLE" in r.text
+
+    def test_an_override_does_not_erase_the_stored_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Set, shadow, unset — and the operator's own value comes back."""
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        with TestClient(app=build_api(house, HUB)) as c:
+            c.put("/hub", json={"title": "The Salt Club"})
+
+        monkeypatch.setenv("AGENT_INBOX_HUB_TITLE", "Set By Deployment")
+        with TestClient(app=build_api(house, HUB)) as c:
+            assert c.get("/").json()["title"] == "Set By Deployment"
+
+        monkeypatch.delenv("AGENT_INBOX_HUB_TITLE")
+        with TestClient(app=build_api(house, HUB)) as c:
+            assert c.get("/").json()["title"] == "The Salt Club"
+
+    def test_an_environment_value_is_never_written_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FR-011, found by outside review on 2026-07-28.
+
+        The sequence: a client renders the effective value while the environment
+        governs; the variable is then removed; the client submits what it rendered.
+        Startup was guarded against erasure and this path was not — and it is the path
+        an operator actually uses.
+        """
+        house = House(Mailbox(InMemoryStore(), hub_name="testhub"))
+        with TestClient(app=build_api(house, HUB)) as c:
+            c.put("/hub", json={"title": "The Salt Club"})
+
+        monkeypatch.setenv("AGENT_INBOX_HUB_TITLE", "Ops Title")
+        with TestClient(app=build_api(house, HUB)) as c:
+            page = c.get("/hub/settings").json()
+        rendered, version = page["title"]["value"], page["version"]
+        assert rendered == "Ops Title", "the premise: the client saw the env value"
+
+        # The variable goes away, and the stale page submits what it rendered, saying
+        # which state it read — as any client that participates in the guard does.
+        monkeypatch.delenv("AGENT_INBOX_HUB_TITLE")
+        with TestClient(app=build_api(house, HUB)) as c:
+            r = c.put("/hub", json={"title": rendered, "version": version})
+            assert r.status_code == 409, r.text
+            assert c.get("/").json()["title"] == "The Salt Club"
+
+    def test_a_write_carrying_the_current_version_is_accepted(
+        self, client: TestClient
+    ) -> None:
+        """The guard must not block ordinary writes, or clients will stop sending it."""
+        version = client.get("/hub/settings").json()["version"]
+        r = client.put("/hub", json={"title": "The Salt Club", "version": version})
+        assert r.status_code == 200, r.text
