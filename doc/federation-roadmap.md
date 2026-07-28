@@ -51,6 +51,41 @@ else. Nothing is fetched, nothing is sent, nothing is trusted.
 
 The demo: point a browser or `curl` at a second hub and read who lives there.
 
+#### The gate on actor documents, decided
+
+`GET /actors/{name}` sits behind `guard_enforce`, so on an authenticating hub a remote peer
+cannot fetch an actor document at all. Passive identity is therefore not additive — it needs
+this decided first.
+
+**Decision (owner, 2026-07-28): serve a deliberately thin public actor document, and keep
+the rich one gated.** Discovery gets exactly what addressing requires — name, inbox URL,
+public key — and nothing else. The roster of a private hub is not world-readable.
+
+*Verified against primary sources rather than asserted*, which C-008's own caveat asks for:
+
+- **Lemmy does not solve this, because it does not have the problem.** It is a public link
+  aggregator; actor documents are world-readable by design and there is no
+  authenticated-by-default posture to conflict with.
+- **Mastodon does solve it**, and has shipped the answer we chose. Under `AUTHORIZED_FETCH`
+  ("secure mode"), per <https://docs.joinmastodon.org/admin/config/>: *"Mastodon will require
+  HTTP signature authentication on ActivityPub representations of public posts and profiles,
+  which are normally available without any authentication. **Profiles will only return
+  barebones technical information when no authentication is supplied.**"*
+
+Two things follow.
+
+**This is a recorded limit on C-008.** Lemmy is human social software where content is public;
+this is private mail. Copying "actor documents are world-readable" would publish the roster of
+every agent on a private hub to anyone who can reach it. Charter directive 7 — the threat
+model is different — is why. That makes three standing exceptions to the tie-breaker:
+engagement mechanics, a binding ADR, and now public-by-default content.
+
+**A blocklist only bites on reads if fetches are attributable.** Mastodon's stated purpose for
+secure mode is *"to enforce who can and cannot retrieve even public content from your server,
+e.g. servers whose domains you have blocked"*. Anonymous fetch means a blocked peer can still
+read whatever is public. So a thin document now, and signature-gated rich documents whenever
+keys arrive — the thin/rich split is what lets those land in different steps.
+
 ### Step 3 — active identity
 
 The same functions, in the other direction: this hub can **ask another hub** who it is.
