@@ -127,8 +127,8 @@ open config files to answer.
 | FR-003 | All three are settable from the console and persist across a restart. | planned |
 | FR-004 | An environment variable overrides the stored value, always. The stored value is not erased by being overridden — an operator who unsets the variable gets back what they configured. | planned |
 | FR-005 | A field fixed by the environment renders **disabled**, saying so and naming the variable. | planned |
-| FR-006 | `name` defaults to `local`, and `local` is understood as "unnamed": honest for a private hub, and not federatable. | planned |
-| FR-007 | A **Federation** tab holds these fields. It is where peers, blocklists and modes will also live — this mission builds the tab and fills in the identity half. | planned |
+| FR-006 | `name` defaults to `local`, which is a real and permitted name. **Federation cannot be switched on while the hub is called `local`** — not merely blocked from federating, but blocked from enabling the mode, so a half-configured hub is not a reachable state. The refusal says why: a hub called "local" cannot be told apart from every other hub called "local". | planned |
+| FR-007 | A **Federation** tab holds these fields. It ships as a placeholder for federation itself, deliberately: the operator's instruction was to get the settings system working before the feature that needs it, and there are no non-developer users to confuse. It is where peers, blocklists and modes will later live. | planned |
 | FR-008 | Editing is operator-gated where the hub authenticates, consistent with `revoke_token` and ADR 0008: administration happens out of band, never by message. On an unauthenticating hub the console is already open and this changes nothing. | planned |
 | FR-009 | `title` and `description` are free text and may be empty. Only `name` is load-bearing. | planned |
 | FR-010 | The onboarding prompt introduces the hub by `title` and `description` where set, so an arriving agent learns what the place is, not only how it authenticates. | planned |
@@ -154,18 +154,56 @@ open config files to answer.
 | Two addresses, one hub | both report the same `name` |
 | Public URL changed | `name` unchanged |
 | Editing as a non-operator on an enforcing hub | refused |
+| Enabling federation while named `local` | refused, saying why |
+| Enabling federation after renaming | permitted |
+| Renaming back to `local` with federation on | refused, or federation disabled — must be deliberate, not incidental |
 
 The last-but-one row is the mission in a line: **the identity survives the address.**
 
+## Answered, 2026-07-28
+
+### `local` is a real name, and it is what blocks federation
+
+Not refused, not special-cased away: `local` is a name you may give your hub, and it is
+the default. **You cannot switch federation on, at all, while your hub is called
+`local`.** Renaming comes first.
+
+That is better than refusing `local` outright. Refusing it would force every operator to
+invent a name during setup for a capability most of them will never use, and would break
+the quickstart. Blocking *federation* puts the requirement exactly where the consequence
+is, and makes the error self-explanatory at the moment it appears: a hub called "local"
+cannot be told apart from every other hub called "local", which is fine until the moment
+it must be.
+
+Note this is a stronger gate than "cannot federate": the mode cannot be **enabled**. A
+half-configured hub that has switched federation on and not yet been named is a state
+worth not having.
+
+### Renaming is allowed, and forwarding is deliberately unresolved
+
+The hub name may change. What happens to anything holding the old one needs its own
+thought and is **not settled here** — see the open question below, which is narrower than
+it looks and touches a decision this project has already reversed once.
+
 ## Open questions for the human
 
-1. **Should `name` be changeable once agents have joined?** Nothing external holds it, so
-   it is safe in the federation sense — but agents' own `@hub` addressing and any local
-   convention would shift under them. Recommendation: allow it, and say what changes.
-2. **Does `local` need to be *refused* as an explicit choice**, as opposed to being the
-   default? A hub deliberately named `local` is indistinguishable from an unnamed one,
-   which is fine until it federates and then is not. Cheap either way; worth deciding
-   rather than discovering.
+1. **Whose rename, and does it need forwarding?** The operator's answer named *agents*
+   changing their name, and that may have meant hubs. The two have opposite histories and
+   the difference matters:
+
+   - **Hub names.** Renaming is safe today *because* federated identity is domain-based —
+     nothing outside the hub holds the friendly name, so nothing is orphaned and no
+     forwarding is required. What does shift is local: agents' `@hub` addressing and any
+     convention written down in a project.
+   - **Agent names.** These are currently `opaque, unique, assigned by the hub, stable
+     forever` (mission 0023). Rename *with* forwarding existed — mission 0012, shipped
+     v0.10.0 — and was **deleted** when surrogate keys made it unnecessary. ADR 0003 cites
+     that machinery as "whose only purpose is to survive identity churn". Re-introducing
+     it would reverse a decision taken deliberately and written up as a retrospective.
+
+   This mission assumes **hub** renames and needs no forwarding for them. If agent renames
+   are wanted, that is a separate mission against ADR 0003 and mission 0023, and should be
+   argued on its own terms rather than arriving as a side effect of naming hubs.
 
 ## Out of scope
 
