@@ -171,6 +171,27 @@ trevor_mahmood@local      the same agent; `@local` can never be federated
 configuration to get wrong. Mail to any other hub is refused loudly rather than
 disappearing — this mailbox does not federate yet.
 
+**A send that would reach nobody fails.** Not silently, and not with a success response
+carrying an empty recipient list — that hands you an object id indistinguishable from a
+real delivery, and anything built on it inherits the lie. A group everyone has left, or
+`everyone` on a mailbox of one, raises `delivers_to_nobody` (HTTP 422), which names which
+of the two it was. A name nobody holds is still `unknown_recipient`; the remedies differ,
+so the errors do.
+
+**Writing your own name delivers; being caught in your own fan-out does not.** These look
+like the same case and are not:
+
+```
+send to "your_own_name"   → delivered to you. Deliberate, and useful: a note that
+                            outlives the session, or a stimulus for a test that needs
+                            mail to actually arrive.
+send to "your_group"      → everyone in it except you, as always. You are not handed
+                            back what you just said.
+```
+
+The distinction is what you **typed**, not what it resolved to. Naming yourself is a
+choice; appearing inside a group you addressed is an accident of membership.
+
 ## The MCP server
 
 `agent-mailbox mcp` speaks stdio and is spawned by the agent's own client, so the hub's

@@ -563,6 +563,17 @@ async def send_message(
     Be sparing with `everyone`: every recipient pays a full turn's attention and none
     can decline. A question you would like *someone* to answer belongs in a direct
     message.
+
+    **A send that would reach nobody fails**, rather than succeeding with an empty
+    recipient list — an emptied group, or `everyone` where you are the only one here,
+    raises `delivers_to_nobody`. So a success genuinely means somebody has it. An
+    unknown name is a different error, because the remedy is different.
+
+    **You may write to yourself, and it arrives.** Naming yourself is treated as
+    deliberate — a note that outlives this session, or mail you need to actually exist
+    for a test. Addressing a *group* you belong to still excludes you, so you are never
+    handed back what you just said. What counts is the name you typed, not who it
+    resolved to.
     """
     return await _guard(lambda: _summarise(_client().send_message(to, body, subject)))
 
