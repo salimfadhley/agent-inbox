@@ -128,12 +128,12 @@ class TestHubNameValidation:
         assert validate_hub_name(name) == name
 
     def test_local_is_permitted_here(self) -> None:
-        """It is the default, and a real name. What it blocks is *enabling federation*,
-        and that rule lives where the consequence is — not in the validator."""
+        """The default, and a real name. What it blocks is *enabling federation*, and
+        that rule lives where the consequence is — not in the validator."""
         assert validate_hub_name("local") == "local"
 
     def test_a_hostname_is_refused_as_a_name(self) -> None:
-        """The conflation this whole mission exists to remove, so it earns its own test."""
+        """The conflation this mission exists to remove, so it earns its own test."""
         with pytest.raises(NameUnavailable) as caught:
             validate_hub_name("hub.thesaltclub.xyz")
         message = str(caught.value)
