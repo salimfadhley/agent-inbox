@@ -26,6 +26,7 @@ from __future__ import annotations
 import html
 import json
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -135,6 +136,7 @@ code { font: 13px ui-monospace, monospace; }
              border-radius: 2px 2px 0 0; }
 .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
        background: #3c3; margin-right: .35rem; }
+.dot.warm { background: #d90; }
 .dot.off { background: var(--line); }
 textarea, input[type=text], input[type=password] { width: 100%;
            font: 13px/1.45 ui-monospace, monospace;
@@ -309,6 +311,35 @@ def _console_base(request: Request) -> str:
     if host:
         return f"{scheme}://{host}".rstrip("/")
     return str(request.base_url).rstrip("/")
+
+
+def _freshness(last: str, now: datetime | None = None) -> tuple[str, str]:
+    """How recently an actor was seen, as a dot class and a plain-words title.
+
+    Green within the hour, amber within the day, grey after that.
+
+    This replaces a comparison against a **hardcoded date**, under a comment claiming a
+    green dot meant "seen today". It did not: it meant "seen at any point since a fixed
+    date in the past", so every dot went green and stayed green, and the display grew
+    more wrong every day it ran. A roster where everyone looks present is worse than no
+    dot at all, because it is believed.
+
+    Unparseable or missing is grey, never green. The failure of a freshness check should
+    not look like freshness.
+    """
+    now = now or datetime.now(UTC)
+    try:
+        seen = datetime.fromisoformat(str(last))
+    except ValueError:
+        return "off", "never seen"
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=UTC)
+    age = now - seen
+    if age < timedelta(hours=1):
+        return "", "seen within the hour"
+    if age < timedelta(hours=24):
+        return "warm", "seen within the day"
+    return "off", "not seen for over a day"
 
 
 def _shortdate(value: str) -> str:
@@ -502,7 +533,9 @@ def build_console(client: HubClient) -> Litestar:
 
         online_rows = _agent_rows(actors)
         who = "<h2>Agents</h2>" + _table(
-            ["", "Who", "Role", "Last seen"], online_rows, "Nobody has joined yet."
+            ["", "Who", "Role", "Project", "Last seen"],
+            online_rows,
+            "Nobody has joined yet.",
         )
         return Response(
             _page("Overview", cards + chart + flow + who, hub, "/"),
@@ -515,15 +548,31 @@ def build_console(client: HubClient) -> Litestar:
             name = a.get("preferredUsername", "")
             profile = a.get("profile") or {}
             last = a.get("lastSeen") or ""
-            # No heartbeat exists, so "recent" is the honest word, not "online": a
-            # green dot means seen today, nothing more.
-            recent = str(last)[:10] >= "2026-07-24"
-            dot = f'<span class="dot{"" if recent else " off"}"></span>'
+            # No heartbeat exists, so this is recency, never "online": the dot says when
+            # the hub last heard from an agent, and nothing about whether it is running.
+            state, why = _freshness(str(last))
+            dot = (
+                f'<span class="dot{" " + state if state else ""}" '
+                f'title="{html.escape(why)}"></span>'
+            )
+            # Self-declared and free-form, like everything else in a profile — an agent
+            # says what it is working on, and the hub takes its word. Blank for the
+            # standing residents and for anyone who joined without describing
+            # themselves, which is most of a fresh hub and not a fault.
+            #
+            # Clipped, because these run long in practice: real values on this hub
+            # include "5g_arg (Project DEVCON / ULEZ-DC)", and one wrapped cell makes
+            # every other row taller for no gain. The full text stays in the tooltip.
+            project = str(profile.get("project", "") or "").strip()
+            shown = (project[:28] + "…") if len(project) > 28 else project
             rows.append(
                 [
                     dot,
                     _mbox_link(name),
                     html.escape(str(profile.get("role", "") or "")),
+                    f'<span title="{html.escape(project)}">{html.escape(shown)}</span>'
+                    if project
+                    else '<span class="dim">—</span>',
                     f'<span class="dim">{html.escape(_shortdate(last))}</span>',
                 ]
             )

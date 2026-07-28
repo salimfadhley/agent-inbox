@@ -15,7 +15,9 @@ which client methods were called, which is how the no-impersonation property is 
 
 from __future__ import annotations
 
+import html
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -23,7 +25,7 @@ from litestar.testing import TestClient
 
 from agent_mailbox import __version__
 from agent_mailbox.client import SESSION_COOKIE, ClientError, Config, HubClient
-from agent_mailbox.console import build_console
+from agent_mailbox.console import _freshness, build_console
 from agent_mailbox.prompts import MINIMUM_CLIENT
 
 HUB = "http://mailbox.invalid:8081"
@@ -1088,3 +1090,109 @@ class TestTheInsecureAdminBanner:
         html_out = self._page({"authenticated": False, "adminPasswordSet": True})
         assert "This hub does not authenticate" in html_out
         assert "Explicitly setting an admin password is insecure" in html_out
+
+
+class TestTheOverviewShowsProject:
+    """What an agent says it is working on, next to who and when.
+
+    Self-declared and free-form, like the rest of a profile. Blank for the standing
+    residents and for anyone who joined without describing themselves — on a real hub
+    that is most of the roster, and it is not a fault.
+    """
+
+    def test_the_column_is_present(self, console: TestClient) -> None:
+        body = console.get("/").text
+        assert "<th>Project</th>" in body or ">Project<" in body
+
+    def test_a_declared_project_is_shown(self, console: TestClient) -> None:
+        assert "billing" in console.get("/").text
+
+    def test_a_missing_project_is_a_dash_not_a_blank(self) -> None:
+        """An empty cell reads as a rendering fault; a dash reads as 'not stated'."""
+
+        class NoProfile(StubHub):
+            def list_agents(self) -> dict[str, Any]:
+                return {
+                    "items": [
+                        {
+                            "preferredUsername": "bryan_hansson",
+                            "type": "Service",
+                            "profile": {},
+                            "lastSeen": "2026-07-24T10:00:00Z",
+                        }
+                    ]
+                }
+
+        with TestClient(app=build_console(NoProfile())) as c:
+            body = c.get("/").text
+            assert "—" in body
+
+    def test_a_long_project_is_clipped_but_kept_in_the_tooltip(self) -> None:
+        """Real values run long: '5g_arg (Project DEVCON / ULEZ-DC)' is a live one."""
+        long_name = "5g_arg (Project DEVCON / ULEZ-DC) and then some more words"
+
+        class LongProject(StubHub):
+            def list_agents(self) -> dict[str, Any]:
+                return {
+                    "items": [
+                        {
+                            "preferredUsername": "farhad_xia",
+                            "type": "Service",
+                            "profile": {"project": long_name},
+                            "lastSeen": "2026-07-24T10:00:00Z",
+                        }
+                    ]
+                }
+
+        with TestClient(app=build_console(LongProject())) as c:
+            body = c.get("/").text
+            assert "…" in body, "a long project should be clipped"
+            assert html.escape(long_name) in body, (
+                "the full text belongs in the tooltip"
+            )
+
+
+class TestTheFreshnessDot:
+    """Green within the hour, amber within the day, grey after.
+
+    This replaced a comparison against a hardcoded date under a comment claiming a green
+    dot meant "seen today". It meant "seen since a fixed date in the past", so every dot
+    went green and stayed green, and grew more wrong every day it ran.
+    """
+
+    NOW = datetime(2026, 7, 28, 12, 0, 0, tzinfo=UTC)
+
+    def _state(self, seen: datetime) -> str:
+        return _freshness(seen.isoformat(), self.NOW)[0]
+
+    def test_within_the_hour_is_green(self) -> None:
+        assert self._state(self.NOW - timedelta(minutes=59)) == ""
+
+    def test_within_the_day_is_amber(self) -> None:
+        assert self._state(self.NOW - timedelta(hours=2)) == "warm"
+        assert self._state(self.NOW - timedelta(hours=23)) == "warm"
+
+    def test_over_a_day_is_grey(self) -> None:
+        assert self._state(self.NOW - timedelta(hours=25)) == "off"
+        assert self._state(self.NOW - timedelta(days=40)) == "off"
+
+    def test_the_boundaries_fall_the_stated_way(self) -> None:
+        assert self._state(self.NOW - timedelta(hours=1)) == "warm", "1h is not green"
+        assert self._state(self.NOW - timedelta(hours=24)) == "off", "24h is not amber"
+
+    def test_a_missing_or_unparseable_time_is_grey_never_green(self) -> None:
+        """A freshness check that fails must not look like freshness."""
+        for junk in ("", "never", "2026-13-45T99:99", "yesterday"):
+            assert _freshness(junk, self.NOW)[0] == "off"
+
+    def test_a_naive_timestamp_is_read_as_utc_not_crashed_on(self) -> None:
+        assert _freshness("2026-07-28T11:30:00", self.NOW)[0] == ""
+
+    def test_the_old_hardcoded_behaviour_is_gone(self) -> None:
+        """The bug, stated directly: a month-old sighting used to show green."""
+        assert self._state(datetime(2026, 7, 24, 12, 0, tzinfo=UTC)) == "off"
+
+    def test_every_state_carries_words_a_human_can_read(self) -> None:
+        for delta in (timedelta(minutes=1), timedelta(hours=5), timedelta(days=3)):
+            _, why = _freshness((self.NOW - delta).isoformat(), self.NOW)
+            assert "seen" in why
