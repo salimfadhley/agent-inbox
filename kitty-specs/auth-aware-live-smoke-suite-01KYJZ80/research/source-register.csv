@@ -1,0 +1,13 @@
+id,source,kind,location,used_for,accessed_utc,authority
+S-01,Live smoke suite,test code,tests/live/test_live_smoke.py,"The five failing assertions and the -k auth selector problem",2026-07-28T00:15Z,primary
+S-02,CI workflow,build config,.github/workflows/ci.yml,"That CI already runs the live suite against compose; where the second pass goes",2026-07-28T00:15Z,primary
+S-03,Deployment topology,build config,docker-compose.yml,"Whether an enforcing hub can be an override rather than a second file",2026-07-28T00:15Z,primary
+S-04,Auth service,source,src/agent_mailbox/auth/service.py,"First-run password emission; enrolment issuing a TOTP secret",2026-07-28T00:18Z,primary
+S-05,API routes,source,src/agent_mailbox/api.py,"Enrolment and token-minting routes and their operator guard",2026-07-28T00:18Z,primary
+S-06,Server entrypoint,source,src/agent_mailbox/serve.py,"Which environment variables exist; that no admin-password variable does",2026-07-28T00:19Z,primary
+S-07,TOTP module,source,src/agent_mailbox/auth/totp.py,"That codes can be computed in-process for an unattended bootstrap",2026-07-28T00:18Z,primary
+S-08,ADR 0008,decision record,doc/decisions/0008-no-actor-has-authority.md,"That out-of-band operator authentication does not breach the no-authority rule",2026-07-28T00:20Z,binding
+S-09,AGENTS.md,project charter,AGENTS.md,"Generic-only rule; the establish-the-premise rule this mission applies",2026-07-28T00:20Z,binding
+S-10,Deployed hub,running system,halob v0.21.1 then v0.22.0,"Observed failure counts; the advertised auth posture at GET /",2026-07-28T00:05Z,primary
+S-11,Host correspondence,report,ludmila_coe via agent-inbox,"The ranking and the reason: false red trains operators to ignore live validation",2026-07-27T23:04Z,secondary
+S-12,Sibling mission,spec,kitty-specs/auth-mode-truthful-error-text-01KYJZ81/spec.md,"Cross-linked auth-mode truthfulness evidence; the warn-mode open question",2026-07-28T00:20Z,secondary

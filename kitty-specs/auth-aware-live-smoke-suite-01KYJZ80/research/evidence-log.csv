@@ -1,0 +1,14 @@
+id,decision,finding,method,artefact,observed_utc,strength
+E-01,D-01,"tests/live against an enforcing hub gives 5 failed / 3 passed / 3 skipped; every failure is the hub behaving correctly","ran the documented invocation against halob v0.21.1",pytest output,2026-07-27T23:00Z,confirmed
+E-02,D-01,"test_the_console_serves_and_warns asserts 'does not authenticate' appears in console HTML; it is correctly absent on an authenticating hub","read the assertion and the served HTML",tests/live/test_live_smoke.py,2026-07-27T23:00Z,confirmed
+E-03,D-01,"pytest tests/live -k auth deselects all 11 tests, so the intuitive route to the LIVE_AUTH variants finds nothing",ran the selector,pytest output,2026-07-27T23:05Z,confirmed
+E-04,D-02,"CI already runs tests/live against a compose stack with LIVE_HUB_URL and LIVE_CONSOLE_URL set",read the smoke job,.github/workflows/ci.yml,2026-07-28T00:15Z,confirmed
+E-05,D-02,"An earlier draft of this spec claimed CI had no deployment to test against; asserted without checking, and wrong",self-review after reading the workflow,kitty-specs/auth-aware-live-smoke-suite-01KYJZ80/spec.md,2026-07-28T00:16Z,confirmed
+E-06,D-03,"The hub advertises its auth posture at GET / as a boolean 'authenticated' plus a prose 'note'",queried the deployed hub,GET / on the hub,2026-07-28T00:05Z,confirmed
+E-07,D-04,"The same hub returned 'This hub does not authenticate' in a 400 and 'not_authenticated' to an uncredentialed request minutes apart",observed while classifying an unrelated defect,raw API responses,2026-07-27T23:08Z,confirmed
+E-08,D-05,"The hub logs 'initial admin password' on first run, making it obtainable from container logs",read the auth service,src/agent_mailbox/auth/service.py:146,2026-07-28T00:18Z,confirmed
+E-09,D-05,"Minting a device token requires an operator session via provide_operator, not an agent credential",read the route,src/agent_mailbox/api.py:1197,2026-07-28T00:18Z,confirmed
+E-10,D-05,"GET/POST /auth/enrol issue and confirm a TOTP secret; agent_mailbox.auth.totp can compute codes in-process",read the routes and the module,src/agent_mailbox/api.py:1145-1160,2026-07-28T00:18Z,confirmed
+E-11,D-05,"No environment variable exists for an initial admin password; serve.py reads only AUTH_MODE, PUBLIC_URL and SECRET_KEY",grepped the server entrypoint,src/agent_mailbox/serve.py,2026-07-28T00:19Z,confirmed
+E-12,D-06,"ADR 0008 places administration out of band and denies authority to actors; an out-of-band operator login is consistent with it",read the ADR,doc/decisions/0008-no-actor-has-authority.md,2026-07-28T00:20Z,confirmed
+E-13,risk-4,"Reserved actors admin and host exist before anyone joins, so 'everyone' always reaches somebody on a deployed hub",API test asserting 422 for an empty broadcast returned 201,tests/test_api.py,2026-07-27T23:50Z,confirmed
