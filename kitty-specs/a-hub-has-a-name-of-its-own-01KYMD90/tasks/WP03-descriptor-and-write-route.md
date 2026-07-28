@@ -8,6 +8,7 @@ requirement_refs:
 - FR-001
 - FR-008
 - FR-009
+- FR-011
 - NFR-003
 tracker_refs:
 - https://github.com/salimfadhley/agent-inbox/issues/15
@@ -22,6 +23,7 @@ subtasks:
 - T015
 - T016
 - T027
+- T029
 phase: Phase 2 - Surfaces
 agent: python-pedro
 history:
@@ -238,6 +240,22 @@ spec-kitty agent action implement WP03 --agent <name>
 - **Establish the premise**: in test 5, assert the field really is environment-governed
   before asserting the refusal. A `409` returned for the wrong reason passes an unexamined
   test.
+
+### T029 — Refuse a write-back of an environment-sourced value
+
+- **Purpose**: FR-011. The second door into the erasure that WP01's T006 closes at startup.
+- **Files**: `src/agent_inbox/api.py`, `tests/test_api.py`
+- **Steps**:
+  1. `PUT /hub` must treat an omitted field as unchanged — never as "clear it". A client
+     sending a partial body is the normal case, not an edge case.
+  2. Refuse a write whose value the client cannot have authored: if the request carries the
+     value currently resolved *from the environment*, refuse with `409` rather than storing
+     it. The operator did not type it; a rendered form did.
+  3. Test the sequence the reviewer gave: store a title, set the variable, resolve (the
+     environment wins), remove the variable, then submit the environment's former value.
+     **Assert the stored value is unchanged.** Assert the store, not the response.
+- **Why**: found by outside review, 2026-07-28. Startup was guarded and this was not, so the
+  invariant held everywhere except the one path an operator actually uses.
 
 ## Test Strategy
 

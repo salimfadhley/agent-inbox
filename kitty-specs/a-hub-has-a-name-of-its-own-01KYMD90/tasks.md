@@ -10,7 +10,7 @@ provable by assertion. The project's recurring defect shape is *a check that pas
 it had nothing to look at*, so several subtasks below require a test to be proved by
 removing the code it guards and watching it fail.
 
-**Organization**: 28 subtasks (`T001`–`T028`) roll into 5 work packages (`WP01`–`WP05`).
+**Organization**: 30 subtasks (`T001`–`T029`) roll into 5 work packages (`WP01`–`WP05`).
 Each work package is independently deliverable. Deep guidance lives in the prompt files;
 this document is the checklist.
 
@@ -165,6 +165,7 @@ for an environment-governed field and `422` for an invalid name.
 - [ ] T014 Refuse with `409` when the requested field is fixed by the environment, naming the variable (WP03)
 - [ ] T015 Refuse with `422` when the name fails validation, carrying WP02's message (WP03)
 - [ ] T016 Test the gate with an agent device token, and each refusal's status code against `STATUS_BY_CODE` (WP03)
+- [ ] T029 Refuse a write-back of an environment-sourced value: submitting a value the environment supplied, after the variable is gone, must not store it (WP03)
 - [ ] T027 Assert NFR-003: changing `AGENT_INBOX_PUBLIC_URL` leaves `name` unchanged, and two addresses reaching one hub report the same `name` (WP03)
 
 ### Implementation Notes
@@ -211,6 +212,7 @@ federation itself is not built yet.
 - [ ] T019 Render an environment-governed field disabled, saying so and naming the variable (WP04)
 - [ ] T020 Submit through `PUT /hub`; surface a `409` or `422` to the operator rather than swallowing it (WP04)
 - [ ] T021 Test the tab, the disabled rendering, and the placeholder notice in `tests/test_console.py` (WP04)
+- [ ] T022 Never submit a value the API reported as environment-sourced — assert the request body omits the field entirely (WP04)
 
 ### Implementation Notes
 

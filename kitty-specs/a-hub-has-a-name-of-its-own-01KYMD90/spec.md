@@ -132,6 +132,7 @@ open config files to answer.
 | FR-008 | Editing is operator-gated where the hub authenticates, consistent with `revoke_token` and ADR 0008: administration happens out of band, never by message. On an unauthenticating hub the console is already open and this changes nothing. | planned |
 | FR-009 | `title` and `description` are free text and may be empty. Only `name` is load-bearing. | planned |
 | FR-010 | The onboarding prompt introduces the hub by `title` and `description` where set, so an arriving agent learns what the place is, not only how it authenticates. | planned |
+| FR-011 | **An effective value that came from the environment is never written back as a stored value.** A client that renders a governed field and later submits it — after the variable has been removed, or from a page rendered before it was — would persist the deployment's value over the operator's own. The write path must refuse it, and the console must not send a value it received with `source: environment`. Found by outside review, 2026-07-28. | planned |
 
 ## Non-functional requirements
 

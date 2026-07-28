@@ -217,3 +217,62 @@ class TestArchitecture:
         domain = {"send", "reply", "inbox", "thread", "peek", "broadcast", "deliver"}
         methods = {m for m in dir(MessageStore) if not m.startswith("_")}
         assert not {m for m in methods if any(d in m for d in domain)}
+
+
+class TestHubSettings:
+    """The first state the hub keeps about itself, identical on both backends."""
+
+    async def test_absent_until_set(self, store: MessageStore) -> None:
+        """No row is the ordinary state, not a missing-configuration error."""
+        assert await store.hub_settings() == {}
+
+    async def test_set_then_read_back(self, store: MessageStore) -> None:
+        await store.set_hub_setting("name", "saltclub")
+        await store.set_hub_setting("title", "The Salt Club")
+        assert await store.hub_settings() == {
+            "name": "saltclub",
+            "title": "The Salt Club",
+        }
+
+    async def test_overwriting_replaces(self, store: MessageStore) -> None:
+        await store.set_hub_setting("name", "saltclub")
+        await store.set_hub_setting("name", "pepperclub")
+        assert (await store.hub_settings())["name"] == "pepperclub"
+
+    async def test_clearing_removes_the_key(self, store: MessageStore) -> None:
+        """Cleared and never-set stay distinguishable, so clearing drops the row."""
+        await store.set_hub_setting("title", "The Salt Club")
+        await store.set_hub_setting("title", None)
+        assert "title" not in await store.hub_settings()
+
+    async def test_an_empty_string_is_a_value_someone_chose(
+        self, store: MessageStore
+    ) -> None:
+        await store.set_hub_setting("title", "")
+        assert (await store.hub_settings())["title"] == ""
+
+    async def test_clearing_something_never_set_is_a_no_op(
+        self, store: MessageStore
+    ) -> None:
+        await store.set_hub_setting("description", None)
+        assert await store.hub_settings() == {}
+
+
+async def test_existing_mail_survives_the_settings_table(tmp_path: Path) -> None:
+    """A schema addition against a database holding live mail.
+
+    The premise is established first: the message is asserted present *before* the
+    reopen, so a test that wrote nothing cannot pass by finding nothing missing.
+    """
+    path = tmp_path / "mail.db"
+    async with SqliteStore(path) as store:
+        await store.claim_name(an_actor("alice"))
+        await store.add_object(an_object("m1", sender="alice"))
+        assert await store.get_object("m1") is not None  # the premise
+
+    async with SqliteStore(path) as reopened:
+        assert await reopened.get_object("m1") is not None
+        assert await reopened.get_actor("alice") is not None
+        assert await reopened.hub_settings() == {}
+        await reopened.set_hub_setting("name", "saltclub")
+        assert await reopened.get_object("m1") is not None

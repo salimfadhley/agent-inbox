@@ -6,6 +6,7 @@ dependencies:
 requirement_refs:
 - FR-005
 - FR-007
+- FR-011
 tracker_refs:
 - https://github.com/salimfadhley/agent-inbox/issues/15
 planning_base_branch: feat/hub-identity
@@ -17,6 +18,7 @@ subtasks:
 - T019
 - T020
 - T021
+- T022
 phase: Phase 2 - Surfaces
 agent: frontend-freddy
 history:
@@ -204,6 +206,22 @@ spec-kitty agent action implement WP04 --agent <name>
 - **Establish the premise**: in test 2, set the variable and assert the API reports
   `source: environment` before asserting the console disables the field. Otherwise a console
   that disables everything passes.
+
+### T022 — Never submit a value the API called environment-sourced
+
+- **Purpose**: FR-011, from the client side. Belt and braces with WP03's T029.
+- **Files**: `src/agent_inbox/console.py`, `tests/test_console.py`
+- **Steps**:
+  1. A field whose `source` is `environment` renders disabled (T019) — and a disabled input
+     is not submitted by a browser, which is the behaviour to **rely on deliberately and say
+     so in a comment**, not to discover by accident.
+  2. If the page builds its payload in script rather than by form submission, it must omit
+     governed fields explicitly. Send only what the operator edited.
+  3. Test it: render with the variable set, submit the form, and assert the request body
+     **does not contain that field at all**. Asserting the stored value is unchanged is a
+     weaker test that WP03's guard would pass on its own.
+- **Why**: the API refusing is the safety net; the console not sending it is the correct
+  behaviour. Both, because this hole was invisible to two rounds of analysis.
 
 ## Test Strategy
 
