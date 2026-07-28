@@ -90,7 +90,7 @@ class MessageStore(Protocol):
         ...
 
     async def hub_settings(self) -> dict[str, str]:
-        """What the operator has configured about this hub. May legitimately be empty."""
+        """What the operator configured about this hub. May legitimately be empty."""
         ...
 
     async def set_hub_setting(self, key: str, value: str | None) -> None:

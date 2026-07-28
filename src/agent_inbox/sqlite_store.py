@@ -220,7 +220,7 @@ class SqliteStore:
     # -- hub settings ------------------------------------------------------
 
     async def hub_settings(self) -> dict[str, str]:
-        """What the operator has configured about this hub. Often empty, legitimately."""
+        """What the operator configured about this hub. Often empty, legitimately."""
         cursor = await self._execute("SELECT key, value FROM hub_settings")
         return {str(row["key"]): str(row["value"]) for row in await cursor.fetchall()}
 
