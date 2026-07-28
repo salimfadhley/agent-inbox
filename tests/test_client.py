@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from agent_mailbox.client import (
+    CONFIG_NAME,
+    LEGACY_CONFIG_NAME,
     UNNAMED,
     Config,
     HubClient,
@@ -21,8 +23,11 @@ from agent_mailbox.client import (
     _toml_str,
     detect_engine,
     duplicate_names,
+    effective_settings,
+    find_config,
     load_config,
     write_config,
+    write_project,
 )
 
 
@@ -122,7 +127,7 @@ class TestConfigRoundTrip:
         (tmp_path / ".git").mkdir()
         write_config("http://hub:8080", "jed_smith", "claude", start=tmp_path)
         write_config("http://hub:8080", "brian_hanson", "codex", start=tmp_path)
-        text = (tmp_path / "agent-mailbox.toml").read_text()
+        text = (tmp_path / CONFIG_NAME).read_text()
         assert "jed_smith" in text and "brian_hanson" in text
 
     def test_reconfiguring_keeps_a_prior_token(self, tmp_path: Path) -> None:
@@ -173,7 +178,7 @@ class TestGlobalConfig:
         (home / "agent-inbox" / "config.toml").write_text('token = "shared-secret"\n')
         project = tmp_path / "proj"
         project.mkdir()
-        (project / "agent-mailbox.toml").write_text(
+        (project / CONFIG_NAME).write_text(
             'hub = "http://hub:8081"\n\n[agents.claude]\nname = "jed_smith"\n'
         )
         env = {"XDG_CONFIG_HOME": str(home), "CLAUDECODE": "1"}
@@ -188,7 +193,7 @@ class TestGlobalConfig:
         (home / "agent-inbox" / "config.toml").write_text('token = "shared"\n')
         project = tmp_path / "proj"
         project.mkdir()
-        (project / "agent-mailbox.toml").write_text(
+        (project / CONFIG_NAME).write_text(
             'hub = "http://hub:8081"\n\n[agents.claude]\n'
             'name = "jed_smith"\ntoken = "mine"\n'
         )
@@ -199,7 +204,7 @@ class TestGlobalConfig:
         """The common case is that it does not exist at all."""
         project = tmp_path / "proj"
         project.mkdir()
-        (project / "agent-mailbox.toml").write_text(
+        (project / CONFIG_NAME).write_text(
             'hub = "http://hub:8081"\n\n[agents.claude]\nname = "jed_smith"\n'
         )
         env = {"XDG_CONFIG_HOME": str(tmp_path / "nothing"), "CLAUDECODE": "1"}
@@ -210,7 +215,7 @@ class TestUniqueNames:
     """Two engines on one name share an inbox — the failure the file must not hold."""
 
     def _write(self, tmp_path: Path, body: str) -> Path:
-        (tmp_path / "agent-mailbox.toml").write_text(body)
+        (tmp_path / CONFIG_NAME).write_text(body)
         return tmp_path
 
     def test_two_engines_claiming_one_name_are_reported(self, tmp_path: Path) -> None:
@@ -270,7 +275,7 @@ def test_an_explicit_engine_beats_the_environment(tmp_path: Path) -> None:
     not — so with two engines configured the environment cannot resolve identity at
     all. Being told outright must win.
     """
-    (tmp_path / "agent-mailbox.toml").write_text(
+    (tmp_path / CONFIG_NAME).write_text(
         'hub = "http://h:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n\n'
         '[agents.codex]\nname = "pablo_fantomas"\n'
     )
@@ -282,7 +287,7 @@ def test_an_explicit_engine_beats_the_environment(tmp_path: Path) -> None:
 
 def test_without_an_engine_two_entries_stay_unresolvable(tmp_path: Path) -> None:
     """It must refuse rather than pick one — a wrong identity reads another's mail."""
-    (tmp_path / "agent-mailbox.toml").write_text(
+    (tmp_path / CONFIG_NAME).write_text(
         'hub = "http://h:8081"\n\n[agents.claude]\nname = "a_name"\n\n'
         '[agents.codex]\nname = "another_name"\n'
     )
@@ -335,3 +340,90 @@ class TestAnOlderHub:
         modern = {"unread": 1, "cursor": "t|abc", "items": []}
         client._call = lambda *a, **k: modern  # type: ignore[method-assign]
         assert client.check_inbox() is modern
+
+
+class TestTheRenameKeepsOldProjectsWorking:
+    """`agent-mailbox` became `agent-inbox`. Nobody's identity may be lost to that.
+
+    An identity file is not ours to invalidate: an agent that cannot find its own name
+    has lost its correspondence, not merely its configuration.
+    """
+
+    def test_the_current_name_is_what_join_writes(self, tmp_path: Path) -> None:
+        write_project(
+            {"hub": "http://h", "name": "rosemary_nasrin"},
+            tmp_path,
+            env={"CLAUDECODE": "1"},
+        )
+        assert (tmp_path / CONFIG_NAME).is_file()
+        assert CONFIG_NAME == "agent-inbox.toml"
+
+    def test_a_legacy_file_is_still_found(self, tmp_path: Path) -> None:
+        """Every project joined before the rename holds this name."""
+        (tmp_path / LEGACY_CONFIG_NAME).write_text(
+            'hub = "http://h"\n[agents.claude]\nname = "rosemary_nasrin"\n'
+        )
+        found = find_config(tmp_path)
+        assert found is not None and found.name == LEGACY_CONFIG_NAME
+        assert load_config(tmp_path, engine="claude").name == "rosemary_nasrin"
+
+    def test_the_current_name_wins_when_a_project_has_both(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / LEGACY_CONFIG_NAME).write_text(
+            'hub = "http://old"\n[agents.claude]\nname = "old_name"\n'
+        )
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://new"\n[agents.claude]\nname = "new_name"\n'
+        )
+        assert load_config(tmp_path, engine="claude").name == "new_name"
+
+    def test_a_nearer_legacy_file_beats_a_distant_current_one(
+        self, tmp_path: Path
+    ) -> None:
+        """Proximity settles which project you are in, not which name it uses.
+
+        Sweeping one name over the whole tree first would let a parent project's file
+        win over the one sitting beside you — a different project's identity.
+        """
+        (tmp_path / ".git").mkdir()
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://parent"\n[agents.claude]\nname = "parent_agent"\n'
+        )
+        child = tmp_path / "sub"
+        child.mkdir()
+        (child / LEGACY_CONFIG_NAME).write_text(
+            'hub = "http://child"\n[agents.claude]\nname = "child_agent"\n'
+        )
+        assert load_config(child, engine="claude").name == "child_agent"
+
+
+class TestTheRenameKeepsOldEnvironmentsWorking:
+    def test_the_new_variables_are_read(self) -> None:
+        cfg = load_config(
+            env={"AGENT_INBOX_HUB": "http://new", "AGENT_INBOX_NAME": "a"}
+        )
+        assert (cfg.hub, cfg.name) == ("http://new", "a")
+
+    def test_the_old_variables_still_work(self) -> None:
+        """Nine of these are set on the reference deployment."""
+        cfg = load_config(
+            env={"AGENT_MAILBOX_HUB": "http://old", "AGENT_MAILBOX_NAME": "b"}
+        )
+        assert (cfg.hub, cfg.name) == ("http://old", "b")
+
+    def test_the_new_name_wins_when_both_are_set(self) -> None:
+        """Whoever set the new one is mid-migration and means the newer value."""
+        cfg = load_config(
+            env={
+                "AGENT_MAILBOX_HUB": "http://old",
+                "AGENT_INBOX_HUB": "http://new",
+                "AGENT_INBOX_NAME": "c",
+            }
+        )
+        assert cfg.hub == "http://new"
+
+    def test_config_list_names_the_variable_actually_set(self) -> None:
+        """`config list` answers "where did this come from" — so do not lie about it."""
+        found = effective_settings(env={"AGENT_MAILBOX_HUB": "http://old"})
+        assert found["hub"] == ("http://old", "AGENT_MAILBOX_HUB")

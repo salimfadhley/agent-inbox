@@ -33,11 +33,28 @@ logger = logging.getLogger(__name__)
 #: `warn` checks credentials and logs a missing one but serves; `enforce` refuses.
 _AUTH_MODES = ("off", "warn", "enforce")
 
-ENV_PREFIX = "AGENT_MAILBOX_"
+#: The project is `agent-inbox`, so its variables are `AGENT_INBOX_*`.
+ENV_PREFIX = "AGENT_INBOX_"
+
+#: What they used to be called, and still are on every deployment written before the
+#: rename — including nine in this project's own reference compose file. Dropping it
+#: would leave a hub unable to read its own configuration on the next restart, which is
+#: a rename that breaks the thing being renamed.
+LEGACY_ENV_PREFIX = "AGENT_MAILBOX_"
 
 
 def _env(name: str, default: str) -> str:
-    return os.environ.get(f"{ENV_PREFIX}{name}", default).strip()
+    """A setting, by its current name or the one it used to have.
+
+    The new name wins when both are set: an operator who has added `AGENT_INBOX_*` to a
+    deployment that still carries the old variables is mid-migration, and the value they
+    just wrote is the one they meant.
+    """
+    for prefix in (ENV_PREFIX, LEGACY_ENV_PREFIX):
+        value = os.environ.get(f"{prefix}{name}")
+        if value is not None:
+            return value.strip()
+    return default.strip()
 
 
 @dataclass(frozen=True, slots=True)

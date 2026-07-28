@@ -15,7 +15,7 @@ import pytest
 
 from agent_mailbox import __version__
 from agent_mailbox.cli import main
-from agent_mailbox.client import ClientError, Config
+from agent_mailbox.client import CONFIG_NAME, ClientError, Config
 
 
 def test_version_is_asked_for_without_a_subcommand(
@@ -67,7 +67,7 @@ def test_doctor_says_what_to_do_when_there_is_no_configuration(
     assert main(["doctor"]) == 2
     err = capsys.readouterr().err
     assert "configuration" in err
-    assert "join" in err or "agent-mailbox.toml" in err
+    assert "join" in err or CONFIG_NAME in err
 
 
 def test_doctor_keeps_the_global_token_when_identity_is_unresolved(
@@ -99,7 +99,7 @@ def test_doctor_keeps_the_global_token_when_identity_is_unresolved(
     xdg = tmp_path / "xdg"
     (xdg / "agent-inbox").mkdir(parents=True)
     (xdg / "agent-inbox" / "config.toml").write_text('token = "shared-secret"\n')
-    (tmp_path / "agent-mailbox.toml").write_text(
+    (tmp_path / CONFIG_NAME).write_text(
         'hub = "http://hub:8081"\n\n'
         "[agents.claude]\n"
         'name = "nicole_ruzickova"\n\n'
@@ -165,7 +165,7 @@ class TestConfigure:
     ) -> None:
         """`name=value` is what anyone who has used a config tool reaches for."""
         assert self._run(tmp_path, monkeypatch, "set", "role=host") == 0
-        assert 'role = "host"' in (tmp_path / "agent-mailbox.toml").read_text()
+        assert 'role = "host"' in (tmp_path / CONFIG_NAME).read_text()
 
     def test_identity_is_refused_machine_wide(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -197,7 +197,7 @@ class TestExplicitEngine:
         body = 'hub = "http://hub.invalid:8081"\n'
         for engine in engines:
             body += f'\n[agents.{engine}]\nname = "name_{engine}"\nrole = "agent"\n'
-        (tmp_path / "agent-mailbox.toml").write_text(body)
+        (tmp_path / CONFIG_NAME).write_text(body)
         return tmp_path
 
     def _shell(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,7 +226,7 @@ class TestExplicitEngine:
     ) -> None:
         """NFR-001: nothing is written. The file must be byte-identical afterwards."""
         self._project(tmp_path, "claude", "codex")
-        before = (tmp_path / "agent-mailbox.toml").read_text()
+        before = (tmp_path / CONFIG_NAME).read_text()
         self._shell(tmp_path, monkeypatch)
 
         assert main(["config", "set", "role", "host"]) == 2
@@ -235,7 +235,7 @@ class TestExplicitEngine:
         assert "cannot tell which engine" in err
         assert "claude, codex" in err
         assert "--engine claude config" in err
-        assert (tmp_path / "agent-mailbox.toml").read_text() == before
+        assert (tmp_path / CONFIG_NAME).read_text() == before
 
     def test_an_agent_command_refuses_before_reaching_the_hub(
         self,
@@ -259,7 +259,7 @@ class TestExplicitEngine:
 
         assert main(["--engine", "codex", "config", "set", "role", "host"]) == 0
 
-        written = (tmp_path / "agent-mailbox.toml").read_text()
+        written = (tmp_path / CONFIG_NAME).read_text()
         assert 'name = "name_codex"' in written
         codex_block = written.split("[agents.codex]")[1]
         assert 'role = "host"' in codex_block
@@ -273,14 +273,14 @@ class TestExplicitEngine:
         """FR-005: a credential admits the machine and names no agent, so a plain
         shell must be able to set one — and must not create a project entry doing it."""
         self._project(tmp_path, "claude", "codex")
-        before = (tmp_path / "agent-mailbox.toml").read_text()
+        before = (tmp_path / CONFIG_NAME).read_text()
         self._shell(tmp_path, monkeypatch)
 
         assert main(["config", "set", "--global", "token", "sekrit"]) == 0
         assert main(["config", "list"]) == 0
         assert main(["config", "path"]) == 0
 
-        assert (tmp_path / "agent-mailbox.toml").read_text() == before
+        assert (tmp_path / CONFIG_NAME).read_text() == before
 
     def test_a_single_entry_still_works_without_a_flag(
         self,
@@ -292,7 +292,7 @@ class TestExplicitEngine:
         self._project(tmp_path, "claude")
         self._shell(tmp_path, monkeypatch)
         assert main(["config", "set", "role", "host"]) == 0
-        assert 'role = "host"' in (tmp_path / "agent-mailbox.toml").read_text()
+        assert 'role = "host"' in (tmp_path / CONFIG_NAME).read_text()
 
     def test_ambiguity_is_shown_rather_than_omitted(
         self,
@@ -317,7 +317,7 @@ class TestExplicitEngine:
         """Spec edge case: chose an engine, and the choice does not exist.
 
         Distinct from having chosen nothing. Before this, it fell through to the
-        generic "write agent-mailbox.toml in your project root" — telling someone to
+        generic "write the config in your project root" — telling someone to
         create a file that is open in front of them, for an engine they just named.
         """
         self._project(tmp_path, "claude")
@@ -339,7 +339,7 @@ class TestExplicitEngine:
         self._project(tmp_path, "claude")
         self._shell(tmp_path, monkeypatch)
         assert main(["--engine", "codex", "config", "set", "role", "host"]) == 0
-        written = (tmp_path / "agent-mailbox.toml").read_text()
+        written = (tmp_path / CONFIG_NAME).read_text()
         assert "[agents.codex]" in written
         assert 'role = "host"' in written.split("[agents.codex]")[1]
 
@@ -354,9 +354,7 @@ class TestExplicitEngine:
         A bare `join` would refuse for the same reason everything else does, so
         suggesting it would send the reader in a circle.
         """
-        (tmp_path / "agent-mailbox.toml").write_text(
-            'hub = "http://hub.invalid:8081"\n'
-        )
+        (tmp_path / CONFIG_NAME).write_text('hub = "http://hub.invalid:8081"\n')
         self._shell(tmp_path, monkeypatch)
 
         class Reachable:

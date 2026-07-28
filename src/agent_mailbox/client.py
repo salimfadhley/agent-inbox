@@ -25,8 +25,36 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-CONFIG_NAME = "agent-mailbox.toml"
+#: What `join` writes, under the project's own name.
+CONFIG_NAME = "agent-inbox.toml"
+
+#: What it used to write, and what every already-joined project still holds. An identity
+#: file is not ours to invalidate: an agent that cannot find its own name has lost its
+#: correspondence, not merely its configuration. Read both, forever if need be.
+LEGACY_CONFIG_NAME = "agent-mailbox.toml"
+
+#: Both names, in the order they are preferred when a project somehow has each.
+CONFIG_NAMES = (CONFIG_NAME, LEGACY_CONFIG_NAME)
+
 IDENTITY_HEADER = "X-Agent-Name"
+
+#: Client settings, current name first. As with the hub's own prefix, the new name wins
+#: when both are present: whoever set it is mid-migration and means the newer one.
+ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "hub": ("AGENT_INBOX_HUB", "AGENT_MAILBOX_HUB"),
+    "name": ("AGENT_INBOX_NAME", "AGENT_MAILBOX_NAME"),
+    "role": ("AGENT_INBOX_ROLE", "AGENT_MAILBOX_ROLE"),
+    "token": ("AGENT_INBOX_TOKEN", "AGENT_MAILBOX_TOKEN"),
+}
+
+
+def env_setting(environ: dict[str, str], key: str) -> tuple[str, str]:
+    """A client setting and the variable it came from, or ``("", "")``."""
+    for var in ENV_NAMES[key]:
+        if value := environ.get(var, "").strip():
+            return value, var
+    return "", ""
+
 
 #: A machine-wide fallback, under the project's true name. Identity stays per project —
 #: the same engine in two repositories is two correspondents — but a *credential* is
@@ -190,13 +218,12 @@ def effective_settings(
                         str(path),
                     )
 
-    for key, var in (
-        ("hub", "AGENT_MAILBOX_HUB"),
-        ("name", "AGENT_MAILBOX_NAME"),
-        ("role", "AGENT_MAILBOX_ROLE"),
-        ("token", "AGENT_MAILBOX_TOKEN"),
-    ):
-        if value := environ.get(var, "").strip():
+    for key in ENV_NAMES:
+        value, var = env_setting(environ, key)
+        if value:
+            # The variable's real name, not the canonical one: `config list` exists to
+            # answer "where did this come from", and naming a variable the operator has
+            # not set would be a worse answer than none.
             found[key] = (value, var)
     return found
 
@@ -234,7 +261,7 @@ ENGINE_MARKERS: tuple[tuple[str, str], ...] = (
     ("CODEX_HOME", "codex"),
     # A real Codex session was not detected by the two markers above: it carried
     # CODEX_THREAD_ID, CODEX_CI and CODEX_MANAGED_BY_NPM instead, so the agent had to
-    # pass --engine and set AGENT_MAILBOX_* by hand for every command. Detection that
+    # pass --engine and set AGENT_INBOX_* by hand for every command. Detection that
     # only works on some installs is worse than none, because the failure is a wrong
     # identity rather than an honest "I do not know".
     ("CODEX_THREAD_ID", "codex"),
@@ -287,16 +314,23 @@ class Config:
 
 
 def find_config(start: Path | None = None) -> Path | None:
-    """Look for ``agent-mailbox.toml`` here and upwards, stopping at a repository root.
+    """Look for the project's identity file here and upwards, stopping at a repo root.
 
     Stopping at the boundary is deliberate: walking further would let one project
     silently adopt a sibling's identity.
+
+    Both ``agent-inbox.toml`` and the older ``agent-mailbox.toml`` are recognised, the
+    current name first. **Per directory, not per name** — a nearer legacy file beats a
+    distant current one, because the question being answered is "which project am I in",
+    and that is settled by proximity. Sweeping one name over the whole tree first would
+    let a parent project's file win over the one sitting beside you.
     """
     here = Path(start or Path.cwd()).resolve()
     for directory in (here, *here.parents):
-        candidate = directory / CONFIG_NAME
-        if candidate.is_file():
-            return candidate
+        for name in CONFIG_NAMES:
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
         if (directory / ".git").exists():
             break
     return None
@@ -310,7 +344,7 @@ def load_hub(start: Path | None = None, env: dict[str, str] | None = None) -> st
     again — it is sitting in the file.
     """
     environ = env if env is not None else dict(os.environ)
-    if from_env := environ.get("AGENT_MAILBOX_HUB", "").strip():
+    if from_env := env_setting(environ, "hub")[0]:
         return from_env
     path = find_config(start)
     if path is not None:
@@ -392,10 +426,10 @@ def load_config(
     editing anything.
     """
     environ = env if env is not None else dict(os.environ)
-    hub = environ.get("AGENT_MAILBOX_HUB", "").strip()
-    name = environ.get("AGENT_MAILBOX_NAME", "").strip()
-    role = environ.get("AGENT_MAILBOX_ROLE", "").strip()
-    token = environ.get("AGENT_MAILBOX_TOKEN", "").strip()
+    hub = env_setting(environ, "hub")[0]
+    name = env_setting(environ, "name")[0]
+    role = env_setting(environ, "role")[0]
+    token = env_setting(environ, "token")[0]
     # An explicit engine wins over sniffing the environment. The MCP server knows which
     # client connected to it — the client says so in `initialize` — and that is a
     # better answer than markers that a client may not pass through to a process it
@@ -440,7 +474,7 @@ def load_config(
             f"Write {CONFIG_NAME} in your project root:\n\n"
             '    hub = "http://<host>:8081"\n'
             '    name = "your_name"\n\n'
-            "Or set AGENT_MAILBOX_HUB and AGENT_MAILBOX_NAME. If you have no name yet, "
+            "Or set AGENT_INBOX_HUB and AGENT_INBOX_NAME. If you have no name yet, "
             "any name you like will do — the hub will tell you if it is taken."
         )
     return Config(

@@ -60,6 +60,8 @@ mcp.json
 # `wake-check` writes the announce-once watermark. Both are deployment-local
 # state, and the charter keeps deployment specifics out of the tracked repo.
 agent-mailbox.toml
+# …and under its current name. An identity file, never ours to publish.
+agent-inbox.toml
 .agent-mailbox-seen.json
 
 # JetBrains IDE
