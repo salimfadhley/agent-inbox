@@ -14,6 +14,7 @@ from agent_inbox.naming import (
     generate,
     normalize,
     validate,
+    validate_hub_name,
 )
 
 
@@ -115,3 +116,66 @@ class TestGenerate:
 
     def test_no_generated_name_is_reserved(self) -> None:
         assert not {generate(seed=s) for s in range(500)} & RESERVED_NAMES
+
+
+class TestHubNameValidation:
+    """The right-hand side of `name@hub`, which was validated nowhere until now."""
+
+    @pytest.mark.parametrize(
+        "name", ["saltclub", "local", "a", "a1", "salt_club", "s" * 64, "hub2"]
+    )
+    def test_accepted(self, name: str) -> None:
+        assert validate_hub_name(name) == name
+
+    def test_local_is_permitted_here(self) -> None:
+        """It is the default, and a real name. What it blocks is *enabling federation*,
+        and that rule lives where the consequence is — not in the validator."""
+        assert validate_hub_name("local") == "local"
+
+    def test_a_hostname_is_refused_as_a_name(self) -> None:
+        """The conflation this whole mission exists to remove, so it earns its own test."""
+        with pytest.raises(NameUnavailable) as caught:
+            validate_hub_name("hub.thesaltclub.xyz")
+        message = str(caught.value)
+        assert "address" in message and "name" in message
+
+    def test_spaces_and_capitals_are_refused_not_normalised(self) -> None:
+        """Reshaping this into `the_salt_club` is what happens today, and is the
+        defect: an operator should learn the rule, not be handed a name they did not
+        choose."""
+        with pytest.raises(NameUnavailable):
+            validate_hub_name("The Salt Club")
+
+    @pytest.mark.parametrize(
+        "name", ["", "   ", "_saltclub", "saltclub_", "s" * 65, "SALTCLUB", "salt-club"]
+    )
+    def test_refused(self, name: str) -> None:
+        with pytest.raises(NameUnavailable):
+            validate_hub_name(name)
+
+    def test_the_message_states_the_rule(self) -> None:
+        with pytest.raises(NameUnavailable) as caught:
+            validate_hub_name("Salt Club")
+        assert "saltclub" in str(caught.value)
+
+    def test_one_rule_shared_with_agent_names(self) -> None:
+        """If the two ever diverge, this is what says so.
+
+        Every input here is one the *pattern* decides, so both validators must agree.
+        Inputs where they legitimately differ — `local`, and anything needing
+        normalisation — are excluded deliberately and tested above.
+        """
+        canonical = ["saltclub", "a", "s" * 64, "salt_club", "a1"]
+        for case in canonical:
+            assert normalize(case) == case, "test input is not canonical"
+            assert validate_hub_name(case) == validate(case).value
+
+        # Refusals must be compared in canonical form too. `_leading` is not a useful
+        # case here: `validate` normalises it to `leading` and accepts, which is the
+        # deliberate difference between the two, not a divergence in the rule.
+        for case in ["s" * 65, ""]:
+            assert normalize(case) == case.strip("_"), "test input is not canonical"
+            with pytest.raises(NameUnavailable):
+                validate_hub_name(case)
+            with pytest.raises(NameUnavailable):
+                validate(case)

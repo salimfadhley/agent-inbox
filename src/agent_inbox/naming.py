@@ -103,6 +103,48 @@ def validate(raw: str) -> Name:
     return Name(candidate)
 
 
+def validate_hub_name(raw: str) -> str:
+    """Validate a hub's name — the right-hand side of ``name@hub``.
+
+    Two differences from :func:`validate`, and both are deliberate.
+
+    **No normalisation.** ``validate`` folds and reshapes a proposed *agent* name
+    because the hub is issuing it and an agent should get close to what it asked for.
+    A hub name is typed by an operator into a form, and silently turning ``The Salt
+    Club`` into ``the_salt_club`` is what the system does today and is the bug: they
+    should learn what a hub name is, not receive one they did not choose.
+
+    **``local`` is permitted.** It is reserved as an *address* keyword, and it is also
+    the default hub name — every hub answers to it as well as to its own name. What
+    ``local`` blocks is *enabling federation*, and that rule lives in
+    :mod:`agent_inbox.federation`, where the consequence is.
+
+    The rule itself is :data:`_VALID`, unchanged — the same pattern the left-hand side
+    of the same address already satisfies. Two validators that nearly agree is a worse
+    state than one: the disagreement surfaces later, in a case nobody chose.
+    """
+    candidate = raw.strip()
+    if not candidate:
+        raise NameUnavailable(
+            "a hub name cannot be empty — use lowercase letters, digits and "
+            "underscores, for example 'saltclub'"
+        )
+    if "." in candidate or "/" in candidate or ":" in candidate:
+        raise NameUnavailable(
+            f"{candidate!r} looks like an address, not a name. A hub's address is set "
+            "by the deployment and a hub may answer to several; its *name* is the "
+            "'@hub' part that identifies it — lowercase letters, digits and "
+            "underscores, for example 'saltclub'"
+        )
+    if not _VALID.match(candidate):
+        raise NameUnavailable(
+            f"{candidate!r} is not a usable hub name — 1 to 64 characters, lowercase "
+            "letters, digits and underscores, starting and ending with a letter or "
+            "digit, for example 'saltclub'"
+        )
+    return candidate
+
+
 def generate(seed: int | None = None) -> str:
     """Propose a name from the checked-in pool.
 
