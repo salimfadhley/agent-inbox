@@ -125,6 +125,8 @@ See open question 1.
 | FR-008 | The enforcing pass obtains its own credential unattended by the bootstrap chain above. No secret in the repository, and none configured as a CI secret — the hub is created fresh for the run and destroyed with it. | planned |
 | FR-009 | The bootstrap is asserted, not merely used. If first-run enrolment or token minting breaks, the job fails *saying so*, rather than surfacing as a confusing auth failure in an unrelated live test. | planned |
 | FR-010 | The enforcing pass fails if it ends up running unauthenticated. A credential that turns out not to be needed would make the entire second pass vacuous — the failure shape this mission exists to remove from live validation. | planned |
+| FR-011 | The suite reads `adminPasswordSet` from `GET /` and treats a hub running the low-security admin override as **not** fully secured, however `authenticated` reads. Added after v0.23.0; without it a hub with a deliberate hole in its front door passes the same assertions as one without. | planned |
+| FR-012 | If CI's enforcing pass uses `AGENT_MAILBOX_ADMIN_PASSWORD` to obtain its session, it must assert the hub advertises the override — so the pass can never quietly be testing a *weaker* hub than the one it claims to validate. | planned |
 
 ## Non-functional requirements
 
@@ -153,14 +155,31 @@ See open question 1.
 
 ## Open questions for the human
 
-1. **Is scraping the initial admin password from the log acceptable, or should the hub
-   gain a documented bootstrap?** The chain above works today with no product change, but
-   it depends on a log line that is not a contract — reword it and CI breaks somewhere
-   unrelated-looking. The alternatives are to treat that line as a contract and test it,
-   or to add a first-run admin secret read from the environment. The latter is real
-   product surface with security consequences on a hub exposed to a network, so it should
-   not be added casually as a side effect of wanting a test. **Recommendation: treat the
-   log line as a contract and assert it, then revisit if it proves annoying.**
+1. ~~**Is scraping the initial admin password from the log acceptable, or should the hub
+   gain a documented bootstrap?**~~ **RESOLVED in v0.23.0 — both, and the second is
+   bigger than this mission asked for.**
+
+   The operator's answer was that every essential feature should be tested, so the log
+   line is now a contract: `INITIAL_PASSWORD_LOG_PREFIX` is a named constant asserted by
+   `tests/test_auth_bootstrap.py`, and rewording it fails a test that says why.
+
+   They also added the environment variable — but as `AGENT_MAILBOX_ADMIN_PASSWORD`, a
+   **standing low-security mode** rather than a first-run seed. Set it and `admin` signs
+   in with no second factor, at any time, with authority to reset passwords and manage
+   tokens. That is deliberate: recovering a hub whose authenticator is lost is exactly
+   the case where the account is already enrolled, so a setup-only variable would not
+   have helped.
+
+   **What this changes for WP03:** the bootstrap chain no longer has to walk enrolment
+   and TOTP at all. CI can set `AGENT_MAILBOX_ADMIN_PASSWORD` on its throwaway enforcing
+   hub and log in directly, which removes five of the six steps and the whole class of
+   risk that made WP03 the mission's most dangerous package. The log-scraping chain
+   remains valid and is now contract-backed, so either route works.
+
+   **A new requirement falls out of it:** the hub advertises `adminPasswordSet` at
+   `GET /`, so the live suite should assert that a hub claiming `authenticated: true`
+   while running the override is not mistaken for a properly secured one. That is FR-003's
+   honesty check with a second dimension — see the amendment below.
 2. **Should the enforcing pass use its own compose file or the existing one with an
    override?** An override keeps one topology definition, which matters because the
    compose file is itself part of what the smoke job validates.

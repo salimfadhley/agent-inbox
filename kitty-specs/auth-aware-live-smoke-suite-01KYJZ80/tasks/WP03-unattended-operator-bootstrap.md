@@ -27,6 +27,25 @@ tags: []
 
 # WP03 — Unattended operator bootstrap
 
+> **AMENDED after v0.23.0 — read this first.** The open question this WP was blocked on
+> has been answered, and the answer makes most of this package optional.
+>
+> The log line is now a **contract** (`INITIAL_PASSWORD_LOG_PREFIX`, asserted in
+> `tests/test_auth_bootstrap.py`), so scraping it is supported rather than fragile.
+>
+> More usefully, `AGENT_MAILBOX_ADMIN_PASSWORD` now signs `admin` in with **no second
+> factor at all**. CI can set it on its throwaway enforcing hub and log straight in,
+> which removes steps 2–5 below and with them the risk that made this the mission's
+> most dangerous package.
+>
+> **Prefer the variable.** Keep the scraping chain as the fallback and as the thing that
+> proves the contract still holds.
+>
+> One requirement replaces the one that went away: if the enforcing pass uses the
+> override, it must assert the hub advertises `adminPasswordSet` — otherwise CI would be
+> validating a hub weaker than the one it claims to test, and reporting green for it
+> (FR-012).
+
 ## Objective
 
 Obtain a device token inside CI with no stored secret, so the enforcing pass needs neither
