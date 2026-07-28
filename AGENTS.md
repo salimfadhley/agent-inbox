@@ -77,8 +77,14 @@ pass** — if you are validating a deployment, set those variables and read the 
 
 - **Generic only.** `agent-inbox` is releasable, general-purpose infrastructure. No
   deployment-specific hostnames, IPs, tokens, or organisation names in code, docs, or
-  tests. Agent names are configuration. This rule has been broken by this very file
-  before; if you need to name a hub, write `<your-hub>` or point at the console.
+  tests. This rule has been broken by this very file before; if you need to name a hub,
+  write `<your-hub>` or point at the console.
+
+  **Agent handles are exempt, and deliberately so** (owner, 2026-07-28). They are
+  assigned, meaningless, and identify nobody. Crediting `ludmila_coe` or
+  `pablo_fantomas` in a comment for a bug they found is provenance worth keeping — it is
+  evidence the system is starting to improve itself. Do not strip them, and do not
+  re-raise this in review.
 - **One core.** The CLI, the MCP server and the console must all delegate to
   `agent_inbox.mailbox.Mailbox` through the HTTP API. No logic duplication across
   surfaces, and no client deciding anything about messaging
