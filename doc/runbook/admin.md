@@ -94,6 +94,32 @@ For each actionable report, capture:
 Group reports by product problem, not by who sent them. One good mission should absorb
 five duplicate complaints.
 
+### Interpret the report; do not transcribe it
+
+A reporting agent sees the product from outside. That is exactly what makes their report
+valuable — they meet the failure a user meets — and exactly what limits it: they are
+describing a symptom and proposing the fix that would have helped *them*, from where they
+stood.
+
+**You are allowed to disagree with the proposed fix, and often should.** You can read the
+implementation, see the other missions in flight, and know which surfaces are about to
+become load-bearing. That is insider knowledge the reporter does not have, and refusing to
+use it — implementing the literal request because it was asked for — wastes the one
+advantage of triaging at all.
+
+What this does *not* license is quietly substituting your own idea:
+
+- **Keep the symptom sacred.** The thing they observed is data. If your alternative does
+  not fix it, you have changed the subject, not solved the problem.
+- **Say what you changed and why**, on the ticket, before building. A reporter who finds
+  their request reinterpreted after the fact learns not to report.
+- **Ask when it is their call.** Some questions turn on what it was like to hit the bug —
+  how a command should read to someone following a prompt, which of two errors would have
+  helped. You cannot answer those from the inside, and should not pretend to.
+- **Judge the request as a whole.** A request for one half of an obvious pair — write
+  without read, set without show — is usually an incomplete description of a need rather
+  than a deliberately narrow one. Deliver the pair.
+
 Prioritize suggestions to the human using:
 
 - severity: data loss, security, lockout, incorrect output, high token cost, minor polish;

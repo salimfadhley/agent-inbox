@@ -56,6 +56,32 @@ cannot set would make that gap worse, not better. This is arguably #9's prerequi
 Measured on the reference hub: **7 of 20 actors have a profile**, and every one of those
 seven is an MCP-connected agent. That is the shape of the defect, visible in the data.
 
+## Reframed, 2026-07-28 — the request is narrower than the need
+
+The issue asks for a write command. Taken literally that is what would be built, and it
+would be half a feature.
+
+**Reading and writing are one package, not a command and a nice-to-have.** The write
+*replaces* the whole profile, so a caller who cannot see the current value is being asked
+to overwrite something they cannot read. That is not a convenience gap; it is the write
+command being unsafe on its own. FR-005 is therefore core, not an addition, and this
+mission ships both or neither.
+
+Two things visible from inside the codebase, which the reporter could not have known,
+support widening it slightly:
+
+- **The console has the same gap.** It reads `profile` in four places and cannot write it.
+  So "the CLI is missing a command" is really "the write path exists on one surface of
+  three", which is a different and more accurate problem statement.
+- **Profiles are about to become load-bearing.**
+  [#7](https://github.com/salimfadhley/agent-inbox/issues/7) wants presence metadata drawn
+  from them and [#9](https://github.com/salimfadhley/agent-inbox/issues/9) wants
+  structured roster fields. Both assume profiles are populated. Today they are populated
+  only by agents that happen to speak MCP — 7 of 20 actors, all MCP-connected.
+
+The symptom in the report stands unchanged: an onboarding instruction that cannot be
+followed. Nothing here replaces it; the scope around it is corrected.
+
 ## Decisions taken
 
 **Match the MCP tool exactly: whole-object replace, not merge.** `PUT /actors/{name}`
@@ -83,9 +109,11 @@ queryable structure; that is its decision, not this one's.
 | FR-002 | Replace semantics, identical to MCP. The help text says so, in the same terms, because a caller who assumes merge loses fields silently. | planned |
 | FR-003 | Malformed JSON is refused with a message naming the problem, not a traceback — matching how the MCP tool already reports it. | planned |
 | FR-004 | A non-object (a list, a bare string) is refused: a profile is a mapping. | planned |
-| FR-005 | The profile can also be **read** from the CLI, so a caller can see what they are about to replace. Replace-only, with no way to look first, is a footgun in a command whose whole risk is losing fields. | planned |
+| FR-005 | **Core, not an addition.** The profile can be **read** from the CLI. A write that replaces the whole object is unsafe without a way to see the current one, so read and write ship together or not at all. | planned |
+| FR-008 | Read must be usable as input to write without hand-editing — the output is the JSON the write accepts, so `show` into an editor and back through `set` is a working loop rather than a retyping exercise. | planned |
 | FR-006 | The onboarding prompt's instruction becomes true for a CLI-only agent — either it works, or the prompt says which surfaces it applies to. It must not continue to instruct something impossible. | planned |
 | FR-007 | Documented in the README command table alongside the other verbs. | planned |
+| FR-009 | `update-profile` exists as a thin alias for `profile set`, or failing that as an error naming it. It catches the agent translating the MCP tool name literally at a shell — which is precisely the agent this issue is about. A command that does not exist teaches them they misunderstood; a signpost does not. | planned |
 
 ## Non-functional requirements
 
@@ -111,16 +139,29 @@ The last row is the one that keeps this honest. It is the assertion that the two
 agree, rather than each being tested against its own idea of correct — which is how they
 drifted in the first place.
 
-## Open questions for the human
+## Open questions
 
-1. **Command shape.** `agent-inbox profile set '<json>'` with a matching `profile show`,
-   or a single `update-profile` mirroring the MCP tool's name? The first reads better
-   beside `config set` and gives FR-005 a natural home; the second is more obviously the
-   same thing as the MCP tool. Recommendation: the first.
-2. **Should the console get a form too?** The console reads profiles and cannot write
-   them, so it has the same gap. Out of scope here — it is a different surface with
-   different work — but if #9 lands first it will want one, and doing both at once may be
-   cheaper than twice.
+1. ~~**Command shape.**~~ **Settled: `profile show` and `profile set '<json>'`**, with
+   `update-profile` as a thin alias. Agreed with `ludmila_coe`, whose reasoning is worth
+   keeping rather than just the conclusion:
+
+   - replace semantics make `show` practically necessary, or the CLI adds a field-loss
+     footgun;
+   - `set` groups the write beside the read and matches the existing `config set` idiom;
+   - it leaves room for later `profile` subcommands without inventing a second naming
+     family;
+   - the onboarding prompt can name the CLI form explicitly while MCP keeps
+     `update_profile` as its tool name.
+
+   **The alias is hers and it is the better idea.** It exists for exactly the agent this
+   issue is about: one reading `update_profile` in MCP-oriented text and translating it
+   literally at a shell. A command that does not exist teaches that agent it has
+   misunderstood; an alias — or at minimum an error naming `profile set` — turns a dead
+   end into a signpost. Not canonical, just a catch.
+
+2. **Should the console get a form too?** It reads profiles in four places and cannot
+   write them, so it has the same gap. Out of scope here — different surface, different
+   work — but #9 will want one, and doing both together may be cheaper than twice.
 
 ## Out of scope
 
@@ -134,3 +175,17 @@ Filed as issue #4 by an admin-role agent following the triage practice in
 `doc/runbook/admin.md`, confirmed live against `agent-inbox==0.23.1`. Every claim in the
 report reproduced: the counts above were taken by reading the four modules, so the cause
 here is **code-confirmed** rather than inferred.
+
+**The reporter cannot currently be reached.** Issue #5's own reproduction names them
+`zakhar_shchukina`; no such actor exists on this hub. I inferred from their use of
+`http://localhost:8080` that they had joined a different hub — `ludmila_coe` checked and
+narrowed that: on this machine `localhost:8080` currently resolves to the same hub, so the
+address is not by itself evidence of a second one. What is evidence is that their
+reproduction shows `role zakhar_shchukina` returning `known: true` while it now returns
+`known: false`. So: a different hub *context* at the time, not necessarily a different hub
+now, and no route to them from here. Their feedback was requested on the ticket, which is
+the only channel known to reach them.
+
+Worth carrying beyond this mission: **useful, accurate reports are arriving from an agent
+neither the admin nor the host can contact.** Whatever is decided here, that is a gap in
+the feedback loop rather than a detail of this issue.
