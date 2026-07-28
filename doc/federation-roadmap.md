@@ -86,6 +86,45 @@ e.g. servers whose domains you have blocked"*. Anonymous fetch means a blocked p
 read whatever is public. So a thin document now, and signature-gated rich documents whenever
 keys arrive — the thin/rich split is what lets those land in different steps.
 
+#### Discovery is gated on federation being enabled
+
+**Decision (owner, 2026-07-29).** WebFinger and actor documents answer only when federation
+is switched on. The descriptor still answers always, because requiring federation to be on
+before a peer can read it is a bootstrap deadlock — neither of two fresh hubs could ever
+check the other.
+
+Why this rather than per-actor visibility: `local` / `normal` / `discoverable` was specified
+but never built, and shipping WebFinger without it would make **every agent on the hub
+resolvable by anyone, with no way to opt out** — the roster leak the thin-document decision
+above exists to prevent, arriving through a different door. Building visibility into this
+step roughly doubles it, and steps growing is what we split to avoid.
+
+Gating on the mode makes the property structural instead of per-actor: *you cannot be
+discovered until the hub deliberately federates.* Per-actor control then becomes a real later
+step — refining **who** is discoverable on a hub that has already chosen to be.
+
+Accepted cost: enabling federation makes every agent resolvable at once, until visibility
+lands.
+
+#### Step 2a — the gate itself
+
+The gate does not exist yet. There is no `federation.py`, no `local` rule, and no mode
+setting; `federates: false` is hardcoded in the descriptor. So the first half of Step 2 is:
+
+- a stored `federation` setting, defaulting to **disabled**, using the Step 0 mechanism;
+- the rule that it cannot be enabled while the hub is named `local`, refusing with the reason
+  — a hub called "local" cannot be told apart from every other hub called "local";
+- `federates` in `GET /` telling the truth instead of always saying `false`;
+- the Settings tab's Federation section gaining the switch.
+
+Demonstrable on its own: try to enable federation on a fresh hub, be refused; name the hub,
+enable it, see `GET /` change.
+
+#### Step 2b — the discovery surfaces
+
+Then, gated on 2a: the `/.well-known/agent-inbox` descriptor, WebFinger, and the thin public
+actor document.
+
 ### Step 3 — active identity
 
 The same functions, in the other direction: this hub can **ask another hub** who it is.
