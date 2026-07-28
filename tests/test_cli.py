@@ -8,13 +8,14 @@ harmless the first time, wrong as a diagnosis, and invisible without this test.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from agent_mailbox import __version__
-from agent_mailbox.cli import main
+from agent_mailbox.cli import force_utf8, main
 from agent_mailbox.client import CONFIG_NAME, ClientError, Config
 
 
@@ -661,3 +662,65 @@ class TestDoctorExitCodes:
             assert marker in text, f"help does not explain the {marker!r} marker"
         assert "exit" in text.lower(), "help does not state the exit-code meaning"
         assert "0" in text and "non-zero" in text.lower()
+
+
+class TestOutputIsAlwaysUtf8:
+    """CLI text uses em-dashes; Windows Git Bash encodes them as cp1252 and corrupts them.
+
+    Issue #3. On a stream whose encoding came from the locale rather than UTF-8, Python
+    writes U+2014 as the single byte 0x97 instead of `e2 80 94`, and every UTF-8 consumer
+    downstream — cat, grep, log files, CI artifact viewers — renders mojibake.
+
+    It does not stay on the terminal. This project routes CLI output into session logs,
+    CI artifacts and mail bodies quoting commands, so a corrupted character outlives the
+    terminal that produced it and is unreadable to every later reader, agents included.
+
+    Tested without Windows by building a cp1252 stream directly, because CI has none.
+    """
+
+    def _cp1252_stream(self) -> tuple[io.BytesIO, io.TextIOWrapper]:
+        raw = io.BytesIO()
+        return raw, io.TextIOWrapper(raw, encoding="cp1252", newline="")
+
+    def test_a_cp1252_stream_would_corrupt_an_em_dash(self) -> None:
+        """The premise. Without this, the fix below would be asserting nothing."""
+        raw, stream = self._cp1252_stream()
+        stream.write("—")
+        stream.flush()
+        assert raw.getvalue() == b"\x97", "precondition: cp1252 mangles U+2014"
+
+    def test_force_utf8_makes_it_emit_utf8(self) -> None:
+        raw, stream = self._cp1252_stream()
+        force_utf8(stream)
+        stream.write("—")
+        stream.flush()
+        assert raw.getvalue() == "—".encode(), "expected e2 80 94"
+
+    def test_a_stream_already_utf8_is_left_alone(self) -> None:
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="utf-8", newline="")
+        force_utf8(stream)
+        stream.write("—")
+        stream.flush()
+        assert raw.getvalue() == "—".encode()
+
+    def test_a_stream_that_cannot_be_reconfigured_is_survived(self) -> None:
+        """Never break the CLI over its own output encoding.
+
+        Anything may be standing in for stdout — a pytest capture, a pipe wrapper, a
+        harness. If it cannot be reconfigured, that is not a reason to fail a command
+        the user actually asked for.
+        """
+
+        class Stubborn(io.StringIO):
+            def reconfigure(self, **kw: object) -> None:
+                raise OSError("not reconfigurable")
+
+        force_utf8(Stubborn())  # must not raise
+
+    def test_an_object_without_reconfigure_is_survived(self) -> None:
+        class Bare:
+            def write(self, text: str) -> int:
+                return len(text)
+
+        force_utf8(Bare())  # must not raise

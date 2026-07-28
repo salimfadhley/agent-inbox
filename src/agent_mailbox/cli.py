@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -1159,6 +1161,42 @@ def uninstall_hook(directory: str | None) -> int:
     return 0
 
 
+def force_utf8(stream: Any) -> None:
+    """Make one output stream write UTF-8, whatever the locale thinks.
+
+    Our text uses em-dashes and other non-ASCII punctuation. On Windows, when stdout is
+    not attached to a UTF-8 console — Git Bash, or anything redirected — Python encodes
+    with the locale codepage instead, so U+2014 goes out as the single byte ``0x97``
+    rather than ``e2 80 94``. Every UTF-8 consumer downstream then shows mojibake.
+
+    **It does not stay on the terminal.** This project routes command output into
+    session logs, CI artifacts, and mail bodies that quote commands. A corrupted
+    character outlives the terminal that produced it and is unreadable to every later
+    reader, agents included — so this degrades from a display problem into a data
+    problem the moment anyone redirects.
+
+    Fixed at the stream rather than at the ~39 call sites that use the character,
+    because chasing call sites fixes today's occurrences and not tomorrow's: the next
+    person to type an em-dash would reintroduce it. Encoding is a property of the
+    stream, so it belongs where the stream is configured.
+
+    **Never fails the command.** Anything may be standing in for stdout — a test
+    capture, a pipe wrapper, a harness — and a CLI that refuses to run because it could
+    not adjust its own output encoding would be worse than one that occasionally
+    prints an odd character.
+
+    Known trade, and it is the right way round: on a console that genuinely cannot
+    render UTF-8, correct bytes may display as replacement characters instead of
+    mojibake. That is a legible failure rather than a silent corruption, and the
+    redirected case — the one that persists — becomes correct.
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    with suppress(Exception):
+        reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for both console scripts, returning an exit code.
 
@@ -1168,6 +1206,10 @@ def main(argv: list[str] | None = None) -> int:
     rather than raising, which is why there is no branch for them here; the console
     script turns whatever comes back into the process's exit status.
     """
+    # Before the first byte. Click writes through these streams, so reconfiguring after
+    # it has started would leave whatever was already emitted encoded the old way.
+    force_utf8(sys.stdout)
+    force_utf8(sys.stderr)
     try:
         return int(cli.main(args=argv, standalone_mode=False) or 0)
     except click.ClickException as exc:  # usage errors, unknown commands
