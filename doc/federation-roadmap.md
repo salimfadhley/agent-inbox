@@ -13,6 +13,23 @@ begins. A step that cannot be demonstrated is too big.
 
 ## The steps
 
+### Step 0 — a settings system, stored in the database ✅ **done**
+
+Introduces the idea that a hub can persist configuration about *itself*, which it never
+could before: the store held `actors`, `objects` and `reads`, all about mail.
+
+- A `hub_settings` table on both store implementations, exercised by the existing contract
+  suite so the two are proved to agree rather than assumed to.
+- Resolution with a stated precedence — **environment, then stored, then default** — that
+  reports which source won and, when the environment governs, *which variable* does it.
+- The rule that makes it safe: **the environment shadows, it never replaces.** An operator
+  who sets a variable, restarts, then unsets it gets their own value back.
+
+Everything above this line depends on this, and so will retention, expiry and anything else
+an operator configures. It is the smallest possible step and it was worth taking alone.
+
+*Built: `a-hub-has-a-name-of-its-own-01KYMD90` WP01–WP03. 695 tests green.*
+
 ### Step 1 — all the settings in the UI
 
 A Settings tab with sections. Federation is the first section, holding the hub's own
