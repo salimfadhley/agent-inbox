@@ -21,6 +21,7 @@ subtasks:
 - T014
 - T015
 - T016
+- T027
 phase: Phase 2 - Surfaces
 agent: python-pedro
 history:

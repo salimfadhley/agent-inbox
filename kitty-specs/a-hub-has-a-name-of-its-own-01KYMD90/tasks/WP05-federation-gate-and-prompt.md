@@ -18,6 +18,7 @@ subtasks:
 - T024
 - T025
 - T026
+- T028
 phase: Phase 3 - Consequences
 agent: python-pedro
 history:
