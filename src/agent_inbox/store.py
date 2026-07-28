@@ -89,6 +89,14 @@ class MessageStore(Protocol):
         """Read-state for the given objects, keyed by object id."""
         ...
 
+    async def hub_settings(self) -> dict[str, str]:
+        """What the operator has configured about this hub. May legitimately be empty."""
+        ...
+
+    async def set_hub_setting(self, key: str, value: str | None) -> None:
+        """Store one setting, or clear it when ``value`` is None."""
+        ...
+
 
 class InMemoryStore:
     """A complete backend that happens to live in dictionaries.
@@ -100,6 +108,7 @@ class InMemoryStore:
         self._actors: dict[str, ActorRecord] = {}
         self._objects: dict[str, ObjectRecord] = {}
         self._reads: dict[str, dict[str, ReadRecord]] = {}
+        self._hub_settings: dict[str, str] = {}
 
     async def claim_name(self, actor: ActorRecord) -> bool:
         if actor.name in self._actors:
@@ -147,6 +156,15 @@ class InMemoryStore:
             object_id: tuple(self._reads.get(object_id, {}).values())
             for object_id in object_ids
         }
+
+    async def hub_settings(self) -> dict[str, str]:
+        return dict(self._hub_settings)
+
+    async def set_hub_setting(self, key: str, value: str | None) -> None:
+        if value is None:
+            self._hub_settings.pop(key, None)
+        else:
+            self._hub_settings[key] = value
 
 
 _conforms: MessageStore = InMemoryStore()

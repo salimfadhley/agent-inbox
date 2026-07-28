@@ -39,7 +39,11 @@ from agent_inbox.vocabulary import ActorType, ObjectType
 #: Bumped when the schema changes shape. There is nothing to migrate *from* yet: this
 #: package is a fresh start, and the superseded implementation's data is not carried
 #: over (its messages expire in a fortnight anyway).
-SCHEMA_VERSION = 1
+#: Bumped to 2 when ``hub_settings`` arrived. Every statement in ``_SCHEMA`` is
+#: ``CREATE ... IF NOT EXISTS`` and is re-applied on open, so an existing database gains
+#: the table without a migration step and without any existing table being touched. The
+#: number is a record that the shape changed, not a trigger for anything.
+SCHEMA_VERSION = 2
 
 _SCHEMA = (
     """
@@ -73,6 +77,16 @@ _SCHEMA = (
         reader    TEXT NOT NULL,
         at        TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (object_id, reader)
+    )
+    """,
+    # The first thing the hub keeps about *itself*. Three tables above are all about
+    # mail; this one is about the mailbox. One row per key rather than one row with
+    # three columns, so "never set" is the absence of a row rather than a NULL — and
+    # absence is the state of every hub that existed before this table did.
+    """
+    CREATE TABLE IF NOT EXISTS hub_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
     )
     """,
     "CREATE INDEX IF NOT EXISTS objects_published ON objects (published, id)",
@@ -202,6 +216,30 @@ class SqliteStore:
         cursor = await self._execute("PRAGMA user_version")
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    # -- hub settings ------------------------------------------------------
+
+    async def hub_settings(self) -> dict[str, str]:
+        """What the operator has configured about this hub. Often empty, legitimately."""
+        cursor = await self._execute("SELECT key, value FROM hub_settings")
+        return {str(row["key"]): str(row["value"]) for row in await cursor.fetchall()}
+
+    async def set_hub_setting(self, key: str, value: str | None) -> None:
+        """Store one setting, or clear it when ``value`` is None.
+
+        Clearing removes the row rather than storing an empty string, because the two
+        mean different things: no row is "never set", and an empty string is a value an
+        operator chose. The console renders them the same and the API does not.
+        """
+        if value is None:
+            await self._execute("DELETE FROM hub_settings WHERE key=?", (key,))
+        else:
+            await self._execute(
+                "INSERT INTO hub_settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+        await self._db.commit()
 
     # -- actors ------------------------------------------------------------
 
