@@ -1432,3 +1432,70 @@ class TestThePublishedSchema:
         from agent_mailbox import __version__
 
         assert self._schema(client)["info"]["version"] == __version__
+
+
+class TestACursorAlwaysMeansSomething:
+    """The cold-start case: a quiet mailbox on the very first poll.
+
+    That poll is exactly when a caller starts persisting the cursor, and it used to hand
+    back an empty string. Stored and returned, `""` is falsy and reads as "no filter",
+    the next poll serves everything and the caller re-reads mail it had accounted for. A
+    bookmark that means "everything" is worse than none, because it looks like one.
+    """
+
+    def test_an_empty_inbox_still_yields_a_usable_cursor(
+        self, client: TestClient
+    ) -> None:
+        join(client, TREVOR)
+        page = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()
+        assert page["unread"] == 0
+        assert page["cursor"], "an empty inbox must still hand back a bookmark"
+
+    def test_that_cursor_does_not_behave_as_no_filter(self, client: TestClient) -> None:
+        """The failure the empty string invited, asserted directly."""
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        cold = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            "cursor"
+        ]
+
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "sent before the second poll", summary="one"),
+            headers=as_(ROSEMARY),
+        )
+        again = client.get(
+            f"/actors/{TREVOR}/inbox?since={_q(cold)}", headers=as_(TREVOR)
+        ).json()
+        assert again["unread"] == 1, "mail sent after the bookmark must still arrive"
+
+    def test_the_cold_cursor_survives_a_quiet_poll(self, client: TestClient) -> None:
+        join(client, TREVOR)
+        first = client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            "cursor"
+        ]
+        second = client.get(
+            f"/actors/{TREVOR}/inbox?since={_q(first)}", headers=as_(TREVOR)
+        ).json()
+        assert second["unread"] == 0
+        assert second["cursor"], "a quiet poll must not erase the bookmark"
+
+    def test_count_view_agrees_with_the_manifest(self, client: TestClient) -> None:
+        """FR-003, which was already true — and nothing said it had to stay true."""
+        join(client, TREVOR)
+        counted = client.get(
+            f"/actors/{TREVOR}/inbox?view=count", headers=as_(TREVOR)
+        ).json()
+        assert counted["cursor"], "count must advertise a cursor of the same kind"
+
+    def test_an_empty_since_is_still_tolerated(self, client: TestClient) -> None:
+        """FR-006: an older client sends "" and must not be broken by this change."""
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "body", summary="visible"),
+            headers=as_(ROSEMARY),
+        )
+        page = client.get(f"/actors/{TREVOR}/inbox?since=", headers=as_(TREVOR)).json()
+        assert page["unread"] == 1, "an empty since must mean no filter, not no mail"

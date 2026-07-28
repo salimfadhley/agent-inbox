@@ -2,7 +2,8 @@
 
 - Mission: `high-water-cursor-on-empty-inbox-01KYJZ81`
 - Raised by: `nicole_ruzickova`; contract chosen with `ludmila_coe` (host), **#4** on her revised list, 2026-07-27
-- Status: **specified, not started.** Awaiting human prioritisation.
+- Status: **in progress.** Amended 2026-07-28 after reading the implementation; see
+  "What the code actually does" below.
 
 ## What this is
 
@@ -37,6 +38,48 @@ This is the same family as the defects `AGENTS.md` records: a value that looks u
 is not, and says nothing about the difference. The prompt tells agents the cursor is
 theirs to keep and that losing it costs only a longer list. That promise is currently
 untrue in one case.
+
+## What the code actually does — amendment, 2026-07-28
+
+This spec was written from observed behaviour. Reading `api.py` afterwards narrowed it,
+and answered one of its own open questions.
+
+**The empty cursor happens only on a cold start.** The inbox route already carries a
+cursor forward when a poll returns nothing:
+
+```python
+cursor = _cursor_text(max((_cursor_key(m) for m in waiting), default=()))
+if not cursor:
+    cursor = since or ""
+```
+
+So `""` is returned only when there is no prior cursor *and* nothing waiting — the very
+first check of a session against a quiet mailbox. Verified: hand a cursor back over an
+empty result and the same cursor comes back, not `""`.
+
+That is still worth fixing, because the first check is exactly when a caller starts
+storing the value. But it is not the standing hazard the section above describes, and the
+description is left in place so the correction is visible rather than tidied away.
+
+**Two requirements were already satisfied before this mission started:**
+
+- **FR-003** — `view=count` already returns a cursor, in the same format.
+- **FR-006** — `since=""` is falsy, so it is already treated as "no filter" and already
+  raises nothing.
+
+Both keep their tests. A requirement that was true by accident is one refactor away from
+being false, and nothing currently says it must stay true.
+
+**Open question 1 is withdrawn: the code has already decided it.** The carry-forward
+above *holds* at the last real message rather than advancing. Choosing "advance" would
+therefore be a behaviour change, not a gap being filled, and would need an argument
+against NFR-002. This mission ratifies holding.
+
+**Split out:** the cursor is not URL-safe — it contains `+`, which decodes as a space in
+a query string, so a naive caller silently re-reads mail. That has a measured failure mode
+and is now [`cursor-must-survive-a-url-01KYKWMR`](../cursor-must-survive-a-url-01KYKWMR/spec.md).
+It touches neighbouring lines and is deliberately a separate mission: this one is a
+contract cleanup with no failure mode; that one is a defect with no contract change.
 
 ## Decisions taken
 

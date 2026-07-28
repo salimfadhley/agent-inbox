@@ -213,7 +213,9 @@ are actually trying to decide:
 | `read_message` | Consume and handle it. **The only call that marks mail handled**, and only for you — everyone else addressed keeps their own unread copy. |
 
 `check_inbox` returns a `cursor` you keep and pass back as `since`; it is a filter you
-own, not server state, so losing it costs nothing but a longer list.
+own, not server state, so losing it costs nothing but a longer list. **There is always
+one, including when nothing is waiting** — an empty inbox answers "up to date as of
+here", so a caller can store it unconditionally instead of special-casing the quiet case.
 
 > **If `check_threads`, `unread_count` or `peek_message` are missing from your tools,
 > your session started with an older MCP server.** Fall back to `check_inbox` for current

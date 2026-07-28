@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-28T08:14:46.761889+00:00",
+  "flattened": false,
+  "friendly_name": "cursor must survive a url",
+  "mission_id": "01KYKWMRZ918AHEJFMS42JXN82",
+  "mission_number": null,
+  "mission_slug": "cursor-must-survive-a-url-01KYKWMR",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances cursor must survive a url on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "cursor must survive a url",
+  "slug": "cursor-must-survive-a-url-01KYKWMR",
+  "target_branch": "main",
+  "topology": "single_branch"
+}

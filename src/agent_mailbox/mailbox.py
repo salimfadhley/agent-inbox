@@ -86,6 +86,15 @@ class Mailbox:
     def _now(self) -> str:
         return self._clock().isoformat()
 
+    def now(self) -> str:
+        """This hub's clock, in the same form a message's ``published`` takes.
+
+        Public because a cursor for an empty inbox has no message to anchor to and must
+        still be comparable with the ones that do. Reading a different clock would let a
+        bookmark drift past mail that had not arrived yet.
+        """
+        return self._now()
+
     async def _context(self) -> tuple[tuple[str, ...], dict[str, frozenset[str]]]:
         """Who exists and which groups they are in — the inputs every rule needs."""
         actors = tuple(await self._store.actors())

@@ -343,7 +343,21 @@ class Api:
         # both never hides and never repeats. Still readable, still safe to persist.
         cursor = _cursor_text(max((_cursor_key(m) for m in waiting), default=()))
         if not cursor:
-            cursor = since or ""
+            # Nothing shown, so there is no message to anchor to. Carry the caller's own
+            # cursor forward when they had one; otherwise mark this instant.
+            #
+            # The empty string used to be returned here, on the first poll of a quiet
+            # mailbox — which is exactly the poll where a caller starts persisting the
+            # value. Stored and handed back, `""` is falsy and reads as "no filter", so
+            # the next poll returns everything and the caller re-reads mail it had
+            # already accounted for. A bookmark that means "everything" is worse than no
+            # bookmark, because it looks like one.
+            #
+            # `<now>|` is a real bookmark: an empty id sorts below every real id, so
+            # mail sent in this instant is still shown rather than swallowed. Erring
+            # towards showing a message twice is recoverable; erring towards never
+            # showing it is not — the same reasoning as `_cursor_parts`.
+            cursor = since or _cursor_text((self.house.mailbox.now(), ""))
 
         # `unread` is always the true total, never the size of this page. A count that
         # silently meant "up to fifty" would let a backlog look handled.

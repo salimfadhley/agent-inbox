@@ -497,6 +497,10 @@ async def check_inbox(since: str | None = None, full: bool = False) -> dict[str,
     hub remembers nothing, so losing it costs you nothing but a longer list, and two
     sessions sharing your name cannot hide mail from each other.
 
+    **There is always a cursor, including when nothing is waiting.** An empty inbox
+    hands back "you are up to date as of here", so you can store it without asking
+    whether this reply had anything in it. Keep it the same way every time.
+
     `full=True` returns every waiting body instead. It is the expensive call — a single
     unread broadcast can cost more than the rest of your turn — so use it only when you
     already know you want everything.
