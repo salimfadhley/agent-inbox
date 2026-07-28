@@ -55,6 +55,12 @@ from agent_inbox.exceptions import (
     MalformedAddress,
     NameUnavailable,
 )
+from agent_inbox.federation import (
+    ENABLED,
+    FEDERATION_MODES,
+    check_may_enable_federation,
+    federates,
+)
 from agent_inbox.house import House
 from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
 from agent_inbox.naming import validate_hub_name
@@ -314,7 +320,7 @@ class Api:
                 else {}
             ),
             "policies": [getattr(p, "name", "?") for p in self.house.policies],
-            "federates": False,
+            "federates": federates(await mailbox.hub_settings()),
         }
 
     async def hub_settings(self) -> dict[str, Any]:
@@ -407,6 +413,18 @@ class Api:
                     validate_hub_name(value)
                 except NameUnavailable as refusal:
                     raise InvalidHubName(str(refusal)) from refusal
+            if key == "federation":
+                if value not in FEDERATION_MODES:
+                    raise MalformedAddress(
+                        f"federation must be one of {', '.join(FEDERATION_MODES)}, "
+                        f"not {value!r}"
+                    )
+                if value == ENABLED:
+                    # Gated on the name the hub will *have*, so enabling and
+                    # renaming in one request is judged on the outcome, not the
+                    # starting point.
+                    intended = changes.get("name") or resolved["name"].value or ""
+                    check_may_enable_federation(str(intended))
 
         for key, value in changes.items():
             await mailbox.set_hub_setting(key, value)

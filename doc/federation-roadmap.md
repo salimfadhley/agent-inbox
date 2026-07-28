@@ -120,6 +120,23 @@ setting; `federates: false` is hardcoded in the descriptor. So the first half of
 Demonstrable on its own: try to enable federation on a fresh hub, be refused; name the hub,
 enable it, see `GET /` change.
 
+#### Step 2 decisions (owner, 2026-07-29)
+
+- **NodeInfo, not an invention.** `/.well-known/nodeinfo` and `/nodeinfo/2.1`, the schema
+  Lemmy and Mastodon both serve. C-008 points here and C-001 forbids inventing what a
+  standard already names. Our own fields go in an extension rather than a parallel document.
+- **The demo is `curl` against a second hub.** So Step 2 is **serving only** — a hub answers
+  questions about itself. Fetching stays Step 3, genuinely separate.
+- **No keys yet.** The thin actor document carries name and inbox URL. Nothing verifies
+  anything, so a published key would be decoration; keys arrive paired with verifying
+  something, as the roadmap already has them.
+- **Two hubs in one process** for tests, wired by a transport stub — no sockets, no network,
+  normal CI as the charter requires. Every later step needs it, so it is built once here.
+
+Note the deliberate split: the *test* harness is in-process, the *demo* is two real hubs and
+`curl`. Passing tests that never proved interoperability is the failure mode; a human running
+`curl` is what actually proves it.
+
 #### Step 2b — the discovery surfaces
 
 Then, gated on 2a: the `/.well-known/agent-inbox` descriptor, WebFinger, and the thin public

@@ -36,6 +36,8 @@ STATUS_BY_CODE: dict[str, int] = {
     "delivers_to_nobody": 422,
     # a hub name that is not an address component — fix the value, not the collision
     "invalid_hub_name": 422,
+    # the hub is not in a state where federation can be switched on
+    "federation_refused": 409,
     # the environment fixes this setting; a write here would be silently overridden
     "hub_setting_governed": 409,
     # the caller has not joined

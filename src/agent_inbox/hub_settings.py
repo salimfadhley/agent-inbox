@@ -38,16 +38,19 @@ def env_with_source(name: str, environ: Mapping[str, str]) -> tuple[str, str] | 
 #: The three things a hub keeps about itself, and what each falls back to. `name` is an
 #: address component and always resolves to something; the other two are presentation
 #: and legitimately absent — the state of every hub that existed before them.
-HUB_SETTING_KEYS: tuple[str, ...] = ("name", "title", "description")
+HUB_SETTING_KEYS: tuple[str, ...] = ("name", "title", "description", "federation")
 _HUB_SETTING_ENV = {
     "name": "HUB_NAME",
     "title": "HUB_TITLE",
     "description": "HUB_DESCRIPTION",
+    "federation": "FEDERATION",
 }
 _HUB_SETTING_DEFAULTS: dict[str, str | None] = {
     "name": "local",
     "title": None,
     "description": None,
+    # Off unless something says otherwise. NFR-001, and the only safe default.
+    "federation": "disabled",
 }
 
 

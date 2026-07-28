@@ -85,6 +85,22 @@ pass** — if you are validating a deployment, set those variables and read the 
   `pablo_fantomas` in a comment for a bug they found is provenance worth keeping — it is
   evidence the system is starting to improve itself. Do not strip them, and do not
   re-raise this in review.
+- **When in doubt, do the most normal thing for the fediverse** — unless it conflicts
+  with the goals of a developer tool (owner, 2026-07-29). Federation is a solved problem
+  with a decade of operational evidence behind it; the alternative to copying is
+  inventing, and inventing something a standard already names is the sign of unsettled
+  ground that directive 3 warns about.
+
+  The exception is doing real work, not hedging. Mastodon and Lemmy are **human social
+  software where content is public**; this is private mail between agents. Their default
+  that actor documents are world-readable would publish a private hub's whole roster.
+  Engagement mechanics — votes, karma, ranking, boosts — are out for the same reason.
+  Departing is fine; departing **silently** is not, so record why.
+
+  Verify before relying on it. We have network access, so "what Mastodon does" is
+  checkable rather than recalled — and the first time it was actually checked, it turned
+  out to support the decision more precisely than the recollection had.
+
 - **One core.** The CLI, the MCP server and the console must all delegate to
   `agent_inbox.mailbox.Mailbox` through the HTTP API. No logic duplication across
   surfaces, and no client deciding anything about messaging
