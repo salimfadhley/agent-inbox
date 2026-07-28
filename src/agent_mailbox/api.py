@@ -121,6 +121,35 @@ def _cursor_text(key: tuple[str, ...]) -> str:
     return "|".join(key) if key else ""
 
 
+def unmangled_timestamp(value: str) -> str:
+    """Undo the one thing a URL does to a timestamp we handed out.
+
+    Our timestamps carry a UTC offset — ``2026-07-28T08:16:42.589603+00:00`` — and in a
+    query string ``+`` means a space. A caller that pastes a value we gave it straight
+    into a URL therefore sends something subtly different from what it received, and we
+    used to compare against the difference without noticing.
+
+    It failed silently and in the worse direction: a space (0x20) sorts *below* ``+``
+    (0x2B), so the mangled value is smaller than every real one, and the inbox filter —
+    a strict ``>`` on a tuple — stopped excluding the very message the caller had just
+    been shown. Mail it had already accounted for came back, and nothing said why.
+
+    Applied to every timestamp a caller can hand back, not only the one that broke. See
+    :meth:`Api.survey` for the other, which measurement showed is *not* affected today
+    and is one operator away from being so.
+
+    The mapping is unambiguous, which is what makes fixing it here safe rather than a
+    guess: an ISO 8601 timestamp never contains a space, so a space in one can only ever
+    have been a ``+``. **Timestamps only** — never an id, which is hex and could in
+    principle carry a space meaningfully in some future format.
+
+    `agent_mailbox.client` escapes correctly and always did, so this repairs nothing
+    that was broken for it. It is for the clients ADR 0005 and the published OpenAPI
+    schema invite, which will reasonably treat an opaque string as opaque.
+    """
+    return value.replace(" ", "+")
+
+
 def _cursor_parts(cursor: str) -> tuple[str, str]:
     """A cursor back into its parts, tolerating one written by an older client.
 
@@ -129,7 +158,7 @@ def _cursor_parts(cursor: str) -> tuple[str, str]:
     a message twice is recoverable; erring towards never showing it is not.
     """
     published, _, ident = cursor.partition("|")
-    return (published, ident)
+    return (unmangled_timestamp(published), ident)
 
 
 #: What a client needs to know that the route signatures cannot tell them.
@@ -321,6 +350,11 @@ class Api:
         vanished would be indistinguishable from mail that never arrived.
         """
         owns(name, caller, self.wire)
+        # Repaired once, here, rather than at each use. The filter below and the cursor
+        # carried forward at the end must agree: repairing only the filter would still
+        # hand a spoiled cursor back, the caller would store *that*, and the damage
+        # would persist across every later poll instead of one.
+        since = unmangled_timestamp(since) if since else since
         waiting = await self.house.peek(caller)
         if since:
             after = _cursor_parts(since)
@@ -528,7 +562,22 @@ class Api:
     # on every console page rather than implied by a route prefix.
 
     async def survey(self, since: str = "") -> dict[str, Any]:
-        return await self.house.survey(since=since)
+        # Defensive, not a fix: measured, this route does **not** currently misbehave on
+        # a mangled timestamp, and an earlier draft of this comment wrongly claimed it
+        # over-reported. It survives because it compares `published >= since` on a bare
+        # string, and no real timestamp sorts between `...+00:00` and `... 00:00` — the
+        # two forms differ only at the offset separator, and `>=` covers the equal case
+        # either way.
+        #
+        # The inbox breaks on the same input because it compares a *tuple* with a strict
+        # `>`: a seen message's own timestamp is greater than the mangled cursor, so it
+        # stops being excluded.
+        #
+        # Which means this route is one operator away — `>=` to `>` — from acquiring the
+        # bug the inbox already had, for a reason nobody changing it would think about.
+        # Normalising both is one string operation and removes the trap rather than
+        # documenting it.
+        return await self.house.survey(since=unmangled_timestamp(since))
 
     async def observe_mailbox(self, name: str) -> Collection:
         items = await self.house.observe_mailbox(self.wire.name_from(name))

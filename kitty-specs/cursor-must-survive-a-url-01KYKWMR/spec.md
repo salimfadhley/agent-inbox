@@ -118,9 +118,26 @@ would catch it.
   The two touch neighbouring lines and are deliberately separate: one is a contract
   cleanup with no failure mode, this one has a measured failure mode and no contract
   change.
-- Auditing other routes for the same hazard. Worth doing, and worth knowing it has **not**
-  been done: `since` is the only place a caller is told to hand a hub-generated string
-  back through a URL, but that was reasoned, not checked.
+- ~~Auditing other routes for the same hazard.~~ **Done, 2026-07-28, and it found one.**
+
+  `/observe/stats?since=` takes a bare timestamp, not a cursor. Nothing in-tree passes it
+  — the console calls `survey()` with no argument — so it is an unexercised capability,
+  which is exactly the sort a generated client finds first.
+
+  **It does not currently misbehave, and an earlier draft of this spec said it did.** I
+  claimed it would over-report and did not construct the case. Measured, correct and
+  mangled timestamps give identical counts, because it compares `published >= since` on a
+  bare string and no real timestamp sorts between `...+00:00` and `... 00:00` — the forms
+  differ only at the offset separator, and `>=` covers the equal case either way.
+
+  The inbox breaks on the same input only because it compares a **tuple** with a strict
+  `>`: a seen message's own timestamp *is* greater than the mangled cursor, so it stops
+  being excluded.
+
+  Both are normalised anyway, through one shared helper, on the operator's decision. The
+  argument is not that stats is broken — it is that stats is one character away from the
+  bug the inbox already had (`>=` → `>`), for a reason nobody making that edit would
+  think about. Its test is labelled a guard, since it passes with the fix removed.
 
 ## Provenance
 

@@ -1499,3 +1499,105 @@ class TestACursorAlwaysMeansSomething:
         )
         page = client.get(f"/actors/{TREVOR}/inbox?since=", headers=as_(TREVOR)).json()
         assert page["unread"] == 1, "an empty since must mean no filter, not no mail"
+
+
+class TestACursorSurvivesBeingPutInAUrl:
+    """Our timestamps contain `+`, and `+` in a query string means a space.
+
+    A caller that pastes back the opaque string it was handed sends something different
+    from what it received. The mangled value sorts *below* every real one, so a filter
+    meant to exclude what has been seen matched everything instead — and said nothing.
+
+    The property under test is not "the fix is applied" but "raw and escaped agree".
+    That survives a change of mechanism, which an assertion about `.replace` would not.
+    """
+
+    def _seed_one(self, client: TestClient) -> str:
+        join(client, ROSEMARY)
+        join(client, TREVOR)
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "body", summary="already seen"),
+            headers=as_(ROSEMARY),
+        )
+        return client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR)).json()[
+            "cursor"
+        ]
+
+    def test_a_cursor_pasted_raw_still_filters(self, client: TestClient) -> None:
+        """The defect, stated as its symptom: mail must not be served twice."""
+        cursor = self._seed_one(client)
+        assert "+" in cursor, "precondition: the cursor carries a UTC offset"
+
+        raw = client.get(
+            f"/actors/{TREVOR}/inbox?since={cursor}", headers=as_(TREVOR)
+        ).json()
+        assert raw["unread"] == 0, (
+            "a cursor pasted into a URL unescaped re-served mail already accounted for"
+        )
+
+    def test_raw_and_escaped_agree(self, client: TestClient) -> None:
+        cursor = self._seed_one(client)
+        raw = client.get(
+            f"/actors/{TREVOR}/inbox?since={cursor}", headers=as_(TREVOR)
+        ).json()
+        escaped = client.get(
+            f"/actors/{TREVOR}/inbox?since={_q(cursor)}", headers=as_(TREVOR)
+        ).json()
+        assert raw["unread"] == escaped["unread"]
+        assert raw["cursor"] == escaped["cursor"]
+
+    def test_new_mail_still_arrives_through_a_raw_cursor(
+        self, client: TestClient
+    ) -> None:
+        """Tolerating the mangling must not turn the filter into a wall."""
+        cursor = self._seed_one(client)
+        client.post(
+            f"/actors/{ROSEMARY}/outbox",
+            json=note([TREVOR], "body", summary="after the cursor"),
+            headers=as_(ROSEMARY),
+        )
+        fresh = client.get(
+            f"/actors/{TREVOR}/inbox?since={cursor}", headers=as_(TREVOR)
+        ).json()
+        assert [r["summary"] for r in fresh["items"]] == ["after the cursor"]
+
+    def test_a_nonsense_cursor_still_degrades_rather_than_raising(
+        self, client: TestClient
+    ) -> None:
+        """FR-004: tolerance must not make the parser strict."""
+        self._seed_one(client)
+        for junk in ("banana", "|||", "2026-13-45T99:99", " "):
+            got = client.get(
+                f"/actors/{TREVOR}/inbox?since={_q(junk)}", headers=as_(TREVOR)
+            )
+            assert got.status_code == 200, f"{junk!r} should degrade, not raise"
+
+    def test_the_survey_timestamp_gets_the_same_treatment(
+        self, client: TestClient
+    ) -> None:
+        """A guard, and honestly labelled as one: this passes with the fix removed.
+
+        `/observe/stats?since=` takes a bare timestamp and, measured, does **not**
+        currently misbehave on a mangled one — it compares `published >= since` on a
+        string, and no real timestamp sorts between `...+00:00` and `... 00:00`. An
+        earlier version of this test claimed otherwise and passed for that reason, which
+        is the vacuous-check shape `AGENTS.md` is about.
+
+        It stays because the route is one operator away from the inbox's bug — `>=` to
+        `>` — and this pins the property that would break first. Do not read a passing
+        run here as evidence the normalisation is doing work today.
+        """
+        self._seed_one(client)
+        stamp = (
+            client.get(f"/actors/{TREVOR}/inbox", headers=as_(TREVOR))
+            .json()["cursor"]
+            .split("|")[0]
+        )
+        assert "+" in stamp
+
+        raw = client.get(f"/observe/stats?since={stamp}").json()
+        escaped = client.get(f"/observe/stats?since={_q(stamp)}").json()
+        assert raw["messages_since"] == escaped["messages_since"], (
+            "a raw timestamp counted differently from an escaped one"
+        )
