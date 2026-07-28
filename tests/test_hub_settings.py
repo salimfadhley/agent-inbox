@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_inbox.serve import ResolvedSetting, resolve_hub_settings
+from agent_inbox.hub_settings import ResolvedSetting, resolve_hub_settings
 from agent_inbox.store import InMemoryStore
 
 

@@ -66,6 +66,18 @@ class Mailbox:
         self._retention_days = retention_days
         self._clock = clock
 
+    async def hub_settings(self) -> dict[str, str]:
+        """What the operator configured about this hub. Often empty, legitimately.
+
+        Reaches the store so the API need not. The store stays private: the hub's own
+        settings are hub state, and this is the object that owns hub state.
+        """
+        return await self._store.hub_settings()
+
+    async def set_hub_setting(self, key: str, value: str | None) -> None:
+        """Store one setting, or clear it when ``value`` is None."""
+        await self._store.set_hub_setting(key, value)
+
     @property
     def hub_name(self) -> str:
         """What this mailbox calls itself. It also always answers to ``local``."""

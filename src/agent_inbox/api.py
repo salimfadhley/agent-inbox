@@ -49,6 +49,7 @@ from agent_inbox.errors import (
 )
 from agent_inbox.exceptions import MailboxError
 from agent_inbox.house import House
+from agent_inbox.hub_settings import resolve_hub_settings
 from agent_inbox.wire import (
     BLIND_FIELDS,
     Actor,
@@ -255,11 +256,27 @@ class Api:
                 "network only."
             )
         )
+        resolved = resolve_hub_settings(
+            await mailbox.hub_settings(), default_name=mailbox.hub_name
+        )
+        # Omitted, not empty. An unset title is absent from the document; `""` is a
+        # value an operator chose, and the two must stay distinguishable because the
+        # console renders them the same and the API must not.
+        presentation = {
+            key: resolved[key].value
+            for key in ("title", "description")
+            if resolved[key].value is not None
+        }
         return {
             "@context": "https://www.w3.org/ns/activitystreams",
             "type": "Service",
-            "name": mailbox.hub_name,
+            # Resolved, not read from the mailbox: the environment may govern it, and
+            # there is one place that answers "what is this hub called".
+            "name": resolved["name"].value,
+            **presentation,
             "version": __version__,
+            # An ADDRESS, and not the identity. A hub answers to many; changing this
+            # does not change `name` (NFR-003).
             "id": self.wire.base,
             # Said out loud, either way — a hub's posture should never be a surprise.
             "authenticated": self.authenticated,

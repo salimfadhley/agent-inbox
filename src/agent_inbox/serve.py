@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -25,6 +24,9 @@ from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
 from agent_inbox.auth.store import SqliteAuthStore
 from agent_inbox.auth.throttle import LoginThrottle
 from agent_inbox.house import House
+from agent_inbox.hub_settings import (
+    env_with_source,
+)
 from agent_inbox.mailbox import Mailbox
 from agent_inbox.sqlite_store import SqliteStore
 
@@ -34,15 +36,6 @@ logger = logging.getLogger(__name__)
 #: `warn` checks credentials and logs a missing one but serves; `enforce` refuses.
 _AUTH_MODES = ("off", "warn", "enforce")
 
-#: The project is `agent-inbox`, so its variables are `AGENT_INBOX_*`.
-ENV_PREFIX = "AGENT_INBOX_"
-
-#: What they used to be called, and still are on every deployment written before the
-#: rename — including nine in this project's own reference compose file. Dropping it
-#: would leave a hub unable to read its own configuration on the next restart, which is
-#: a rename that breaks the thing being renamed.
-LEGACY_ENV_PREFIX = "AGENT_MAILBOX_"
-
 
 def _env(name: str, default: str) -> str:
     """A setting, by its current name or the one it used to have.
@@ -51,78 +44,8 @@ def _env(name: str, default: str) -> str:
     deployment that still carries the old variables is mid-migration, and the value they
     just wrote is the one they meant.
     """
-    found = _env_with_source(name, os.environ)
+    found = env_with_source(name, os.environ)
     return found[0].strip() if found else default.strip()
-
-
-def _env_with_source(name: str, environ: Mapping[str, str]) -> tuple[str, str] | None:
-    """The value **and the variable it came from**, or None when neither is set.
-
-    The variable name matters as much as the value. A console that greys out a field and
-    says `AGENT_INBOX_HUB_NAME` governs it, on a deployment configured through
-    `AGENT_MAILBOX_HUB_NAME`, sends the operator to edit a variable that is not the one
-    in effect — and they conclude the console is broken.
-    """
-    for prefix in (ENV_PREFIX, LEGACY_ENV_PREFIX):
-        variable = f"{prefix}{name}"
-        value = environ.get(variable)
-        if value is not None:
-            return value.strip(), variable
-    return None
-
-
-#: The three things a hub keeps about itself, and what each falls back to. `name` is an
-#: address component and always resolves to something; the other two are presentation
-#: and legitimately absent — the state of every hub that existed before them.
-HUB_SETTING_KEYS: tuple[str, ...] = ("name", "title", "description")
-_HUB_SETTING_ENV = {
-    "name": "HUB_NAME",
-    "title": "HUB_TITLE",
-    "description": "HUB_DESCRIPTION",
-}
-_HUB_SETTING_DEFAULTS: dict[str, str | None] = {
-    "name": "local",
-    "title": None,
-    "description": None,
-}
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedSetting:
-    """A value, and who decided it.
-
-    Copied in shape from `client.effective_settings()`, which already answers "which one
-    won" for client configuration. Two nearly-identical answers to one question is worse
-    than one, and this project has paid for near-duplicates before.
-    """
-
-    value: str | None
-    source: str
-    variable: str | None = None
-
-
-def resolve_hub_settings(
-    stored: Mapping[str, str], environ: Mapping[str, str] | None = None
-) -> dict[str, ResolvedSetting]:
-    """Environment, then stored, then default — and say which.
-
-    **The environment shadows; it never replaces.** Nothing here writes to `stored`,
-    and nothing at startup may either: an operator who sets a variable, restarts, then
-    unsets it must get their configured value back. Overwriting it would be silent
-    data loss that looks exactly like it worked.
-    """
-    env = os.environ if environ is None else environ
-    resolved: dict[str, ResolvedSetting] = {}
-    for key in HUB_SETTING_KEYS:
-        found = _env_with_source(_HUB_SETTING_ENV[key], env)
-        if found is not None:
-            resolved[key] = ResolvedSetting(found[0], "environment", found[1])
-            continue
-        if key in stored:
-            resolved[key] = ResolvedSetting(stored[key], "stored")
-            continue
-        resolved[key] = ResolvedSetting(_HUB_SETTING_DEFAULTS[key], "default")
-    return resolved
 
 
 @dataclass(frozen=True, slots=True)
