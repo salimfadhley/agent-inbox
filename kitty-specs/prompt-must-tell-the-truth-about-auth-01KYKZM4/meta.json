@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-07-28T09:06:51.291660+00:00",
+  "flattened": false,
+  "friendly_name": "prompt must tell the truth about auth",
+  "mission_id": "01KYKZM48VR156M9QZM79S2GCZ",
+  "mission_number": null,
+  "mission_slug": "prompt-must-tell-the-truth-about-auth-01KYKZM4",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances prompt must tell the truth about auth on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "prompt must tell the truth about auth",
+  "slug": "prompt-must-tell-the-truth-about-auth-01KYKZM4",
+  "target_branch": "main",
+  "topology": "single_branch"
+}
