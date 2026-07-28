@@ -1,0 +1,14 @@
+id,decision,finding,method,artefact,observed_utc,strength
+E-01,D-01,"GET / reports id as the public URL and name from AGENT_INBOX_HUB_NAME defaulting to local",queried the deployed hub and read serve.py,src/agent_inbox/serve.py,2026-07-28T11:00Z,code-confirmed
+E-02,D-01,"An admin and the host both concluded two addresses were two hubs; they were one",triage of issues #2-#5 then a check by ludmila_coe,github issues + hub descriptor,2026-07-28T10:20Z,observed
+E-03,D-02,"Agent names are validated by ^[a-z0-9](?:[a-z0-9_]{0,62}[a-z0-9])?$ while hub names are validated nowhere",read naming.py and exercised the parser,src/agent_inbox/naming.py,2026-07-28T12:10Z,code-confirmed
+E-04,D-02,"trevor@The Salt Club parses successfully into trevor@the salt club",ran parse() against candidate hub names,src/agent_inbox/addressing.py,2026-07-28T12:10Z,code-confirmed
+E-05,D-02,"hub.thesaltclub.xyz is accepted as a hub NAME, which is the hostname/name conflation",same probe,src/agent_inbox/addressing.py,2026-07-28T12:10Z,code-confirmed
+E-06,D-04,"The default hub name is the reserved keyword LOCAL, so every unconfigured hub is anonymous and mutually indistinguishable",read addressing.LOCAL against serve.py's default,src/agent_inbox/addressing.py,2026-07-28T12:10Z,code-confirmed
+E-07,D-05,"Lemmy and Mastodon identify an instance by its domain; no separate instance name exists and no name registry was built",established protocol knowledge; not re-read from spec,doc/research/competitive-survey-findings.md,2026-07-28T12:30Z,inferred
+E-08,D-06,"No rename or forwarding machinery remains in src/ — it was deleted when surrogate keys landed",grepped for rename/supersedes/forward,src/agent_inbox/,2026-07-28T12:35Z,code-confirmed
+E-09,D-06,"ADR 0003 cites mission 0012's forwarding as machinery whose only purpose is to survive identity churn",read the ADR cost table,doc/decisions/0003-identity-is-a-surrogate-key.md,2026-07-28T12:35Z,code-confirmed
+E-10,D-07,"serve.py states configuration is environment only, no config file, because a container's contract is its environment",read the module docstring,src/agent_inbox/serve.py,2026-07-28T12:40Z,code-confirmed
+E-11,D-07,"The store has exactly three tables — actors, objects, reads — so there is nowhere to keep hub settings today",read the schema,src/agent_inbox/sqlite_store.py,2026-07-28T12:40Z,code-confirmed
+E-12,D-08,"client.effective_settings() already returns (value, source) for client config",read the function,src/agent_inbox/client.py,2026-07-28T12:45Z,code-confirmed
+E-13,D-03,"Pablo's federation spec FR-001 already plans a Federation tab holding server profile alongside peers and blocklists",read the spec on his branch,kitty-specs/manual-activitypub-federation-v1-01KYJY10/spec.md,2026-07-28T12:20Z,code-confirmed

@@ -1,0 +1,14 @@
+id,source,kind,location,used_for,accessed_utc,authority
+S-01,Hub server entrypoint,source,src/agent_inbox/serve.py,"Environment-only config philosophy; hub_name default; the settings that exist today",2026-07-28T12:40Z,primary
+S-02,Addressing,source,src/agent_inbox/addressing.py,"LOCAL keyword; how name@hub parses; is_local_to",2026-07-28T12:10Z,primary
+S-03,Naming,source,src/agent_inbox/naming.py,"The agent-name rule reused for hub names",2026-07-28T12:10Z,primary
+S-04,SQLite store,source,src/agent_inbox/sqlite_store.py,"The three existing tables; where settings would live",2026-07-28T12:40Z,primary
+S-05,Client config,source,src/agent_inbox/client.py,"effective_settings as the precedence-reporting precedent",2026-07-28T12:45Z,primary
+S-06,ADR 0003,decision record,doc/decisions/0003-identity-is-a-surrogate-key.md,"Identity as surrogate key; the cost table; forwarding as churn machinery",2026-07-28T12:35Z,binding
+S-07,ADR 0004,decision record,doc/decisions/0004-activitystreams-messaging-model.md,"Fediverse stack evaluated and rejected; addressing model kept",2026-07-28T12:25Z,binding
+S-08,ADR 0008,decision record,doc/decisions/0008-no-actor-has-authority.md,"Administration out of band; why the write is operator-gated",2026-07-28T12:45Z,binding
+S-09,Mission 0023,mission brief,doc/missions/0023-assigned-names-and-profiles.md,"The @hub seam; names opaque, assigned, stable forever",2026-07-28T12:30Z,primary
+S-10,Mission 0012,mission brief,doc/missions/0012-renames-and-simpler-routing.md,"Rename with forwarding, shipped then removed",2026-07-28T12:35Z,primary
+S-11,Competitive survey,research,doc/research/competitive-survey-findings.md,"Federation prior art, with its own not-re-read-from-spec caveat",2026-07-28T12:30Z,secondary
+S-12,Federation mission,spec,kitty-specs/manual-activitypub-federation-v1-01KYJY10/spec.md,"FR-001's Federation tab; FR-022 remote actors displayed with their domain",2026-07-28T12:20Z,primary
+S-13,Deployed hub,running system,halob 0.26.0,"Observed descriptor; hub name equal to the machine name",2026-07-28T12:00Z,primary
