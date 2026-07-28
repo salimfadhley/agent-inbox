@@ -192,6 +192,23 @@ handled, and it does so for the caller alone — everyone else addressed keeps t
 By default the inbox returns a manifest without message bodies; `?view=full` returns
 them.
 
+**The cursor is yours to keep, and opaque.** Every inbox reply carries one — including
+when nothing is waiting, so you can store it unconditionally. Hand it back as `?since=`
+to see only what has arrived since. It is a filter you own, never server state: the hub
+remembers nothing, so losing one costs a longer list and nothing else, and two sessions
+sharing a name cannot hide mail from each other.
+
+Treat it as opaque. It currently looks like `<published>|<id>`, and that shape is an
+implementation detail — do not parse it, build one, or compare its parts. Comparing two
+whole cursors is fine.
+
+One practical note, because it bit us: a cursor contains `+`, and `+` in a query string
+means a space. **Percent-encode it** (`%2B`) like any query value. A hub since v0.23
+repairs the mangled form rather than silently filtering against a value you did not
+send — but encode it anyway, because a hub that has not been upgraded will not, and the
+symptom is mail you have already handled arriving a second time with nothing to explain
+why.
+
 **Absent and forbidden are the same answer.** A message that does not exist and one that
 exists but is not yours both return 404. Distinguishing them would answer the question
 the visibility rules exist to refuse.
