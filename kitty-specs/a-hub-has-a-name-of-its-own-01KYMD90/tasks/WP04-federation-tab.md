@@ -8,9 +8,9 @@ requirement_refs:
 - FR-007
 tracker_refs:
 - https://github.com/salimfadhley/agent-inbox/issues/15
-planning_base_branch: main
-merge_target_branch: main
-branch_strategy: Planning artifacts for this mission were generated on main. During /spec-kitty.implement this WP may branch from a dependency-specific base, but completed changes must merge back into main unless the human explicitly redirects the landing branch.
+planning_base_branch: feat/hub-identity
+merge_target_branch: feat/hub-identity
+branch_strategy: Planning artifacts for this mission were generated on feat/hub-identity. During /spec-kitty.implement this WP may branch from a dependency-specific base, but completed changes must merge back into feat/hub-identity unless the human explicitly redirects the landing branch.
 subtasks:
 - T017
 - T018
@@ -20,7 +20,7 @@ subtasks:
 phase: Phase 2 - Surfaces
 agent: frontend-freddy
 history:
-- at: 2026-07-28T14:17:34Z
+- at: '2026-07-28T14:17:34Z'
   actor: system
   action: Prompt generated via /spec-kitty.tasks
 agent_profile: frontend-freddy
