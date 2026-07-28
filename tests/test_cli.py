@@ -665,11 +665,11 @@ class TestDoctorExitCodes:
 
 
 class TestOutputIsAlwaysUtf8:
-    """CLI text uses em-dashes; Windows Git Bash encodes them as cp1252 and corrupts them.
+    """CLI text uses em-dashes; Git Bash encodes them as cp1252 and corrupts them.
 
-    Issue #3. On a stream whose encoding came from the locale rather than UTF-8, Python
-    writes U+2014 as the single byte 0x97 instead of `e2 80 94`, and every UTF-8 consumer
-    downstream — cat, grep, log files, CI artifact viewers — renders mojibake.
+    Issue #3. On a stream whose encoding came from the locale rather than UTF-8,
+    Python writes U+2014 as the single byte 0x97 instead of `e2 80 94`, and every
+    UTF-8 consumer downstream — cat, grep, log files, CI viewers — shows mojibake.
 
     It does not stay on the terminal. This project routes CLI output into session logs,
     CI artifacts and mail bodies quoting commands, so a corrupted character outlives the
