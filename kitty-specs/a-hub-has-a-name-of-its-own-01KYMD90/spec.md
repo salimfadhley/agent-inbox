@@ -3,7 +3,7 @@
 - Mission: `a-hub-has-a-name-of-its-own-01KYMD90`
 - Issue: [#15](https://github.com/salimfadhley/agent-inbox/issues/15)
 - Raised by: the operator, 2026-07-28, and designed with them in conversation
-- Status: **specified, not started.** Decisions taken; see below.
+- Status: **specified, no open questions, ready to implement.**
 
 ## What this is
 
@@ -179,31 +179,31 @@ Note this is a stronger gate than "cannot federate": the mode cannot be **enable
 half-configured hub that has switched federation on and not yet been named is a state
 worth not having.
 
-### Renaming is allowed, and forwarding is deliberately unresolved
+### Renaming a hub is allowed, and needs no forwarding
 
-The hub name may change. What happens to anything holding the old one needs its own
-thought and is **not settled here** — see the open question below, which is narrower than
-it looks and touches a decision this project has already reversed once.
+**Hub names, not agent names** — confirmed with the operator after the answer was
+ambiguous, because the two have opposite histories and the wrong reading would have
+reversed a shipped decision.
 
-## Open questions for the human
+A hub may be renamed. Nothing outside the hub ever held the friendly name — federated
+identity is domain-based — so nothing is orphaned and **no forwarding machinery is
+built**. That is the whole benefit of adopting the fediverse answer, and it is worth
+being explicit that the benefit was collected rather than merely available.
 
-1. **Whose rename, and does it need forwarding?** The operator's answer named *agents*
-   changing their name, and that may have meant hubs. The two have opposite histories and
-   the difference matters:
+What does shift is local: agents' `@hub` addressing, and any convention written into a
+project's own instructions. The rename should say so rather than being silent about it.
 
-   - **Hub names.** Renaming is safe today *because* federated identity is domain-based —
-     nothing outside the hub holds the friendly name, so nothing is orphaned and no
-     forwarding is required. What does shift is local: agents' `@hub` addressing and any
-     convention written down in a project.
-   - **Agent names.** These are currently `opaque, unique, assigned by the hub, stable
-     forever` (mission 0023). Rename *with* forwarding existed — mission 0012, shipped
-     v0.10.0 — and was **deleted** when surrogate keys made it unnecessary. ADR 0003 cites
-     that machinery as "whose only purpose is to survive identity churn". Re-introducing
-     it would reverse a decision taken deliberately and written up as a retrospective.
+**Agent names are untouched by this mission.** They remain `opaque, unique, assigned by
+the hub, stable forever` (mission 0023). Rename-with-forwarding for agents existed
+(mission 0012, shipped v0.10.0) and was deleted when surrogate keys made it unnecessary;
+[ADR 0003](../../doc/decisions/0003-identity-is-a-surrogate-key.md) cites that machinery
+as existing only to survive identity churn. Re-introducing it would reverse a decision
+taken deliberately and written up as a retrospective — arguable, but it would need
+arguing on its own terms, and it is not what this mission does.
 
-   This mission assumes **hub** renames and needs no forwarding for them. If agent renames
-   are wanted, that is a separate mission against ADR 0003 and mission 0023, and should be
-   argued on its own terms rather than arriving as a side effect of naming hubs.
+## Open questions
+
+None. All three are answered and recorded above.
 
 ## Out of scope
 
