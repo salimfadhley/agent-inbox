@@ -114,12 +114,27 @@ get one, so a closed door there would make onboarding impossible. Verified on ha
 0.23.1 — the console answers `/prompts/agent` with 200 and no credentials while the hub
 returns 401 for an inbox. The page explains how to install a token; it never carries one.
 
-Worth recording rather than assuming: that openness is a property of **console
-exposure**, not of a decision anyone wrote down. The hub itself 404s on that path. On a
-console reachable beyond a trusted network, the page discloses hub name, version, role
-vocabulary, naming scheme and operational commands — a reconnaissance surface. Nobody has
-decided that is acceptable; nobody has decided it is not. Out of scope here, and worth its
-own question later.
+**Correction, same day.** An earlier draft of this section — and what I told the host —
+said that openness was a side effect of console exposure rather than a decision anyone
+recorded. That was wrong, and checking took one grep. The console's `_gate` exempts it
+explicitly:
+
+```python
+if path in OPEN_PATHS or path.startswith(("/prompts", "/static/")):
+    return None
+```
+
+with the rule stated in its docstring: *"A screen is allowed only if it is needed before
+anyone can sign in."* So it is deliberate, console-wide, applies on every authenticating
+deployment, and the reasoning is exactly the bootstrap argument — recorded in code before
+anyone asked the question.
+
+What remains genuinely open is narrower, and is a deployment question rather than a design
+one: on a console reachable beyond a trusted network, that page discloses hub name,
+version, role vocabulary, naming scheme and operational commands. The decision to serve it
+before sign-in was made for bootstrapping on a LAN; whether it should still hold when the
+console is exposed further has not been asked. Out of scope here. Tracked as a host
+watchpoint under *public onboarding prompt exposure needs an explicit operator decision*.
 
 ## Functional requirements
 
