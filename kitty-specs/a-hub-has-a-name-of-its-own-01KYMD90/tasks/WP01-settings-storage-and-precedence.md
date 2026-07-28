@@ -269,8 +269,9 @@ Everything else is coverage.
 - [ ] A hub with nothing configured is unchanged.
 - [ ] The stale "environment only" comment in `serve.py` is replaced with the current
       argument, not deleted.
-- [ ] `ruff`, `pyright` and `pytest` all pass. Do not commit past a failing gate — read the
-      gate's own output before claiming it is green.
+- [ ] All four charter gates pass: `uv run pytest`, `uv run ruff check`,
+      `uv run ruff format --check`, `uv run pyright`. Do not commit past a failing gate —
+      read the gate's own output before claiming it is green.
 
 ## Risks
 

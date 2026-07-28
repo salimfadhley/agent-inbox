@@ -10,7 +10,7 @@ provable by assertion. The project's recurring defect shape is *a check that pas
 it had nothing to look at*, so several subtasks below require a test to be proved by
 removing the code it guards and watching it fail.
 
-**Organization**: 26 subtasks (`T001`–`T026`) roll into 5 work packages (`WP01`–`WP05`).
+**Organization**: 28 subtasks (`T001`–`T028`) roll into 5 work packages (`WP01`–`WP05`).
 Each work package is independently deliverable. Deep guidance lives in the prompt files;
 this document is the checklist.
 
@@ -47,6 +47,8 @@ Reference table only — progress is tracked by the checkboxes under each work p
 | T024 | The prompt introduces the hub by `title` and `description` | WP05 | |
 | T025 | The prompt reads correctly when both are absent — every hub today | WP05 | [P] |
 | T026 | Documentation: README, admin runbook, and the mission's own record | WP05 | [P] |
+| T027 | Assert that identity survives the address — NFR-003 | WP03 | |
+| T028 | The outside-model review, before the mission closes | WP05 | |
 
 ---
 
@@ -117,6 +119,11 @@ with a name the new rule would refuse still starts.
 
 ### Implementation Notes
 
+**FR-006 is claimed by both WP02 and WP05, deliberately.** It has two halves that belong in
+different places: `local` is a *permitted name* (here), and `local` *blocks enabling
+federation* (WP05, where the consequence is). Putting the whole requirement in one package
+would put a constraint where its consequence is not.
+
 Measured, not assumed: `trevor@The Salt Club` parses **successfully** today into
 `trevor@the salt club`, and `hub.thesaltclub.xyz` is accepted as a hub *name*. That second
 one is the hostname/name conflation the whole mission exists to remove, so it earns a named
@@ -148,7 +155,7 @@ because the API is where decisions live.
 `PUT /hub` succeeds for an operator, is refused with an agent device token, returns `409`
 for an environment-governed field and `422` for an invalid name.
 **Prompt**: `tasks/WP03-descriptor-and-write-route.md`
-**Requirement Refs**: FR-001, FR-008, FR-009
+**Requirement Refs**: FR-001, FR-008, FR-009, NFR-003
 
 ### Included Subtasks
 
@@ -158,6 +165,7 @@ for an environment-governed field and `422` for an invalid name.
 - [ ] T014 Refuse with `409` when the requested field is fixed by the environment, naming the variable (WP03)
 - [ ] T015 Refuse with `422` when the name fails validation, carrying WP02's message (WP03)
 - [ ] T016 Test the gate with an agent device token, and each refusal's status code against `STATUS_BY_CODE` (WP03)
+- [ ] T027 Assert NFR-003: changing `AGENT_INBOX_PUBLIC_URL` leaves `name` unchanged, and two addresses reaching one hub report the same `name` (WP03)
 
 ### Implementation Notes
 
@@ -241,6 +249,11 @@ description are set and reads exactly as today where they are not.
 **Prompt**: `tasks/WP05-federation-gate-and-prompt.md`
 **Requirement Refs**: FR-006, FR-010
 
+**Deferred with the switch**: the spec's *renaming back to `local` with federation on* row
+is out of scope here and recorded as such in `spec.md`. This package ships no federation
+state, so there is nothing for that rule to act on; it belongs to the mission that owns the
+switch.
+
 ### Included Subtasks
 
 - [ ] T022 Implement the gate in one place: federation cannot be *enabled* while `name` is `local`, and the refusal explains why (WP05)
@@ -248,6 +261,7 @@ description are set and reads exactly as today where they are not.
 - [ ] T024 Introduce the hub by `title` and `description` in `src/agent_inbox/prompts.py` where they are set (WP05)
 - [ ] T025 Verify the prompt reads correctly when both are absent — that is every hub in existence today (WP05)
 - [ ] T026 Update the README, the admin runbook, and this mission's record (WP05)
+- [ ] T028 Run the outside-model review on the finished mission — one narrow question, `codex exec` under a hard alarm, findings reproduced before acting (WP05)
 
 ### Implementation Notes
 

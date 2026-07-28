@@ -211,6 +211,33 @@ spec-kitty agent action implement WP05 --agent <name>
      too, and a stale doc outlives a stale comment.
 - **Do not**: document the federation switch. It does not exist.
 
+### T028 — The outside-model review, before the mission closes
+
+- **Purpose**: charter directive 4, a standing instruction from the owner that has already
+  caught two live bugs — a thread disclosure (0020) and retroactive group membership (0028),
+  the second found in minutes by a reviewer writing its own probes.
+- **Files**: none — this produces a finding list, not a diff.
+- **Steps**:
+  1. Run it **last**, once WP01–WP05 are green. A review of half-built work reports on the
+     half.
+  2. Ask **one narrow question** naming the invariant. A broad "review this" produced
+     nothing usable in forty minutes. For this mission the question is the mission's own
+     highest risk:
+
+     > *Can an operator's stored hub name be lost or silently replaced — by an environment
+     > variable, a restart, a write to `PUT /hub`, or any ordering of those?*
+
+  3. Invoke with a hard lid and closed stdin, as the charter specifies:
+
+     ```bash
+     perl -e 'alarm 300; exec @ARGV' codex exec "<question>" < /dev/null
+     ```
+
+  4. **Treat findings as leads, not verdicts.** Reproduce independently before acting. Record
+     what was asked, what came back, and what reproduced.
+- **Why it is a subtask**: because it is a standing instruction that nothing in the task
+  breakdown represented, and an instruction nobody owns is one that gets skipped.
+
 ## Test Strategy
 
 `pytest`, in `tests/test_hub_identity.py`.
@@ -233,7 +260,10 @@ The two tests that matter:
 - [ ] With both absent, the prompt is unchanged — asserted against current output.
 - [ ] The description cannot read as instruction.
 - [ ] `README.md` and `doc/runbook/admin.md` describe the three settings and precedence.
-- [ ] `ruff`, `pyright` and `pytest` pass.
+- [ ] The outside-model review has run on the finished mission, with its question, its
+      findings, and what reproduced all recorded.
+- [ ] All four charter gates pass: `uv run pytest`, `uv run ruff check`,
+      `uv run ruff format --check`, `uv run pyright`.
 
 ## Risks
 

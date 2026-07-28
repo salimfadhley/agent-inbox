@@ -212,7 +212,8 @@ chose. T010 step 4 is the guard against it.
 - [ ] Validation runs at writes only.
 - [ ] A hub with a now-invalid configured name starts, asserted, with the premise
       established.
-- [ ] `ruff`, `pyright` and `pytest` pass.
+- [ ] All four charter gates pass: `uv run pytest`, `uv run ruff check`,
+      `uv run ruff format --check`, `uv run pyright`.
 
 ## Risks
 

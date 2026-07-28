@@ -143,12 +143,17 @@ spec-kitty agent action implement WP03 --agent <name>
 - **Steps**:
   1. Return each of the three fields as `{value, source, variable}` per
      `contracts/hub-settings.md`. `variable` appears only when `source` is `environment`.
-  2. Decide the read gate deliberately and record why. The descriptor at `GET /` is public;
-     this route exposes *how the deployment is configured*, which is closer to
-     administrative. Gating it with the operator dependency is the conservative choice and
-     matches `revoke_token`'s neighbourhood. If you gate it differently, say so in a comment
-     — an unexplained exemption in this file has already had to be re-derived once.
-  3. Never return the value of a secret. These three are not secrets, but the shape invites
+  2. **Operator-gated**, as the contract states. The descriptor at `GET /` is public, but
+     this route exposes *how the deployment is configured*, which is administrative — so it
+     sits in `revoke_token`'s neighbourhood, behind `provide_operator`. This is settled; do
+     not re-decide it. If you believe it is wrong, change the contract first and say why,
+     because an unexplained exemption in this file has already had to be re-derived once.
+  3. An unset `title` or `description` is `"value": null` with `"source": "default"` here,
+     while `GET /` omits it entirely. The console needs to know the field exists and is
+     unset; a reader of the descriptor does not. A field an operator deliberately cleared to
+     `""` is `stored` with an empty value — that is what FR-009's "may be empty" means, and
+     it must stay distinguishable from never-set.
+  4. Never return the value of a secret. These three are not secrets, but the shape invites
      reuse; make it clear in the docstring that this route reports configuration, not
      credentials.
 - **Parallel**: can be written alongside T011.
@@ -212,6 +217,23 @@ spec-kitty agent action implement WP03 --agent <name>
      merely as "an error"**, with the variable named in the body.
   6. `PUT /hub` with `The Salt Club` — `422`, with WP02's message.
   7. `PUT /hub` on an unauthenticating hub — succeeds, matching `_gate`'s existing posture.
+### T027 — Assert that identity survives the address
+
+- **Purpose**: NFR-003, and the mission's headline claim. Untested, it is just a sentence.
+- **Files**: `tests/test_api.py`
+- **Steps**:
+  1. Set a `name`, read `GET /`, then change `AGENT_INBOX_PUBLIC_URL` and read it again.
+     `id` changes; `name` does not.
+  2. Request the descriptor by two different addresses that reach the same hub, and assert
+     both report the same `name`. This is the exact confusion that prompted the mission —
+     two agents reaching one hub by different addresses and concluding they were on
+     different hubs.
+  3. Assert `name` is unchanged **in the store**, not merely in the response. An identity
+     that survives a re-read but not a restart has not survived.
+- **Why this is its own subtask**: NFR-003 was mapped to this package with nothing asserting
+  it. A requirement whose only evidence is that someone believed it is the shape this
+  project has learned to distrust.
+
 - **Establish the premise**: in test 5, assert the field really is environment-governed
   before asserting the refusal. A `409` returned for the wrong reason passes an unexamined
   test.
@@ -233,7 +255,10 @@ repo was invisible at the exception layer and obvious at the wire.
 - [ ] `422` for an invalid name, carrying WP02's message.
 - [ ] Both codes are in `STATUS_BY_CODE` explicitly.
 - [ ] An agent device token cannot reach the write — asserted with a real token.
-- [ ] `ruff`, `pyright` and `pytest` pass.
+- [ ] Changing the public URL leaves `name` unchanged, in the response and in the store.
+- [ ] Two addresses reaching one hub report the same `name`.
+- [ ] All four charter gates pass: `uv run pytest`, `uv run ruff check`,
+      `uv run ruff format --check`, `uv run pyright`.
 
 ## Risks
 

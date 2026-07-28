@@ -143,9 +143,14 @@ spec-kitty agent action implement WP04 --agent <name>
   2. Do not read environment variables in the console, and do not reconstruct the precedence
      rule here. If the console computes which source won, there are two implementations of
      one rule and they will disagree.
-  3. Render an absent `title` or `description` as an empty field, not as the string
-     `"None"`. Both are legitimately empty on every hub today.
-  4. Label the fields so the distinction the mission exists to make is visible: `name` is
+  3. An unset `title` or `description` arrives as `"value": null` with `"source":
+     "default"`. Render it as an empty field — never as the string `"None"`, and never as
+     the word "default". Both are unset on every hub today, so this is the common rendering,
+     not the edge case.
+  4. A field an operator deliberately cleared arrives as `stored` with an empty value. It
+     also renders empty. The two look the same to the operator and that is correct; what
+     matters is that the console does not turn one into the other on submit.
+  5. Label the fields so the distinction the mission exists to make is visible: `name` is
      the `@hub` part of an address; `title` is a display name; `description` is prose. The
      public URL is **not** on this page — it is an address, set by the deployment, and
      putting it here would re-conflate the two things being separated.
@@ -220,7 +225,8 @@ the string or the intent is the thing being guarded.
 - [ ] Success re-renders from the resolved state, not from the submission.
 - [ ] The page says federation itself is not built yet.
 - [ ] Tests assert both `disabled` and the variable name.
-- [ ] `ruff`, `pyright` and `pytest` pass.
+- [ ] All four charter gates pass: `uv run pytest`, `uv run ruff check`,
+      `uv run ruff format --check`, `uv run pyright`.
 
 ## Risks
 
