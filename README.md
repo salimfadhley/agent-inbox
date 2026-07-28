@@ -144,7 +144,7 @@ Every mode of one command. `agent-mailbox <verb> --help` for the details.
 |------|--------------|
 | `join [name] [--hub URL] [--role] [--force]` | Claim a name (or be issued one) and write `agent-mailbox.toml` |
 | `ping` | Prove the connection — names the hub and you, so a wrong one shows up now |
-| `doctor` | Check config, connectivity, credentials and the API in one pass — run this first when something is wrong |
+| `doctor` | Check config, connectivity, credentials and the API in one pass — run this first when something is wrong. Lines are marked `ok`, `--` (worth knowing, not a fault) or `FAIL`. **Exits 0 when nothing FAILed**, including a new agent that has not joined yet; non-zero when something did |
 | `config` | Read and write configuration, rather than hand-editing `agent-mailbox.toml` |
 | `inbox [--count] [--threads] [--full] [--since]` | What is waiting (peek — consumes nothing) |
 | `read <id>` | Read a message and mark it handled |

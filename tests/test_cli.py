@@ -543,3 +543,121 @@ class TestTheSuiteCannotSeeTheRunningAgent:
 
         monkeypatch.setenv("CODEX_HOME", "/somewhere")
         assert detect_engine() == "codex"
+
+
+class TestDoctorExitCodes:
+    """`doctor` prints `ok` / `--` / `FAIL` — green, amber, red — and the exit code
+    must agree with the markers it just showed.
+
+    It did not. The healthy first-run state of every new agent printed nothing but `ok`
+    and `--` and then exited 2, so a wake hook or provisioning script could not tell a
+    brand-new agent from an unreachable hub. Issue #2.
+    """
+
+    class _Hub:
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def hub_info(self) -> dict[str, Any]:
+            return {"name": "hub", "version": "test", "authenticated": False}
+
+        def remote_doctor(self) -> dict[str, Any]:
+            return {"you": {"token": "not needed"}, "verdict": "fine"}
+
+        def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            return {"items": []}
+
+        def ping(self) -> dict[str, Any]:
+            return {"you": "rosemary_nasrin"}
+
+    def _patch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agent_mailbox.cli.HubClient", self._Hub)
+        for var in (
+            "AGENT_MAILBOX_HUB",
+            "AGENT_MAILBOX_NAME",
+            "AGENT_INBOX_HUB",
+            "AGENT_INBOX_NAME",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_healthy_but_not_joined_exits_zero(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The whole mission. Nothing failed, so nothing should be reported as failure.
+
+        This is the state every new install passes through, and `doctor` is the first
+        command the onboarding prompt tells an agent to run.
+        """
+        monkeypatch.chdir(tmp_path)
+        self._patch(monkeypatch)
+        code = main(["doctor", "--hub", "http://hub:8081"])
+        out = capsys.readouterr()
+        assert "FAIL" not in out.out + out.err, "precondition: nothing actually failed"
+        assert code == 0, "a run with no FAIL line must not report failure"
+
+    def test_no_hub_url_still_exits_two(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A genuine blocker keeps its code. This mission changes one case, not four."""
+        monkeypatch.chdir(tmp_path)
+        self._patch(monkeypatch)
+        assert main(["doctor"]) == 2
+
+    def test_an_ambiguous_engine_still_exits_two(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://hub:8081"\n\n'
+            '[agents.claude]\nname = "rosemary_nasrin"\n\n'
+            '[agents.codex]\nname = "trevor_mahmood"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        self._patch(monkeypatch)
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        assert main(["doctor"]) == 2
+
+    def test_a_duplicate_name_clash_is_never_silenced(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """NFR-002, and the trap this fix could have walked into.
+
+        The `unique names` check reports FAIL and *keeps walking* — deliberately, since
+        the engine running now may be fine while another has its mail eaten. So a naive
+        "the not-joined case returns 0" would exit 0 with a FAIL on screen, silencing a
+        real fault. Widening success is exactly how a fix becomes the opposite defect.
+        """
+        # The current engine (claude) has NO entry, so this reaches the not-joined
+        # return — while two *other* engines clash. An earlier version of this test put
+        # claude in the file, which took the joined path instead and never exercised the
+        # line under test: it passed against the naive fix, proving nothing.
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://hub:8081"\n\n'
+            '[agents.codex]\nname = "same_name"\n\n'
+            '[agents.gemini]\nname = "same_name"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        self._patch(monkeypatch)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        code = main(["doctor"])
+        out = capsys.readouterr()
+        assert "FAIL" in out.out + out.err, "precondition: the clash must be reported"
+        assert code != 0, "a FAIL on screen must never exit 0"
+
+    def test_the_help_explains_the_markers_and_the_codes(self) -> None:
+        """FR-007. `--` is explained nowhere today, so a reader must infer it is not a
+        failure — the same inference the exit code got wrong."""
+        from click.testing import CliRunner
+
+        from agent_mailbox.cli import cli
+
+        text = CliRunner().invoke(cli, ["doctor", "--help"]).output
+        for marker in ("ok", "--", "FAIL"):
+            assert marker in text, f"help does not explain the {marker!r} marker"
+        assert "exit" in text.lower(), "help does not state the exit-code meaning"
+        assert "0" in text and "non-zero" in text.lower()

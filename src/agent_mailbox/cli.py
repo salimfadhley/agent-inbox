@@ -643,13 +643,26 @@ def _token_help(hub_url: str, name: str, path: Path) -> str:
 def doctor(ctx: click.Context, hub: str | None) -> int:
     """Check config, connectivity, credentials and the API, in that order.
 
-    Fix what it reports with `config set`, never by editing files.
-
     Several things can be wrong and they look alike from inside an agent: no config, an
     unreachable hub, a hub that answers but rejects us, and a hub that works but has not
     been told who we are. `ping` proves only the last of them. This walks the chain in
     order and stops at the first break, because a later check would only produce a
     second, more confusing error about the same cause.
+
+    Each line is marked:
+
+    \b
+      ok     this is fine
+      --     worth knowing, but not a fault — a step you have not taken yet
+      FAIL   broken; the text says what to do about it
+
+    Fix what it reports with `config set`, never by editing files.
+
+    EXIT CODE: 0 when nothing FAILed — including a brand new agent that has not joined,
+    which is the ordinary first-run state and not an error. Non-zero when something did.
+    A hub that rejects your credentials exits 1 and the other blockers exit 2, but that
+    distinction is historical and carries no defined meaning: treat any non-zero as
+    "something on this list is broken" and read the FAIL line to find out which.
     """
     ok, bad, todo = "ok  ", "FAIL", "--  "
     where = find_config() or (project_root() / CONFIG_NAME)
@@ -844,7 +857,16 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
             "only if you want one — you will be told if it is taken. Either way\n"
             f"{where} is written for you; there is no second step."
         )
-        return 2
+        # Amber, not red. Nothing failed: every check that ran passed, and the only
+        # outstanding thing is a step the caller has not taken yet. This used to return
+        # 2, directly beneath the comment above calling it a good outcome — so the
+        # command printed nothing but `ok` and `--` and then reported failure, and any
+        # script reading the code could not tell a new agent from an unreachable hub.
+        #
+        # `clashes` still decides, because that check reports and keeps walking rather
+        # than returning: a duplicate name is a real fault that has nothing to do with
+        # whether *this* engine has joined, and widening success must not swallow it.
+        return 1 if clashes else 0
 
     # 4. The API, as us. Everything above can be right while a real call still
     #    fails, and only a real call finds that out.
