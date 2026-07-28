@@ -283,10 +283,10 @@ class TestEnrolmentProvesTheAuthenticatorWorks:
         """A phone accumulates these. `agent-inbox: admin` is ambiguous the moment
         someone runs a second hub; the hub's name is what tells them apart.
         """
-        svc = AuthService(InMemoryAuthStore(), secret_key=KEY, hub_name="halob")
+        svc = AuthService(InMemoryAuthStore(), secret_key=KEY, hub_name="examplehub")
         await svc.bootstrap()
         offer = await svc.begin_enrolment("admin")
         assert "issuer=agent-inbox" in offer.provisioning_uri
         # pyotp leaves the slash literal (it double-encodes a pre-encoded
         # name), which is what authenticator apps display as the account.
-        assert "agent-inbox:halob/admin" in offer.provisioning_uri
+        assert "agent-inbox:examplehub/admin" in offer.provisioning_uri

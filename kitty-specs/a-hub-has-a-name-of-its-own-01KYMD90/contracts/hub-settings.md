@@ -48,7 +48,7 @@ Responses:
 | Status | When |
 |---|---|
 | `200` | applied; body is the updated descriptor |
-| `422` | `name` fails validation — body names the rule, in the shape `unknown_recipient` set |
+| `422` | `name` fails validation — body names the rule, using the same error envelope as `unknown_recipient` |
 | `409` | the field is fixed by the environment and cannot be changed here |
 | `401` | no operator session, on a hub that authenticates |
 
@@ -70,13 +70,20 @@ knowing why it is disabled.
   "name":        { "value": "saltclub", "source": "stored" },
   "title":       { "value": "The Salt Club", "source": "environment",
                    "variable": "AGENT_INBOX_HUB_TITLE" },
-  "description": { "value": "", "source": "default" }
+  "description": { "value": null, "source": "default" }
 }
 ```
 
 `source` is one of `environment`, `stored`, `default`. `variable` appears only for
 `environment`, and exists so the UI can name what governs the field rather than merely
 greying it.
+
+**Unset has one representation, and it is not the empty string.** On `GET /` an unset
+`title` or `description` is **omitted**; on this route it is present with `"value": null`
+and `"source": "default"`, because the console needs to know the field exists and is
+unset. An operator who deliberately clears a field to `""` is in the `stored` state with an
+empty value — distinguishable from never having set it, which is what FR-009's "may be
+empty" means. `name` is never null: it falls back to `local`.
 
 **The stored value is not disclosed when shadowed.** If the environment governs `name`,
 this reports the environment's value — the effective one. Whether the operator's stored

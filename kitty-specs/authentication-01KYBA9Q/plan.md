@@ -117,7 +117,7 @@ tests/
    `agent-mailbox.toml` and sends it as a bearer header.
 9. **ADR 0010** records the two-principal model, grace mode, and single-owner/all-admins.
 10. **Migration** documented in `quickstart.md`: deploy with `AUTH_MODE=warn`, mint tokens
-    for the agents already on halob, watch the warnings drain, set `AUTH_MODE=enforce`.
+    for the agents already on examplehub, watch the warnings drain, set `AUTH_MODE=enforce`.
 
 ## Charter Check (post-design)
 

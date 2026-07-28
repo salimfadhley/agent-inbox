@@ -921,10 +921,10 @@ def test_with_no_session_the_console_still_acts_as_itself(console: TestClient) -
 def test_the_page_says_what_application_it_is(console: TestClient) -> None:
     """A self-hosted hub answers to whatever the box is called.
 
-    "halob" tells a browser tab, a history entry or a bookmark nothing about what the
-    site is, so the application's own name goes in the title and in the documented
-    `application-name` meta. Bitwarden will not read either — it names saved items
-    after the hostname — but everything else does.
+    "examplehub" tells a browser tab, a history entry or a bookmark nothing about
+    what the site is, so the application's own name goes in the title and in the
+    documented `application-name` meta. Bitwarden will not read either — it names
+    saved items after the hostname — but everything else does.
     """
     page = console.get("/login").text
     assert '<meta name="application-name" content="agent-inbox">' in page

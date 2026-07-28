@@ -65,6 +65,7 @@ src/agent_inbox/
 ├── store.py             # MODIFIED — the same on the in-memory store; contract tests cover both
 ├── serve.py             # MODIFIED — precedence: environment over stored, and which won
 ├── naming.py            # MODIFIED — hub-name validation, reusing the agent-name rule
+├── federation.py        # NEW — the rule that `local` blocks enabling federation
 ├── api.py               # MODIFIED — title/description on GET /; an operator-gated write
 └── console.py           # MODIFIED — a Federation tab; env-fixed fields disabled
 
@@ -72,10 +73,12 @@ tests/
 ├── test_store_contract.py   # MODIFIED — settings behave the same on both stores
 ├── test_hub_settings.py     # NEW — precedence, including unset-after-override
 ├── test_api.py              # MODIFIED — descriptor fields, operator gating
-└── test_console.py          # MODIFIED — the tab, and the disabled-field rendering
+├── test_console.py          # MODIFIED — the tab, and the disabled-field rendering
+└── test_hub_identity.py     # NEW — the federation gate, and the prompt's wording
 ```
 
-**Structure Decision**: single project, no new modules. Hub settings are a property of the
+**Structure Decision**: single project, one new module — `federation.py`, which exists so
+the rule that gates federation has a home the mission that owns the switch can find. Hub settings are a property of the
 hub, so they belong in the store the hub already owns rather than in a new component.
 
 ## Complexity Tracking
@@ -148,7 +151,7 @@ hub, so they belong in the store the hub already owns rather than in a new compo
 
 - **Purpose**: federation cannot be **enabled** while the hub is called `local`.
 - **Relevant requirements**: FR-006
-- **Affected surfaces**: `console.py`, `api.py`
+- **Affected surfaces**: `federation.py`, `test_hub_identity.py`
 - **Sequencing/depends-on**: IC-03, IC-05
 - **Risks**: there is no federation to gate yet, so this is a rule with nothing behind it
   — precisely the shape `AGENTS.md` warns about. Whatever ships must be exercised by a
@@ -160,7 +163,7 @@ hub, so they belong in the store the hub already owns rather than in a new compo
 
 - **Purpose**: an arriving agent learns what the place is, not only how it authenticates.
 - **Relevant requirements**: FR-010
-- **Affected surfaces**: `prompts.py`, `test_console.py`
+- **Affected surfaces**: `prompts.py`, `test_hub_identity.py`
 - **Sequencing/depends-on**: IC-04
 - **Risks**: the prompt is the most-read document here and has twice been found asserting
   something untrue. Title and description are optional, so the wording must read correctly

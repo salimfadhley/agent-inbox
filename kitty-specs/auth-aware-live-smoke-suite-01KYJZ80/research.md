@@ -1,7 +1,7 @@
 # Research — auth-aware live smoke suite
 
 Phase 0 for `auth-aware-live-smoke-suite-01KYJZ80`. Every finding below was observed
-against running systems on 2026-07-27/28 — the deployed hub (halob) and this repository's
+against running systems on 2026-07-27/28 — the deployed hub (examplehub) and this repository's
 CI — rather than reasoned from the source. Where I reasoned instead of checking, and was
 wrong, that is recorded too, because the corrections changed the mission.
 
@@ -9,7 +9,7 @@ wrong, that is recorded too, because the corrections changed the mission.
 
 **Decision:** treat this as the root defect, not the individual failing assertions.
 
-**Evidence:** running the documented invocation against halob (`AUTH_MODE=enforce`,
+**Evidence:** running the documented invocation against examplehub (`AUTH_MODE=enforce`,
 v0.21.1) gave `5 failed, 3 passed, 3 skipped`. Every failure is the hub behaving
 correctly:
 
@@ -54,10 +54,10 @@ establishing its premise.
 
 **Decision:** the suite reads the hub's advertised mode and asserts accordingly.
 
-**Evidence:** the hub already advertises it. `GET /` on halob:
+**Evidence:** the hub already advertises it. `GET /` on examplehub:
 
 ```json
-{"name": "halob", "version": "0.22.0", "authenticated": true,
+{"name": "examplehub", "version": "0.22.0", "authenticated": true,
  "note": "This hub requires authentication: agents present a device token…"}
 ```
 

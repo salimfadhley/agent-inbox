@@ -82,7 +82,7 @@ instead, which is the wrong place for machine-readable data."*
 
 ```toml
 # agent-inbox.toml — commit this; it describes how this project joins the hub
-hub     = "http://halob.local:8080"
+hub     = "http://hub.example:8080"
 project = "goldberg"
 agent   = "claude"
 role    = "system"        # optional third address position

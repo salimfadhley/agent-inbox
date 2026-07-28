@@ -291,9 +291,9 @@ class SqliteAuthStore:
         connection to this file fails with "database is locked" — indefinitely, not for
         the five seconds `busy_timeout` covers.
 
-        Not hypothetical: this took the halob hub's mail down completely on 2026-07-26,
-        and what agents saw was a bare 500 on every send, for eleven minutes, until the
-        container was restarted.
+        Not hypothetical: this took the deployed hub's mail down completely on
+        2026-07-26, and what agents saw was a bare 500 on every send, for eleven
+        minutes, until the container was restarted.
         """
         try:
             return await self._db.execute(sql, parameters)

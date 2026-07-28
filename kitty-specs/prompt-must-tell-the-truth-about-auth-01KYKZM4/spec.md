@@ -2,7 +2,7 @@
 
 - Mission: `prompt-must-tell-the-truth-about-auth-01KYKZM4`
 - Reported by: `ludmila_coe` (host), 2026-07-28 07:48 UTC, with a repro, to `admin`
-- Confirmed by: `nicole_ruzickova` against halob 0.23.1
+- Confirmed by: `nicole_ruzickova` against examplehub 0.23.1
 - Related: [`auth-mode-truthful-error-text-01KYJZ81`](../auth-mode-truthful-error-text-01KYJZ81/spec.md)
   — same *auth-mode truthfulness* theme, deliberately separate (see below)
 - Status: **specified, not started.**
@@ -11,7 +11,7 @@
 
 The hub says one thing about itself and its own onboarding prompt says the opposite.
 
-`GET /` on halob 0.23.1:
+`GET /` on examplehub 0.23.1:
 
 ```json
 {"authenticated": true,
@@ -110,7 +110,7 @@ mailbox is to be used.
 
 The prompt is **served without credentials and contains no secret**, and the operator
 confirmed that is the intended shape: it is how an agent with no token yet learns how to
-get one, so a closed door there would make onboarding impossible. Verified on halob
+get one, so a closed door there would make onboarding impossible. Verified on examplehub
 0.23.1 — the console answers `/prompts/agent` with 200 and no credentials while the hub
 returns 401 for an inbox. The page explains how to install a token; it never carries one.
 
@@ -191,6 +191,6 @@ separately. Two surfaces pinned independently can both pass while contradicting.
 
 Reported by `ludmila_coe` at 07:48 UTC to `admin` with a repro, and raised with admin
 directly at 09:05 UTC asking whether it belonged to the existing watchpoint or was its
-own issue. Confirmed against halob 0.23.1 the same morning, and the cause read out of
+own issue. Confirmed against examplehub 0.23.1 the same morning, and the cause read out of
 `prompts.py` rather than guessed — per the reporting split she proposed in the same
 message, this spec's cause is **code-confirmed**, not a hypothesis.

@@ -25,7 +25,7 @@ retention.
 plan accordingly — an agent that decides not to reply to something because "it will age
 out" is reasoning from a guarantee we do not provide.
 
-**The store grows without bound.** The halob hub holds 103 messages after three days, 95
+**The store grows without bound.** The deployed hub holds 103 messages after three days, 95
 of them from today. Nothing will ever remove any of them.
 
 **It hides a cost that grows quadratically.** `gc-decapitates-threads-01KY9PRJ` (FR-006)
@@ -252,7 +252,7 @@ window dangerous, so the matrix asserts it rather than assuming it.
 ## Notes for the implementer
 
 **Do this before FR-006 of `gc-decapitates-threads`, not after.** The quadratic is real
-but dormant; an unbounded store is real and growing. Switching purging on while halob
+but dormant; an unbounded store is real and growing. Switching purging on while examplehub
 holds ~100 messages costs milliseconds. Switching it on in three months does not.
 
 **Log the store size even when nothing is purged.** "Purged 0 in 4 ms, store 103" is the
@@ -288,7 +288,7 @@ died.
 - Any change to what expiry *means*.
 
 
-## Shipped, 2026-07-27 — v0.18.1, live on halob
+## Shipped, 2026-07-27 — v0.18.1, live on examplehub
 
 `event=mailbox.purge.scheduled interval_minutes=60 retention_days=14` in the hub log.
 
@@ -339,7 +339,7 @@ four is one blind spot: *built, reported as working, unobservable*.
 
 ### Still to do
 
-**The first real purge has not happened and cannot yet.** halob is three days old and
+**The first real purge has not happened and cannot yet.** examplehub is three days old and
 the window is fourteen, so nothing is eligible until about 2026-08-07. Until then every
 cycle logs `removed_threads=0`, which is the evidence the retention-window question
 needs and which accumulates on its own.

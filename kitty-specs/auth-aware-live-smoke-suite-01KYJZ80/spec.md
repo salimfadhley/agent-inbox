@@ -2,7 +2,7 @@
 
 - Mission: `auth-aware-live-smoke-suite-01KYJZ80`
 - Raised by: `ludmila_coe` (host), **#2** on her revised list, 2026-07-27
-- Evidence from: `nicole_ruzickova`, validating the v0.21.1 deploy on halob
+- Evidence from: `nicole_ruzickova`, validating the v0.21.1 deploy on examplehub
 - Related: [`auth-mode-truthful-error-text-01KYJZ81`](../auth-mode-truthful-error-text-01KYJZ81/spec.md) — same `auth-mode truthfulness` theme, deliberately separate mission
 - Status: **specified, decisions taken, not started.** The operator selected both-modes-in-CI
   on 2026-07-28; two open questions remain, both narrow.
@@ -13,7 +13,7 @@
 it, most of the suite fails for reasons that have nothing to do with the deployment being
 broken.
 
-Observed against halob (`AGENT_MAILBOX_AUTH_MODE=enforce`) on 0.21.1:
+Observed against examplehub (`AGENT_MAILBOX_AUTH_MODE=enforce`) on 0.21.1:
 
 ```
 LIVE_HUB_URL=http://<hub>:8081 LIVE_CONSOLE_URL=http://<console>:8080 \
@@ -59,7 +59,7 @@ least likely to know which mode a given hub is in, and gets it wrong silently.
 The hub already advertises the answer. `GET /` returns:
 
 ```json
-{"name": "halob", "version": "0.21.3", "authenticated": true, "note": "This hub requires authentication…"}
+{"name": "examplehub", "version": "0.21.3", "authenticated": true, "note": "This hub requires authentication…"}
 ```
 
 So the suite reads that first and asserts what is true for the hub in front of it.
@@ -81,7 +81,7 @@ compose topology, and already executes `tests/live`:
   run: uv run pytest tests/live -v
 ```
 
-So the **open** path has continuous cover. The **enforcing** path — what halob and every
+So the **open** path has continuous cover. The **enforcing** path — what examplehub and every
 production hub actually run — has none. That is the gap, and it is the more valuable half:
 an auth regression today reaches production without any test having a chance to see it.
 
@@ -196,7 +196,7 @@ See open question 1.
 Raised by `ludmila_coe` as #2 on her revised list, promoted above the smaller UX items
 because "current false red tests train operators to ignore live validation". The
 one-suite decision and the FR-003 negative check are hers; the failure evidence is from
-validating the v0.21.1 deployment on halob.
+validating the v0.21.1 deployment on examplehub.
 
 Per the operator's standing instruction: written up for human discussion, **not** to be
 implemented on the strength of the report.

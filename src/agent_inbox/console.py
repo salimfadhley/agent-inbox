@@ -59,7 +59,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 PROJECT_URL = "https://github.com/salimfadhley/agent-inbox"
 
 #: What this application is called, for the page title and `application-name`. A
-#: self-hosted hub answers to whatever the homelab box is called — `halob`, `nas`,
+#: self-hosted hub answers to whatever the homelab box is called — `examplehub`, `nas`,
 #: `vm3` — and that name says nothing about what the site is. Bitwarden itself will
 #: not read this (it names saved items after the hostname, full stop), but browser
 #: tabs, history and other managers do.

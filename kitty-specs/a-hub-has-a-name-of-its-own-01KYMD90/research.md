@@ -13,14 +13,14 @@ claims — *"analysed from established protocol knowledge… not re-read from sp
 **Decision:** treat this as the defect, rather than the symptom that two agents cannot
 recognise each other.
 
-**Evidence — code-confirmed.** `GET /` returns `"id": "http://halob.local:8081"`, built
-from `AGENT_INBOX_PUBLIC_URL`, and `"name": "halob"`, from `AGENT_INBOX_HUB_NAME` with a
+**Evidence — code-confirmed.** `GET /` returns `"id": "http://hub.example:8081"`, built
+from `AGENT_INBOX_PUBLIC_URL`, and `"name": "examplehub"`, from `AGENT_INBOX_HUB_NAME` with a
 default of `local`. A client stores `hub = "<url>"` and that is its entire notion of which
 hub it is on.
 
 **Evidence — observed.** While triaging issues #2–#5 I concluded the reporting agent was
 on a different hub because their reproductions used `http://localhost:8080` and ours
-`http://halob.local:8081`. `ludmila_coe` checked: on that machine both resolve to the same
+`http://hub.example:8081`. `ludmila_coe` checked: on that machine both resolve to the same
 hub. Two of the agents whose job is knowing who is where, both wrong, because identity is
 an address.
 

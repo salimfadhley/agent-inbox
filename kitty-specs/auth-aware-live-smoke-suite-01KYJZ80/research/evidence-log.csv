@@ -1,5 +1,5 @@
 id,decision,finding,method,artefact,observed_utc,strength
-E-01,D-01,"tests/live against an enforcing hub gives 5 failed / 3 passed / 3 skipped; every failure is the hub behaving correctly","ran the documented invocation against halob v0.21.1",pytest output,2026-07-27T23:00Z,confirmed
+E-01,D-01,"tests/live against an enforcing hub gives 5 failed / 3 passed / 3 skipped; every failure is the hub behaving correctly","ran the documented invocation against examplehub v0.21.1",pytest output,2026-07-27T23:00Z,confirmed
 E-02,D-01,"test_the_console_serves_and_warns asserts 'does not authenticate' appears in console HTML; it is correctly absent on an authenticating hub","read the assertion and the served HTML",tests/live/test_live_smoke.py,2026-07-27T23:00Z,confirmed
 E-03,D-01,"pytest tests/live -k auth deselects all 11 tests, so the intuitive route to the LIVE_AUTH variants finds nothing",ran the selector,pytest output,2026-07-27T23:05Z,confirmed
 E-04,D-02,"CI already runs tests/live against a compose stack with LIVE_HUB_URL and LIVE_CONSOLE_URL set",read the smoke job,.github/workflows/ci.yml,2026-07-28T00:15Z,confirmed

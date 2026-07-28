@@ -33,7 +33,7 @@ tags: []
 
 Run the suite twice on every push: once against today's open compose stack, once against a
 hub started with `AGENT_MAILBOX_AUTH_MODE=enforce`. The enforcing configuration is what
-halob and every production hub run, and nothing tests it today.
+examplehub and every production hub run, and nothing tests it today.
 
 ## Subtasks
 

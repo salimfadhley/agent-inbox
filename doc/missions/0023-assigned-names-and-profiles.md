@@ -77,7 +77,7 @@ exactly as a mailing list is just an address. Individuals and groups share one n
 membership is *derived from profiles* instead of parsed out of the address. Every routing
 capability survives, and the single delivery mode from 0012 carries over untouched.
 
-**`@local` is a hub part, and deliberately so.** `lally_smith@halob` versus
+**`@local` is a hub part, and deliberately so.** `lally_smith@examplehub` versus
 `lally_smith@local` gives federation between hubs a seam for free. Keep it as a real
 component, not decoration.
 

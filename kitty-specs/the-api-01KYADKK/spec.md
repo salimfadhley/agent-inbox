@@ -135,14 +135,14 @@ old hub.
 
 ## Status, 2026-07-27 — shipped, with one requirement never built
 
-The API is live and serving the halob hub. The FR table read `proposed` throughout, long
+The API is live and serving the deployed hub. The FR table read `proposed` throughout, long
 after the work shipped. Reconciled by checking each row against the code and the running
 hub rather than assuming, which turned up two rows that are not simply "done":
 
 **FR-011 is superseded.** It requires `GET /` to advertise *that the hub is
 unauthenticated*, which was true when written and is now false: `authentication-01KYBA9Q`
 FR-012 replaced it with an honest `authenticated: true|false` reflecting the active mode,
-and halob reports `true`. The underlying intent — a hub states its own posture rather
+and examplehub reports `true`. The underlying intent — a hub states its own posture rather
 than leaving it to be discovered — is met, and met better. Left visible rather than
 edited, because someone reading this later should be able to see the model changed.
 

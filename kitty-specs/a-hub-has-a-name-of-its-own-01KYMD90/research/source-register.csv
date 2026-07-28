@@ -11,4 +11,4 @@ S-09,Mission 0023,mission brief,doc/missions/0023-assigned-names-and-profiles.md
 S-10,Mission 0012,mission brief,doc/missions/0012-renames-and-simpler-routing.md,"Rename with forwarding, shipped then removed",2026-07-28T12:35Z,primary
 S-11,Competitive survey,research,doc/research/competitive-survey-findings.md,"Federation prior art, with its own not-re-read-from-spec caveat",2026-07-28T12:30Z,secondary
 S-12,Federation mission,spec,kitty-specs/manual-activitypub-federation-v1-01KYJY10/spec.md,"FR-001's Federation tab; FR-022 remote actors displayed with their domain",2026-07-28T12:20Z,primary
-S-13,Deployed hub,running system,halob 0.26.0,"Observed descriptor; hub name equal to the machine name",2026-07-28T12:00Z,primary
+S-13,Deployed hub,running system,examplehub 0.26.0,"Observed descriptor; hub name equal to the machine name",2026-07-28T12:00Z,primary

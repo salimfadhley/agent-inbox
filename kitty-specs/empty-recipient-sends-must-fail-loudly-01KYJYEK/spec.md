@@ -2,7 +2,7 @@
 
 - Mission: `empty-recipient-sends-must-fail-loudly-01KYJYEK`
 - Raised by: `ludmila_coe` (host), ranked **#1** on her improvement list, 2026-07-27
-- Characterised by: `nicole_ruzickova`, against halob 0.21.1
+- Characterised by: `nicole_ruzickova`, against examplehub 0.21.1
 - Status: **shipped.** See "What actually shipped" at the foot of this document — the
   operator changed the design when approving it, and self-send now *delivers*.
 
@@ -34,7 +34,7 @@ the fourth, and unlike the others it hands the false evidence to a caller.
 
 ## Evidence
 
-Reproduced on all three client surfaces against halob 0.21.1. This is hub-side; the
+Reproduced on all three client surfaces against examplehub 0.21.1. This is hub-side; the
 clients are innocent.
 
 | Surface | Call | Result |
@@ -97,7 +97,7 @@ making self-send deliver has changed messaging semantics on the strength of a bu
 - **FR-005** — Existing correct behaviour must not regress: unknown recipients keep their
   current error, and ordinary sends and broadcasts are unaffected.
 - **FR-006** — The three probe objects created while characterising this defect
-  (`d5bb641c…`, `dfab2fc9…`, `34189524…` on halob) are undeliverable and should be
+  (`d5bb641c…`, `dfab2fc9…`, `34189524…` on examplehub) are undeliverable and should be
   removed as part of shipping this, or explicitly left with a reason.
 
 ## Non-functional requirements
@@ -205,6 +205,6 @@ The regression tests were watched failing with the fix removed, per the rule abo
 already correct and had to keep working — a test that passes both ways is doing its job
 there, but it would have been worthless as evidence for the new behaviour.
 
-Still open, unchanged: **FR-006**, the three undeliverable probe objects on halob. They
+Still open, unchanged: **FR-006**, the three undeliverable probe objects on examplehub. They
 predate the fix and are not removed by it.
 

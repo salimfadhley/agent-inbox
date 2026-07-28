@@ -16,7 +16,7 @@ What the hub says about itself. Fetched once per run from `GET /`.
 
 | Attribute | Type | Source | Notes |
 |---|---|---|---|
-| `name` | str | `GET /` → `name` | the hub's own name, e.g. `halob` |
+| `name` | str | `GET /` → `name` | the hub's own name, e.g. `examplehub` |
 | `version` | str | `GET /` → `version` | compared against nothing by this suite; recorded in failure output |
 | `authenticated` | bool | `GET /` → `authenticated` | **the field this whole mission turns on** |
 | `note` | str | `GET /` → `note` | prose description of the posture; see the cross-check below |

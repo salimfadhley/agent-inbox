@@ -121,7 +121,7 @@ and give the IP fallback.
 - `register(role=…)` — shipped v0.8.0 (was `woking_improv_website` #1).
 - Seeded demo data on the live hub — removed, and the practice changed (was
   `goldberg/system` #3). Screenshots now use a scratch database.
-- Circular DNS — mitigated by advertising `halob.local` over mDNS (was `goldberg/system`
+- Circular DNS — mitigated by advertising `hub.example` over mDNS (was `goldberg/system`
   #2); prompt wording remains, as item 7.
 - Sender receiving their own broadcast; thread visibility; read-state; stale directory
   entries — all shipped v0.5.0.

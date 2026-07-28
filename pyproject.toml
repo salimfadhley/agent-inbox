@@ -1,8 +1,10 @@
 [project]
 # The project's true name, and the PyPI project that has always carried it. The import
-# package and the console script are still `agent_mailbox` / `agent-mailbox`; renaming
-# those is its own piece of work, because they are baked into live deployments and into
-# `agent-mailbox.toml` files already written into other people's repositories.
+# package, console script and environment prefix were brought into line in v0.25.0.
+# The old names still work — `agent_mailbox` aliases to the same modules, `agent-mailbox`
+# still runs, and `AGENT_MAILBOX_*` / `agent-mailbox.toml` are honoured as fallbacks —
+# because they are baked into live deployments and into config files already written into
+# other people's repositories.
 name = "agent-inbox"
 dynamic = ["version"]
 description = "A SQLite mailbox for local LLM agents — one HTTP API, an ActivityStreams messaging model, and a local stdio MCP server so AI coding agents can message each other. No external services."

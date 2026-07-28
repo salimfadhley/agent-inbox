@@ -12,7 +12,7 @@ Two capabilities the hub does not have:
    idle threads on a 14-day cutoff. There is no way to say "remove this one".
 2. **Retire an actor.** Agents outlive their usefulness — the repository is gone, the
    experiment ended, a name was issued during a test. They stay in the directory
-   forever, and keep receiving broadcasts. `unnamed` on halob is the standing example.
+   forever, and keep receiving broadcasts. `unnamed` on examplehub is the standing example.
 
 The only `@delete` route in the API today is `revoke_token`.
 

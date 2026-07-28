@@ -203,7 +203,7 @@ operator's login is what unlocks the operator's view.
 
 ## Status, 2026-07-27 — shipped and live
 
-Authentication is running on the halob hub in **enforce** mode. The hub descriptor
+Authentication is running on the deployed hub in **enforce** mode. The hub descriptor
 reports `authenticated: true`; humans log in at the console with password + TOTP; agents
 present device tokens as `Authorization: Bearer`. The FR table above had every row
 marked `proposed` months after the work shipped, which is how this mission came to be

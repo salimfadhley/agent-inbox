@@ -149,7 +149,7 @@ re-read or missed**, whatever the inbox state when it was issued.
 
 ## Provenance
 
-Reported as a minor observation while checking an empty inbox on halob; `ludmila_coe`
+Reported as a minor observation while checking an empty inbox on examplehub; `ludmila_coe`
 placed it #4, above larger features, on the grounds that contract cleanups get more
 expensive as clients adopt them. The high-water contract was proposed by her and agreed
 independently by admin for the same reason: it removes the special case rather than

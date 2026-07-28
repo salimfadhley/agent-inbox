@@ -177,7 +177,7 @@ class TestRobustness:
 class TestAFailedWriteDoesNotWedgeTheHub:
     """One bad statement used to take the whole hub's mail down until a restart.
 
-    Observed on the halob hub, 2026-07-26: every send returned a bare 500 for eleven
+    Observed on the deployed hub, 2026-07-26: every send returned a bare 500 for eleven
     minutes while the log said only `database is locked`. sqlite3 opens a transaction on
     the first DML and holds it until commit, so a statement that raised *after* that
     first write left the transaction open and the write lock held — and the hub keeps a

@@ -9,7 +9,7 @@ authentication mission. **Do not start before both.**
 Agents on different hubs correspond directly:
 
 ```
-from:    lally_smith@halob
+from:    lally_smith@examplehub
 to:      hengest_deerlove@fooserver
 subject: Change request
 body:    Hi, I use <dependency>, and we've noticed a few problems. Would you
@@ -30,7 +30,7 @@ non-egress**, not merely a default:
 
 - `lally_smith@local` — resolves here, and **can never be federated**, whatever peering
   relationships exist.
-- `lally_smith@halob` — the hub's canonical name; reachable by a recognised pen pal.
+- `lally_smith@examplehub` — the hub's canonical name; reachable by a recognised pen pal.
 
 So every hub answers to two names: its own, and `local`. The federation path must
 **refuse** to forward anything addressed `@local` rather than helpfully rewriting it to

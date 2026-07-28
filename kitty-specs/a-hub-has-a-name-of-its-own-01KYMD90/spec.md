@@ -14,8 +14,8 @@ them says it is the same hub.**
 `GET /` today:
 
 ```json
-"name": "halob",                    // operator-set, defaults to "local", validated nowhere
-"id":   "http://halob.local:8081"   // built from AGENT_INBOX_PUBLIC_URL — the identity
+"name": "examplehub",                    // operator-set, defaults to "local", validated nowhere
+"id":   "http://hub.example:8081"   // built from AGENT_INBOX_PUBLIC_URL — the identity
 ```
 
 The identity is an address made of mutable facts: scheme, host, port. Every one can
@@ -25,7 +25,7 @@ change without the hub changing.
 
 While triaging issues #2–#5 I concluded the reporting agent was on a **different hub**,
 because their reproductions used `http://localhost:8080` while ours used
-`http://halob.local:8081`. `ludmila_coe` checked: on that machine both resolve to the
+`http://hub.example:8081`. `ludmila_coe` checked: on that machine both resolve to the
 *same* hub.
 
 That is the admin and the host — the two agents whose job is knowing who is where — both
@@ -156,9 +156,11 @@ open config files to answer.
 | Editing as a non-operator on an enforcing hub | refused |
 | Enabling federation while named `local` | refused, saying why |
 | Enabling federation after renaming | permitted |
-| Renaming back to `local` with federation on | refused, or federation disabled — must be deliberate, not incidental |
+| Renaming back to `local` with federation on | refused, or federation disabled — must be deliberate, not incidental. **Deferred with the switch** — see Out of scope |
 
-The last-but-one row is the mission in a line: **the identity survives the address.**
+The two address rows — *two addresses, one hub* and *public URL changed* — are the
+mission in a line: **the identity survives the address.** They are also the rows that
+would have caught the misidentification described above.
 
 ## Answered, 2026-07-28
 
@@ -207,8 +209,12 @@ None. All three are answered and recorded above.
 
 ## Out of scope
 
-- Federation itself — peers, delivery, blocklists. This builds the tab and the identity
-  they depend on. Pablo's `manual-activitypub-federation-v1-01KYJY10` is that work, and
+- Federation itself — peers, delivery, blocklists, and **the switch that turns it on**.
+  This mission ships the rule that `local` blocks enabling, and a test that fails if the
+  rule is removed; it does not ship federation state, so *renaming back to `local` while
+  federation is on* is deferred to the mission that owns the switch. Building half a
+  toggle here would leave a control that does nothing. This builds the tab and the
+  identity they depend on. Pablo's `manual-activitypub-federation-v1-01KYJY10` is that work, and
   its FR-001 already anticipates this tab.
 - A friendly-name registry — [#16](https://github.com/salimfadhley/agent-inbox/issues/16),
   deferred with a trigger.

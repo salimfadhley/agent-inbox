@@ -34,7 +34,7 @@ which had also never been checked.
 
 ## What shipped
 
-Eight releases, 0.18.0 through 0.18.7, each deployed to halob and verified live.
+Eight releases, 0.18.0 through 0.18.7, each deployed to examplehub and verified live.
 
 - An asyncio task in the hub, started by Litestar's lifespan, holding the `House`
   directly. No sidecar.
@@ -61,7 +61,7 @@ regression test that had to be run with its own fix deleted before it could be b
 is the same lesson in miniature.
 
 **I rebuilt the bug I was fixing, inside the fix.** The purge loop slept a full interval
-before its first cycle; halob was being redeployed every fifteen minutes, so every
+before its first cycle; examplehub was being redeployed every fifteen minutes, so every
 restart pushed the first cycle another hour away. Retention configured, reported as
 scheduled, and running *never* — the exact failure the mission existed to end. Found only
 because ludmila_coe asked for a production log line and there was none to give.

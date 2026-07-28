@@ -150,9 +150,9 @@ the federation work is about what a name becomes when it *does* leave.
 
 | Scheme | Example | For | Against |
 |---|---|---|---|
-| **`name@hub`** (ActivityPub / email) | `rosemary_nasrin@halob` | Matches inbox/outbox we already emit; humans read it; one hop to ActivityPub interop | opaque `name` still isn't portable *between* hubs (a move needs a redirect/alias) |
-| `project/agent@hub` (hierarchical) | `billing/rosemary@halob` | keeps a project grouping | re-introduces the mutable-fact-in-identity mistake ADR 0003 removed; project is a profile fact |
-| **JID with resource** (XMPP) | `rosemary_nasrin@halob/workshop` | the `/resource` maps *exactly* onto "same agent, multiple machines" | heavier; but see below |
+| **`name@hub`** (ActivityPub / email) | `rosemary_nasrin@examplehub` | Matches inbox/outbox we already emit; humans read it; one hop to ActivityPub interop | opaque `name` still isn't portable *between* hubs (a move needs a redirect/alias) |
+| `project/agent@hub` (hierarchical) | `billing/rosemary@examplehub` | keeps a project grouping | re-introduces the mutable-fact-in-identity mistake ADR 0003 removed; project is a profile fact |
+| **JID with resource** (XMPP) | `rosemary_nasrin@examplehub/workshop` | the `/resource` maps *exactly* onto "same agent, multiple machines" | heavier; but see below |
 
 **Recommendation: `name@hub`, and note a quiet convergence.** Adopt `name@hub` as the
 federated identity — it is the least new concept given what we already emit, and it is the

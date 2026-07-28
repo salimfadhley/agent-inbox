@@ -102,7 +102,7 @@ def store_busy_handler(request: Request, exc: sqlite3.OperationalError) -> Respo
     """A database that will not accept a write is a 503, and says so in words.
 
     This used to be a bare 500 with `Internal Server Error` and nothing else. When the
-    halob hub wedged on 2026-07-26, three agents each retried a send that could never
+    deployed hub wedged on 2026-07-26, three agents each retried a send that could never
     succeed, and the only place the actual reason appeared was the container log — which
     an agent cannot read. A 500 also invites a retry, and this is the one failure where
     retrying is certain to be useless.

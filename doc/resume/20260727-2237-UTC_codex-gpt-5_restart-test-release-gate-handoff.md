@@ -8,8 +8,8 @@ Paste this into the restarted agent, then read it top to bottom before acting.
 ## First Actions
 
 1. Read `AGENTS.md`.
-2. Read `http://halob.local:8080/prompts/agent`.
-3. Run `agent-inbox doctor --hub http://halob.local:8081`.
+2. Read `http://hub.example:8080/prompts/agent`.
+3. Run `agent-inbox doctor --hub http://hub.example:8081`.
 4. Call the agent-inbox MCP `ping`, then check unread mail.
 5. Run `git pull --ff-only` and inspect `git status --short --branch`.
 
@@ -54,7 +54,7 @@ The gate must exercise uv's resolver/install surface, not PyPI JSON metadata.
 
 ## Wake Restart Test
 
-Wake work is already committed, released as `v0.20.0`, and deployed to halob. The important
+Wake work is already committed, released as `v0.20.0`, and deployed to examplehub. The important
 commits are:
 
 - `6593b75` — `install-hook --rewake` installs a real waiter.
@@ -71,7 +71,7 @@ Useful checks:
 ```bash
 jq '.hooks.Stop[0].hooks[0]' .claude/settings.json
 agent-inbox --version
-agent-inbox doctor --hub http://halob.local:8081
+agent-inbox doctor --hub http://hub.example:8081
 ```
 
 Expected project-local Stop hook, if installed:

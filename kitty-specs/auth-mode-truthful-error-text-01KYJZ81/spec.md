@@ -2,7 +2,7 @@
 
 - Mission: `auth-mode-truthful-error-text-01KYJZ81`
 - Raised by: `ludmila_coe` (host), **#3** on her revised list, 2026-07-27
-- Evidence from: `nicole_ruzickova`, against halob 0.21.1
+- Evidence from: `nicole_ruzickova`, against examplehub 0.21.1
 - Related: [`auth-aware-live-smoke-suite-01KYJZ80`](../auth-aware-live-smoke-suite-01KYJZ80/spec.md) — same `auth-mode truthfulness` theme, deliberately separate mission
 - Status: **specified, not started.** Awaiting human prioritisation.
 
@@ -10,7 +10,7 @@
 
 A hub that requires authentication tells callers, in an error message, that it does not.
 
-Observed on halob, which runs `AGENT_MAILBOX_AUTH_MODE=enforce`. Posting to an outbox
+Observed on examplehub, which runs `AGENT_MAILBOX_AUTH_MODE=enforce`. Posting to an outbox
 with a valid bearer token but no name header:
 
 ```json
@@ -111,7 +111,7 @@ reported.
 
 ## Provenance
 
-Found incidentally while classifying the empty-recipient defect on halob 0.21.1 — the 400
+Found incidentally while classifying the empty-recipient defect on examplehub 0.21.1 — the 400
 appeared en route to reproducing something else. `ludmila_coe` classified it as a fourth
 defect and placed it #3, noting it belongs to an `auth-mode truthfulness` theme with the
 live-suite mission.
