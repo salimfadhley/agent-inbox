@@ -241,6 +241,7 @@ The hub reads its settings from the environment, which is a container's contract
 | `AGENT_MAILBOX_RETENTION_DAYS` | `14` | Idle days before a thread expires |
 | `AGENT_MAILBOX_AUTH_MODE` | `off` | `off`, `warn` or `enforce` |
 | `AGENT_MAILBOX_SECRET_KEY` | *(generated)* | Set a stable key or 2FA enrolments will not survive a restart |
+| `AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` | *(none)* | **Setup only.** The first admin password, for a hub built unattended. See below |
 | `AGENT_MAILBOX_LOGIN_MAX_FAILURES` / `_LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Brute-force lockout |
 | `AGENT_MAILBOX_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` behind a reverse proxy |
 
@@ -250,6 +251,30 @@ Clients read `AGENT_MAILBOX_HUB` and `AGENT_MAILBOX_NAME`, but should not need t
 Authentication is single-owner — every human is an admin, logging in with a password
 plus a phone authenticator, and each agent gets its own revocable device token. Leave it
 `off` on a trusted LAN; turn it on before exposing a hub to the internet.
+
+### Getting into a hub you have just built
+
+A new hub prints its admin password to the log, once per boot, until somebody actually
+enrols:
+
+```
+initial admin password: <password> (change it now)
+```
+
+That prefix is a **contract**, not a log message: unattended setup has nothing else to go
+on, so `tests/test_auth_bootstrap.py` asserts it and rewording it fails a test that says
+why.
+
+When reading a container log is not practical — CI, or a scripted deployment —
+`AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` sets that first password instead, and it is never
+logged.
+
+**It is a setup-time facility, not a way to configure the admin password.** It applies
+only while the admin account has never been enrolled — the same window in which a password
+is printed at all. Once a real operator finishes enrolling, it is ignored and says so in
+the log. That is deliberate: otherwise leaving it set in a deployment would silently
+reinstate a known password on the next restart, handing the hub to anyone who had ever
+seen that value.
 
 ## Documentation
 

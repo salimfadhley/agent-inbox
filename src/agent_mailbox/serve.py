@@ -61,6 +61,12 @@ class Settings:
     #: Fernet key for encrypting TOTP secrets at rest. Needed once 2FA is
     #: enrolled; never a default (charter: no secrets in the repo).
     secret_key: str = ""
+    #: The first admin password, for a hub being set up **unattended** — CI, or a
+    #: scripted deployment — where reading it back out of a container log is not
+    #: possible. Setup-time only: it applies while the admin account has never been
+    #: enrolled, and is ignored (loudly) afterwards, so leaving it set cannot reinstate
+    #: a known password on a later restart. Not a way to configure the admin password.
+    initial_admin_password: str = ""
     #: Failed logins from one source before it is locked out for a while.
     login_max_failures: int = 5
     #: The lockout / sliding-window length, in minutes.
@@ -91,6 +97,7 @@ class Settings:
             log_level=_env("LOG_LEVEL", "INFO").upper(),
             auth_mode=auth_mode,
             secret_key=_env("SECRET_KEY", ""),
+            initial_admin_password=_env("INITIAL_ADMIN_PASSWORD", ""),
             login_max_failures=int(_env("LOGIN_MAX_FAILURES", "5")),
             login_lockout_minutes=int(_env("LOGIN_LOCKOUT_MINUTES", "15")),
             trust_proxy=_env("TRUST_PROXY", "").lower() in ("1", "true", "yes"),
@@ -187,7 +194,9 @@ def build_app(
                 "and session. Device tokens and mail are untouched. REMOVE THE FLAG "
                 "NOW — with it set, this happens on every start."
             )
-        await auth.bootstrap()  # logs a password when the table is empty or unused
+        # Logs a password when the table is empty or unused — unless the operator
+        # supplied one, in which case it is used and never logged.
+        await auth.bootstrap(config.initial_admin_password or None)
 
     async def close_store(_: Litestar) -> None:
         if auth_store is not None:

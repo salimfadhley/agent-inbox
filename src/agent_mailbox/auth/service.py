@@ -28,6 +28,19 @@ from agent_mailbox.auth.store import AuthStore
 
 logger = logging.getLogger("agent_mailbox.auth")
 
+#: **A contract, not a log message.** An unattended setup — CI standing up an enforcing
+#: hub, or an operator scripting a deployment — has no other way to learn the password
+#: of a hub it has just created, so it reads this prefix out of the container log.
+#:
+#: Changing it breaks those callers, and breaks them *badly*: the symptom is a failure
+#: to authenticate somewhere later, which sends whoever is debugging to the wrong place
+#: entirely. `tests/test_auth_bootstrap.py` asserts it, so the break happens here and
+#: says what it is.
+#:
+#: `AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` is the alternative for callers that would
+#: rather supply a password than scrape one.
+INITIAL_PASSWORD_LOG_PREFIX = "initial admin password: "
+
 #: A throwaway hash to verify against when the user does not exist, so a wrong username
 #: costs the same time as a wrong password — no user-enumeration by timing (FR-017).
 _DUMMY_HASH = secrets.hash_password("this password matches nobody")
@@ -91,11 +104,21 @@ class AuthService:
 
     # -- bootstrap ---------------------------------------------------------
 
-    async def bootstrap(self) -> str | None:
+    async def bootstrap(self, initial_password: str | None = None) -> str | None:
         """Make sure someone can get in, and say how. Returns a password if it set one.
 
         Jenkins-style: a random password, only ever stored hashed, printed to the log
         for the operator to use once.
+
+        ``initial_password`` is the operator's own choice instead of a random one — set
+        from ``AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD``, for setting a hub up
+        unattended, where reading a password back out of a log is not possible. It is a
+        **setup-time** facility and deliberately not a way to configure the admin
+        password: it applies only while the account has never been enrolled, which is
+        the same window in which a password is printed at all. Once a real operator
+        finishes enrolling, the variable does nothing — so leaving it set cannot
+        silently reinstate a known password on the next restart, and cannot be used to
+        take an account back from whoever holds it.
 
         **It keeps printing — a fresh password each boot — until that account has
         actually been set up.** Printing only at the instant of seeding was a trap:
@@ -115,7 +138,8 @@ class AuthService:
             # Someone renamed or replaced the seed account. Not ours to second-guess.
             return None
 
-        password = secrets.generate_token()
+        chosen = (initial_password or "").strip()
+        password = chosen or secrets.generate_token()
         if existing is None:
             await self._store.add_user(
                 User(
@@ -141,9 +165,33 @@ class AuthService:
                 "the admin account has never been set up — issuing a new password"
             )
         else:
+            if chosen:
+                # Say so, or an operator who left the variable set would believe it is
+                # still governing the password. It is not, and has not been since
+                # enrolment — that is the safety property, and silence about it would
+                # make the variable look like a backdoor that had merely failed.
+                logger.warning(
+                    "AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD is set but ignored: the "
+                    "admin account is already enrolled. It applies only before "
+                    "first-run enrolment. Remove it."
+                )
             return None  # set up properly; never print again
 
-        logger.warning("initial admin password: %s (change it now)", password)
+        if chosen:
+            # Never log the password itself in this branch: the operator already knows
+            # it, and it came from somewhere durable rather than from a container log.
+            logger.warning(
+                "initial admin password taken from "
+                "AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD (change it now)"
+            )
+            return password
+
+        # CONTRACT: this exact prefix is depended upon. `tests/test_auth_bootstrap.py`
+        # asserts it, because an unattended setup reads the password back out of the
+        # container log and has nothing else to go on. Reword it and that breaks — so
+        # change the test deliberately, rather than discovering it as a confusing
+        # authentication failure somewhere unrelated.
+        logger.warning("%s%s (change it now)", INITIAL_PASSWORD_LOG_PREFIX, password)
         return password
 
     async def pending_setup(self) -> str | None:
