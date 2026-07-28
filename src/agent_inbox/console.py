@@ -211,6 +211,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
         + link("/compose", "Compose")
         + link("/prompts", "Prompt")
         + link("/maintenance", "Maintenance")
+        + link("/settings", "Settings")
         + link("/account", "Account")
     )
     return f"""<!doctype html>
@@ -1508,6 +1509,113 @@ def build_console(client: HubClient) -> Litestar:
             )
         return Redirect("/", cookies=_relay_cookie(set_cookie))
 
+    def _settings_page(
+        settings: dict[str, Any], hub: dict[str, Any] | None, note: str = ""
+    ) -> str:
+        """Everything an operator configures, in sections.
+
+        A container, not a page about federation. Federation is the first section and
+        retention, expiry and the rest join it — so a section is a heading and a block,
+        and adding the next one should mean adding a block rather than reshaping this.
+        """
+        rows = []
+        for key, label, hint in (
+            (
+                "name",
+                "Hub name",
+                "The <code>@hub</code> part of an address. Lowercase "
+                "letters, digits and underscores. Not the hub's web address.",
+            ),
+            ("title", "Title", "A display name. Free text."),
+            ("description", "Description", "What this hub is for, and who runs it."),
+        ):
+            field = settings.get(key) or {}
+            value = html.escape(str(field.get("value") or ""))
+            source = str(field.get("source", "default"))
+            variable = field.get("variable")
+            if source == "environment":
+                # Shown, not offered. A greyed box with no explanation reads as broken;
+                # one naming the variable reads as governed. The variable comes from the
+                # API because a deployment may be configured through the legacy prefix,
+                # and naming the wrong one sends the operator to edit the wrong thing.
+                control = (
+                    f'<input name="{key}" value="{value}" disabled>'
+                    f'<p class="muted">Set by this deployment through '
+                    f"<code>{html.escape(str(variable))}</code>. Change it there, or "
+                    f"unset it to use the value stored here.</p>"
+                )
+            else:
+                control = f'<input name="{key}" value="{value}">'
+            rows.append(
+                f'<p><label for="{key}"><strong>{label}</strong></label><br>'
+                f'{control}<br><span class="muted">{hint}</span></p>'
+            )
+
+        version = html.escape(str(settings.get("version", "")))
+        body = (
+            "<h2>Settings</h2>"
+            f"{note}"
+            "<h3>Federation</h3>"
+            "<p class='muted'>How this hub identifies itself. Federation itself is not "
+            "built yet — these are the fields it will use, and they are worth setting "
+            "now because the hub's name appears in every address on it.</p>"
+            "<form method='post' action='/settings/save'>"
+            f'<input type="hidden" name="version" value="{version}">'
+            + "".join(rows)
+            + "<button type='submit'>Save</button></form>"
+        )
+        return _page("Settings", body, hub, "/settings")
+
+    @get("/settings", media_type=MediaType.HTML, sync_to_thread=True)
+    def settings_view(request: Request) -> Response:
+        """What this hub is configured to be."""
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call("GET", "/hub/settings", session=sid)
+        if status != 200:
+            return Response(
+                _refused(body, "the hub would not say how it is configured", hub),
+                media_type=MediaType.HTML,
+            )
+        return Response(_settings_page(body or {}, hub), media_type=MediaType.HTML)
+
+    @post("/settings/save", status_code=200, sync_to_thread=True)
+    def settings_save(request: Request, data: Form) -> Response:
+        """Save what the operator changed, and say what the hub made of it.
+
+        Governed fields are `disabled`, so a browser does not submit them — that is the
+        behaviour this relies on, deliberately rather than incidentally. The `version`
+        goes back with the write so a page rendered under different configuration is
+        refused rather than storing the deployment's value over the operator's own.
+        """
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        changes: dict[str, Any] = {
+            k: str(v) for k, v in data.items() if k in ("name", "title", "description")
+        }
+        if "version" in data:
+            changes["version"] = str(data["version"])
+        status, body, _ = client.auth_call("PUT", "/hub", changes, session=sid)
+        if status != 200:
+            detail = (body or {}).get("detail") or "the hub refused that change"
+            note = (
+                "<p class='muted'><strong>Not saved.</strong> "
+                f"{html.escape(str(detail))}</p>"
+            )
+            fresh_status, fresh, _ = client.auth_call(
+                "GET", "/hub/settings", session=sid
+            )
+            return Response(
+                _settings_page(fresh or {}, hub, note), media_type=MediaType.HTML
+            )
+        # Re-render from what the hub returned, not from what was submitted: the two
+        # differ whenever the environment governs, and showing the submission would say
+        # a change took effect when it did not.
+        return Response(
+            _settings_page(body or {}, hub, "<p class='muted'>Saved.</p>"),
+            media_type=MediaType.HTML,
+        )
+
     def _gate(request: Request) -> Response | None:
         """Require a session for the console's own pages once the hub authenticates.
 
@@ -1548,6 +1656,8 @@ def build_console(client: HubClient) -> Litestar:
             do_compose,
             maintenance,
             maintenance_purge,
+            settings_view,
+            settings_save,
             token_index,
             tokens,
             mint,

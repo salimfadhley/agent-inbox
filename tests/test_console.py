@@ -54,6 +54,11 @@ class StubHub(HubClient):
         self.operator: str | None = None
         self.acting: str | None = None
         self.purged = False
+        #: Stored hub settings, and what the environment governs. The stub mirrors the
+        #: real routes closely enough that the console's behaviour is what is tested,
+        #: not the stub's.
+        self.hub_settings: dict[str, str] = {}
+        self.governed: dict[str, str] = {}
         self.purge_preview: dict[str, Any] = {
             "threads": [
                 {
@@ -169,6 +174,55 @@ class StubHub(HubClient):
         self.calls.append(f"read:{object_id}")
         return {}
 
+    def _resolved_settings(self) -> dict[str, Any]:
+        import hashlib
+
+        out: dict[str, Any] = {}
+        for key in ("name", "title", "description"):
+            if key in self.governed:
+                out[key] = {
+                    "value": self.governed[key],
+                    "source": "environment",
+                    "variable": f"AGENT_INBOX_HUB_{key.upper()}",
+                }
+            elif key in self.hub_settings:
+                out[key] = {"value": self.hub_settings[key], "source": "stored"}
+            else:
+                out[key] = {
+                    "value": "console" if key == "name" else None,
+                    "source": "default",
+                }
+        material = "|".join(
+            f"{k}={out[k]['value']!r}:{out[k]['source']}" for k in sorted(out)
+        )
+        out["version"] = hashlib.sha256(material.encode()).hexdigest()[:16]
+        return out
+
+    def _write_settings(self, body: dict[str, Any]) -> tuple[int, Any, None]:
+        current = self._resolved_settings()
+        seen = body.get("version")
+        if seen is not None and seen != current["version"]:
+            return 409, {"detail": "these settings changed since you read them"}, None
+        for key, value in body.items():
+            if key == "version":
+                continue
+            if key not in ("name", "title", "description"):
+                return 400, {"detail": f"not a hub setting: {key}"}, None
+            if key in self.governed:
+                return (
+                    409,
+                    {"detail": f"{key} is set by AGENT_INBOX_HUB_{key.upper()}"},
+                    None,
+                )
+            if key == "name" and value and not value.islower():
+                return (
+                    422,
+                    {"detail": f"{value!r} is not a usable hub name, e.g. 'saltclub'"},
+                    None,
+                )
+            self.hub_settings[key] = str(value)
+        return 200, self._resolved_settings(), None
+
     def auth_call(
         self,
         method: str,
@@ -178,6 +232,10 @@ class StubHub(HubClient):
         session: str | None = None,
     ) -> tuple[int, Any, str | None]:
         self.calls.append(f"auth:{method}:{path}:{'sid' if session else 'nosid'}")
+        if path == "/hub/settings" and method == "GET":
+            return 200, self._resolved_settings(), None
+        if path == "/hub" and method == "PUT":
+            return self._write_settings(body or {})
         if path == "/observe/purge":
             if method == "GET":
                 return 200, dict(self.purge_preview), None
@@ -1206,3 +1264,57 @@ class TestTheFreshnessDot:
         for delta in (timedelta(minutes=1), timedelta(hours=5), timedelta(days=3)):
             _, why = _freshness((self.NOW - delta).isoformat(), self.NOW)
             assert "seen" in why
+
+
+class TestSettingsTab:
+    """Step 1 and 1.1: a Settings container, whose first section is Federation."""
+
+    def test_the_tab_is_in_the_navigation(self, console: TestClient) -> None:
+        assert "href='/settings'" in console.get("/").text
+
+    def test_it_shows_the_three_identity_fields(self, console: TestClient) -> None:
+        page = console.get("/settings").text
+        assert "Federation" in page
+        for field in ("name", "title", "description"):
+            assert f'name="{field}"' in page
+
+    def test_it_says_federation_is_not_built_yet(self, console: TestClient) -> None:
+        """A page that implies federation works is a page that lies until it does."""
+        assert "not built yet" in console.get("/settings").text
+
+    def test_saving_a_title_persists_it(self, console: TestClient) -> None:
+        version = console.get("/settings").text.split('name="version" value="')[1][:16]
+        r = console.post(
+            "/settings/save", data={"title": "The Salt Club", "version": version}
+        )
+        assert r.status_code == 200, r.text
+        assert "The Salt Club" in console.get("/settings").text
+
+    def test_a_refusal_is_shown_not_swallowed(self, console: TestClient) -> None:
+        version = console.get("/settings").text.split('name="version" value="')[1][:16]
+        r = console.post(
+            "/settings/save", data={"name": "Not A Name", "version": version}
+        )
+        assert "Not saved" in r.text
+        assert "saltclub" in r.text, "the rule should be quoted back to the operator"
+
+    def test_a_governed_field_is_shown_but_not_offered(self) -> None:
+        """A greyed box with no explanation reads as broken; one naming the variable
+        reads as governed. The variable comes from the hub, because a deployment may
+        be configured through the legacy prefix and naming the wrong one sends the
+        operator to edit something that is not in effect."""
+        client, hub = make()
+        hub.governed["name"] = "fixed-by-deployment"
+        with client as c:
+            page = c.get("/settings").text
+            assert 'name="name" value="fixed-by-deployment" disabled' in page
+            assert "AGENT_INBOX_HUB_NAME" in page
+
+    def test_a_governed_field_cannot_be_written(self) -> None:
+        client, hub = make()
+        hub.governed["title"] = "Set By Deployment"
+        with client as c:
+            version = c.get("/settings").text.split('name="version" value="')[1][:16]
+            r = c.post("/settings/save", data={"title": "Sneaky", "version": version})
+            assert "Not saved" in r.text
+            assert hub.hub_settings.get("title") is None
