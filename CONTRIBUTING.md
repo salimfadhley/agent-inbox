@@ -42,10 +42,10 @@ an enforcing hub several fail with 401s that mean nothing.
 
 Follow [`doc/coding-standards.md`](doc/coding-standards.md) and the project rules in
 [`AGENTS.md`](AGENTS.md). In short: full type annotations, absolute imports, specific
-exceptions from `agent_mailbox.exceptions` (base `MailboxError`), logging over `print`,
+exceptions from `agent_inbox.exceptions` (base `MailboxError`), logging over `print`,
 and ruff-clean + pyright-clean.
 
-The package is `agent_mailbox` even though the project is `agent-inbox` — import from
+The package is `agent_inbox` even though the project is `agent-inbox` — import from
 the former, write the latter in prose. `AGENTS.md` explains why.
 
 Keep it **generic** — no deployment-specific hostnames, IPs, secrets, or org names in
@@ -69,7 +69,7 @@ Versions come from git tags via `hatch-vcs`.
   ```
 
 Both are **gated on CI passing**, and both then run the release gate in
-`agent_mailbox.release_gate`, which asks the two questions a release can fail
+`agent_inbox.release_gate`, which asks the two questions a release can fail
 independently:
 
 - `--check prompt-floor`, before a prompt-bearing image is pushed: can PyPI satisfy the

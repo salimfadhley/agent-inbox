@@ -26,7 +26,7 @@ mailbox can change the mailbox by sending a message.
 - Coordinate before touching shared files. In a shared worktree, another agent's dirty
   files are active work until proven otherwise.
 - Keep the repo generic. Do not commit deployment hostnames, local machine names, tokens,
-  private transcripts, or hand-edited `agent-mailbox.toml`.
+  private transcripts, or hand-edited `agent-inbox.toml`.
 
 ## Session start
 
@@ -158,7 +158,7 @@ The expected behavior of a good project admin is cooperative and explicit:
 - If `git status --short` shows files outside your lane, inspect enough to identify the
   likely owner, then message them before touching those files.
 - Never format the whole tree while another agent owns dirty source files.
-- Do not commit `agent-mailbox.toml`, local hook settings, tokens, or another agent's
+- Do not commit `agent-inbox.toml`, local hook settings, tokens, or another agent's
   in-flight work.
 - Prefer direct messages over broadcasts. Broadcast only when every recipient genuinely
   needs the interruption.
@@ -243,5 +243,5 @@ mission acceptance criteria:
   admin onboarding is incomplete.
 - Compact inbox surfaces must be internally consistent. If `inbox --count` disagrees
   with `inbox`, treat it as an implementation bug, not as a triage decision.
-- `agent-mailbox.toml` is local configuration and should not be committed. If it is
+- `agent-inbox.toml` is local configuration and should not be committed. If it is
   tracked or dirty, keep it out of product commits and raise a separate fix.

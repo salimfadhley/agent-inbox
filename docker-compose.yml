@@ -4,53 +4,53 @@
 #
 # `:latest` is only ever an official release (a v* tag) — a plain merge to main
 # publishes `:edge`, never `:latest` — so `pull` here always brings a released build,
-# not an in-progress one. Pin AGENT_MAILBOX_VERSION to a specific release (e.g. 0.2.0)
+# not an in-progress one. Pin AGENT_INBOX_VERSION to a specific release (e.g. 0.2.0)
 # when you want to control exactly what runs.
 #
 # Two services from ONE image (they are the same program, run in two modes):
-#   agent-mailbox  — the hub. Owns the SQLite file on a named volume. The only stateful
+#   agent-inbox    — the hub. Owns the SQLite file on a named volume. The only stateful
 #                    part; the only thing with a volume.
 #   console        — the human web UI. A client. No volume, no database, no credential —
 #                    it reads the hub over HTTP like any other client and cannot reach
 #                    the store even if it wanted to (nothing is mounted). Remove it and
 #                    the hub is untouched.
 #
-# Set AGENT_MAILBOX_PUBLIC_URL to how agents actually reach the hub from where THEY run
+# Set AGENT_INBOX_PUBLIC_URL to how agents actually reach the hub from where THEY run
 # (its LAN name/IP and port). It is baked into every identifier and prompt the hub hands
 # out, so a wrong value sends agents nowhere.
 
 services:
-  agent-mailbox:
-    image: salimfadhley/agent-inbox:${AGENT_MAILBOX_VERSION:-latest}
+  agent-inbox:
+    image: salimfadhley/agent-inbox:${AGENT_INBOX_VERSION:-latest}
     # To build locally instead of pulling, comment out `image:` and uncomment:
     # build: .
     restart: unless-stopped
     ports:
-      - "${AGENT_MAILBOX_PORT:-8080}:8080"
+      - "${AGENT_INBOX_PORT:-8080}:8080"
     environment:
       # No default that pretends to know the answer: the hub cannot guess how it is
       # reached, and a wrong value would be wrong in every identifier it emits. localhost
       # is the honest fallback; override it for a real deployment.
-      AGENT_MAILBOX_PUBLIC_URL: ${AGENT_MAILBOX_PUBLIC_URL:-http://localhost:8080}
-      AGENT_MAILBOX_HUB_NAME: ${AGENT_MAILBOX_HUB_NAME:-agent-mailbox}
+      AGENT_INBOX_PUBLIC_URL: ${AGENT_INBOX_PUBLIC_URL:-http://localhost:8080}
+      AGENT_INBOX_HUB_NAME: ${AGENT_INBOX_HUB_NAME:-agent-inbox}
       # Authentication (ADR 0010). Default off = trust the header (LAN). Migrate a live
       # hub off -> warn -> enforce. SECRET_KEY encrypts TOTP secrets at rest and must be
       # stable across restarts; supply it from the environment, never the repo.
-      AGENT_MAILBOX_AUTH_MODE: ${AGENT_MAILBOX_AUTH_MODE:-off}
-      AGENT_MAILBOX_SECRET_KEY: ${AGENT_MAILBOX_SECRET_KEY:-}
+      AGENT_INBOX_AUTH_MODE: ${AGENT_INBOX_AUTH_MODE:-off}
+      AGENT_INBOX_SECRET_KEY: ${AGENT_INBOX_SECRET_KEY:-}
     volumes:
       - agent-mailbox-data:/data
 
   console:
-    image: salimfadhley/agent-inbox:${AGENT_MAILBOX_VERSION:-latest}
-    # ENTRYPOINT is `agent-mailbox`; this selects the console mode instead of `serve`.
+    image: salimfadhley/agent-inbox:${AGENT_INBOX_VERSION:-latest}
+    # ENTRYPOINT is `agent-inbox`; this selects the console mode instead of `serve`.
     command: ["console", "--host", "0.0.0.0", "--port", "8090"]
     restart: unless-stopped
     depends_on:
       # Wait for the hub's healthcheck, not just for its container to exist. The console
       # claims its own mailbox once at startup; if it raced ahead of a not-yet-ready hub
       # that join would quietly fail and compose/inbox would not work until a restart.
-      agent-mailbox:
+      agent-inbox:
         condition: service_healthy
     ports:
       - "${CONSOLE_PORT:-8082}:8090"
@@ -59,12 +59,14 @@ services:
       # still advertises the hub's *public* id on its prompt page, not this internal
       # address — that distinction is deliberate (a sidecar reaches the hub by a name no
       # agent could use).
-      AGENT_MAILBOX_HUB: http://agent-mailbox:8080
-      AGENT_MAILBOX_NAME: console
+      AGENT_INBOX_HUB: http://agent-inbox:8080
+      AGENT_INBOX_NAME: console
       # The image's healthcheck defaults to the hub's port. This mode listens on 8090,
       # so without this the console reports `unhealthy` forever while serving perfectly.
-      AGENT_MAILBOX_HEALTH_PORT: "8090"
+      AGENT_INBOX_HEALTH_PORT: "8090"
     # No volume. That absence is the guarantee: the console cannot touch the store.
 
 volumes:
+  # NOT renamed with everything else: this names live data. A new name
+  # would create an empty volume and leave the mail in the old one.
   agent-mailbox-data:

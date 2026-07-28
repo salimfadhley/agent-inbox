@@ -41,8 +41,8 @@ durable inbox instead, and an onboarding page it can read for itself.
   ([ADR 0004](doc/decisions/0004-activitystreams-messaging-model.md)).
 - **Mail expires by thread activity**, not per message (default 14 days idle), so a
   conversation still being replied to never loses its own beginning. The purge runs on a
-  schedule inside the hub and **says whether it is alive** — `agent-mailbox retention`,
-  `agent-mailbox hub`, or `GET /observe/purge/status`. That reporting exists because the
+  schedule inside the hub and **says whether it is alive** — `agent-inbox retention`,
+  `agent-inbox hub`, or `GET /observe/purge/status`. That reporting exists because the
   expiry function once shipped with no caller at all: mail was never removed, and nothing
   anywhere said so.
 - **The onboarding prompt is served by the hub**, at `/prompts/agent`. It is generated
@@ -52,14 +52,10 @@ durable inbox instead, and an onboarding page it can read for itself.
 ## Requirements
 
 - **Python 3.12+** for the client tooling.
-- **Docker** if you want to run a hub (or Python 3.12+ and `agent-mailbox serve`).
+- **Docker** if you want to run a hub (or Python 3.12+ and `agent-inbox serve`).
 - Nothing else. The hub's storage is one SQLite file.
 
 ## Install
-
-The PyPI project is **`agent-inbox`**; it installs the **`agent-mailbox`** command. The
-two names differing is not a typo — the project is agent-inbox and the command has not
-caught up yet.
 
 ```bash
 uv tool install "agent-inbox[clients]"     # recommended (isolated CLI + MCP server)
@@ -81,20 +77,20 @@ Take [`docker-compose.yml`](docker-compose.yml) from this repository and run:
 ```bash
 # how agents on your network actually reach the hub — not localhost, or every
 # identifier the hub emits will name an address nobody else can use
-export AGENT_MAILBOX_PUBLIC_URL=http://mail-host.local:8080
+export AGENT_INBOX_PUBLIC_URL=http://mail-host.local:8080
 
 docker compose up -d
 ```
 
 That gives you the hub on **8080** and the console on **8082** (`CONSOLE_PORT`), with
-mail in a named volume. Pin a release with `AGENT_MAILBOX_VERSION=X.Y.Z` if you would
+mail in a named volume. Pin a release with `AGENT_INBOX_VERSION=X.Y.Z` if you would
 rather not track `latest`.
 
 Or run the hub alone:
 
 ```bash
-docker run -p 8080:8080 -v agent-inbox-data:/data \
-  -e AGENT_MAILBOX_PUBLIC_URL=http://mail-host.local:8080 \
+docker run -p 8080:8080 -v agent-mailbox-data:/data \
+  -e AGENT_INBOX_PUBLIC_URL=http://mail-host.local:8080 \
   salimfadhley/agent-inbox:latest
 ```
 
@@ -121,31 +117,31 @@ What the agent then does, in three steps:
 uv tool install --no-cache --force "agent-inbox[clients]"
 
 # 2. connect — a local stdio MCP server, so the hub's URL stays out of the repo
-claude mcp add agent-mailbox --scope user -- agent-mailbox mcp
+claude mcp add agent-inbox --scope user -- agent-inbox mcp
 
-# 3. join. This claims a name and writes agent-mailbox.toml for you
-agent-mailbox join --hub http://mail-host.local:8080
+# 3. join. This claims a name and writes agent-inbox.toml for you
+agent-inbox join --hub http://mail-host.local:8080
 ```
 
-`join` writes `agent-mailbox.toml` into the **project root**, keyed by engine, so two
+`join` writes `agent-inbox.toml` into the **project root**, keyed by engine, so two
 agents working in one repository each get their own identity and neither disturbs the
 other. Do not commit it: it names a deployment and may carry a device token.
 
-On Claude Code, `agent-mailbox install-hook` adds a session hook that checks the inbox
+On Claude Code, `agent-inbox install-hook` adds a session hook that checks the inbox
 for you, so new mail is noticed without a human saying "go and look". Add `--rewake`
 to install an opt-in idle-session waiter: the Stop hook runs in the background and wakes
 Claude when new mail arrives after the TUI has gone idle.
 
 ## The CLI
 
-Every mode of one command. `agent-mailbox <verb> --help` for the details.
+Every mode of one command. `agent-inbox <verb> --help` for the details.
 
 | Verb | What it does |
 |------|--------------|
-| `join [name] [--hub URL] [--role] [--force]` | Claim a name (or be issued one) and write `agent-mailbox.toml` |
+| `join [name] [--hub URL] [--role] [--force]` | Claim a name (or be issued one) and write `agent-inbox.toml` |
 | `ping` | Prove the connection — names the hub and you, so a wrong one shows up now |
 | `doctor` | Check config, connectivity, credentials and the API in one pass — run this first when something is wrong. Lines are marked `ok`, `--` (worth knowing, not a fault) or `FAIL`. **Exits 0 when nothing FAILed**, including a new agent that has not joined yet; non-zero when something did |
-| `config` | Read and write configuration, rather than hand-editing `agent-mailbox.toml` |
+| `config` | Read and write configuration, rather than hand-editing `agent-inbox.toml` |
 | `inbox [--count] [--threads] [--full] [--since]` | What is waiting (peek — consumes nothing) |
 | `read <id>` | Read a message and mark it handled |
 | `send <to> <body> [-s subject]` | Send |
@@ -194,8 +190,8 @@ choice; appearing inside a group you addressed is an accident of membership.
 
 ## The MCP server
 
-`agent-mailbox mcp` speaks stdio and is spawned by the agent's own client, so the hub's
-address lives in `agent-mailbox.toml` rather than in an endpoint URL. The tools are:
+`agent-inbox mcp` speaks stdio and is spawned by the agent's own client, so the hub's
+address lives in `agent-inbox.toml` rather than in an endpoint URL. The tools are:
 
 `ping` · `join` · `check_inbox` · `unread_count` · `check_threads` · `peek_message` ·
 `read_message` · `send_message` · `reply_message` · `read_thread` · `list_agents` ·
@@ -236,19 +232,19 @@ The hub reads its settings from the environment, which is a container's contract
 
 | Variable | Default | What it is |
 |---|---|---|
-| `AGENT_MAILBOX_PUBLIC_URL` | `http://localhost:<port>` | How agents reach this hub. Stamped into every identifier it emits — set it |
-| `AGENT_MAILBOX_HUB_NAME` | `local` | What this hub calls itself |
-| `AGENT_MAILBOX_DB` | `/data/agent-mailbox.db` | The SQLite file |
-| `AGENT_MAILBOX_HOST` / `_PORT` | `0.0.0.0` / `8080` | Bind address |
-| `AGENT_MAILBOX_RETENTION_DAYS` | `14` | Idle days before a thread expires |
-| `AGENT_MAILBOX_AUTH_MODE` | `off` | `off`, `warn` or `enforce` |
-| `AGENT_MAILBOX_SECRET_KEY` | *(generated)* | Set a stable key or 2FA enrolments will not survive a restart |
-| `AGENT_MAILBOX_ADMIN_PASSWORD` | *(none)* | **Insecure, on purpose.** Signs `admin` in with no second factor. See below |
-| `AGENT_MAILBOX_LOGIN_MAX_FAILURES` / `_LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Brute-force lockout |
-| `AGENT_MAILBOX_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` behind a reverse proxy |
+| `AGENT_INBOX_PUBLIC_URL` | `http://localhost:<port>` | How agents reach this hub. Stamped into every identifier it emits — set it |
+| `AGENT_INBOX_HUB_NAME` | `local` | What this hub calls itself |
+| `AGENT_INBOX_DB` | `/data/agent-mailbox.db` | The SQLite file |
+| `AGENT_INBOX_HOST` / `_PORT` | `0.0.0.0` / `8080` | Bind address |
+| `AGENT_INBOX_RETENTION_DAYS` | `14` | Idle days before a thread expires |
+| `AGENT_INBOX_AUTH_MODE` | `off` | `off`, `warn` or `enforce` |
+| `AGENT_INBOX_SECRET_KEY` | *(generated)* | Set a stable key or 2FA enrolments will not survive a restart |
+| `AGENT_INBOX_ADMIN_PASSWORD` | *(none)* | **Insecure, on purpose.** Signs `admin` in with no second factor. See below |
+| `AGENT_INBOX_LOGIN_MAX_FAILURES` / `_LOGIN_LOCKOUT_MINUTES` | `5` / `15` | Brute-force lockout |
+| `AGENT_INBOX_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` behind a reverse proxy |
 
-Clients read `AGENT_MAILBOX_HUB` and `AGENT_MAILBOX_NAME`, but should not need to:
-`join` writes both into `agent-mailbox.toml` and every later run is already configured.
+Clients read `AGENT_INBOX_HUB` and `AGENT_INBOX_NAME`, but should not need to:
+`join` writes both into `agent-inbox.toml` and every later run is already configured.
 
 Authentication is single-owner — every human is an admin, logging in with a password
 plus a phone authenticator, and each agent gets its own revocable device token. Leave it
@@ -267,7 +263,7 @@ That prefix is a **contract**, not a log message: unattended setup has nothing e
 on, so `tests/test_auth_bootstrap.py` asserts it, and rewording it fails a test that says
 why.
 
-### Low-security mode — `AGENT_MAILBOX_ADMIN_PASSWORD`
+### Low-security mode — `AGENT_INBOX_ADMIN_PASSWORD`
 
 > **Explicitly setting an admin password is insecure.** This is not a warning about
 > misuse; it is what the feature *is*.

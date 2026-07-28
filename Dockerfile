@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# agent-mailbox — the hub.
+# agent-inbox — the hub.
 #
 # One HTTP API in ActivityStreams, over a SQLite file. Every other surface — the CLI,
 # a local MCP server, the web console — is a client of this, not part of it, so none of
@@ -9,9 +9,9 @@
 # Storage is a single file at /data/agent-mailbox.db; mount a volume at /data so mail
 # survives restarts. No external services.
 #
-# Build:  docker build -t agent-mailbox .
+# Build:  docker build -t agent-inbox .
 # Run:    docker run -p 8080:8080 -v agent-mailbox-data:/data \
-#           -e AGENT_MAILBOX_PUBLIC_URL=http://<host>:8080 agent-mailbox
+#           -e AGENT_INBOX_PUBLIC_URL=http://<host>:8080 agent-inbox
 
 FROM python:3.12-slim AS build
 
@@ -40,11 +40,11 @@ RUN useradd --create-home --uid 10001 agentmailbox
 COPY --from=build --chown=agentmailbox:agentmailbox /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:${PATH}" \
-    AGENT_MAILBOX_HOST=0.0.0.0 \
-    AGENT_MAILBOX_PORT=8080 \
-    AGENT_MAILBOX_DB=/data/agent-mailbox.db
+    AGENT_INBOX_HOST=0.0.0.0 \
+    AGENT_INBOX_PORT=8080 \
+    AGENT_INBOX_DB=/data/agent-mailbox.db
 
-# AGENT_MAILBOX_PUBLIC_URL is deliberately not defaulted here: the hub cannot guess how
+# AGENT_INBOX_PUBLIC_URL is deliberately not defaulted here: the hub cannot guess how
 # it is reached, and a wrong answer would be baked into every identifier it emits.
 # Left unset it falls back to localhost, which is at least honest.
 
@@ -61,7 +61,7 @@ EXPOSE 8080
 # and they do not listen on the same port. Hardcoding 8080 left the console sidecar
 # permanently `unhealthy` — it serves fine on 8090, and nothing was ever wrong with it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import os,urllib.request,sys; p=os.environ.get('AGENT_MAILBOX_HEALTH_PORT') or os.environ.get('AGENT_MAILBOX_PORT') or '8080'; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health').status==200 else 1)"
+    CMD python -c "import os,urllib.request,sys; p=os.environ.get('AGENT_INBOX_HEALTH_PORT') or os.environ.get('AGENT_INBOX_PORT') or '8080'; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health').status==200 else 1)"
 
 # One command, several modes. This must track [project.scripts]: unifying the entry
 # points once broke the image because this line still named a console script that no
@@ -71,5 +71,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 # selects a different mode instead of being appended to `serve` and rejected. That is
 # what makes the console sidecar work from this same image without an --entrypoint
 # override — which is the point being made: it is the same program, run elsewhere.
-ENTRYPOINT ["agent-mailbox"]
+ENTRYPOINT ["agent-inbox"]
 CMD ["serve"]
