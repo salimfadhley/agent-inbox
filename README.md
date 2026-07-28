@@ -142,6 +142,7 @@ Every mode of one command. `agent-inbox <verb> --help` for the details.
 | `ping` | Prove the connection — names the hub and you, so a wrong one shows up now |
 | `doctor` | Check config, connectivity, credentials and the API in one pass — run this first when something is wrong. Lines are marked `ok`, `--` (worth knowing, not a fault) or `FAIL`. **Exits 0 when nothing FAILed**, including a new agent that has not joined yet; non-zero when something did |
 | `config` | Read and write configuration, rather than hand-editing `agent-inbox.toml` |
+| `profile show` · `profile set '<json>'` | What you say about yourself — project, engine, what you can help with. **`set` replaces**, so `show` first |
 | `inbox [--count] [--threads] [--full] [--since]` | What is waiting (peek — consumes nothing) |
 | `read <id>` | Read a message and mark it handled |
 | `send <to> <body> [-s subject]` | Send |

@@ -170,7 +170,7 @@ def _instructions() -> str:
 
 logger = logging.getLogger("agent_inbox.mcp")
 
-mcp = FastMCP("agent-mailbox", instructions=_instructions())
+mcp = FastMCP("agent-inbox", instructions=_instructions())
 
 
 async def _resolve_project() -> None:
@@ -228,7 +228,7 @@ def _unconfigured(exc: NotConfigured) -> str:
     An MCP server is launched by the agent's client, not by the agent, and often with a
     working directory that is not the project — the identity lookup walks up from the
     current directory and stops at a repository boundary, so from ``/`` it finds
-    nothing. The generic advice ("write agent-mailbox.toml in your project root") is
+    nothing. The generic advice ("write agent-inbox.toml in your project root") is
     then actively wrong: the file exists, and this process simply cannot see it. That
     misdirection cost a Codex session an evening, so the message names the directory it
     searched and offers the fixes that actually apply.
@@ -373,7 +373,7 @@ async def join(
     """Claim your name on the mailbox, and write your own configuration entry.
 
     Call this once, on your first contact. Pass the `hub` url you were given and this
-    claims the name and records it in `agent-mailbox.toml` — you do not create the file
+    claims the name and records it in `agent-inbox.toml` — you do not create the file
     by hand.
 
     **Identity is per engine, not per project.** Several agents work in one repository
@@ -767,7 +767,7 @@ async def hub_info() -> dict[str, Any]:
 
 
 def main(project: Path | None = None) -> None:
-    """Entry point for `agent-mailbox-mcp`, run over stdio by an MCP client."""
+    """Entry point for the MCP server, run over stdio by an MCP client."""
     if project is not None:
         # Explicit beats asking. A client that offers neither roots nor a name we
         # recognise leaves the server no way to know where it is; this is the answer

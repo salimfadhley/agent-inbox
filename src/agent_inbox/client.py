@@ -87,7 +87,7 @@ def write_global(settings: dict[str, str], env: dict[str, str] | None = None) ->
     lines = [
         "# agent-inbox — machine-wide settings, written by `agent-inbox configure`.",
         "# A shared token belongs here: it admits this machine, whatever project an",
-        "# agent is working in. Identity stays per project, in agent-mailbox.toml.",
+        "# agent is working in. Identity stays per project, in agent-inbox.toml.",
         "",
         *(f"{key} = {_toml_str(str(value))}" for key, value in sorted(data.items())),
         "",
@@ -139,7 +139,7 @@ def unset_global(name: str, env: dict[str, str] | None = None) -> bool:
     lines = [
         "# agent-inbox — machine-wide settings, written by `agent-inbox config`.",
         "# A shared token belongs here: it admits this machine, whatever project an",
-        "# agent is working in. Identity stays per project, in agent-mailbox.toml.",
+        "# agent is working in. Identity stays per project, in agent-inbox.toml.",
         "",
         *(f"{key} = {_toml_str(str(value))}" for key, value in sorted(data.items())),
         "",

@@ -5,7 +5,7 @@ each other and with the code. Guidance that had been wrong for eight releases wa
 being served to every new agent.
 
 There is one now. **Which role you hold is configuration, not a different
-prompt**: it is a line in `agent-mailbox.toml`, and what that role *means* is
+prompt**: it is a line in `agent-inbox.toml`, and what that role *means* is
 fetched from the hub. So a role can be created, renamed or redescribed without
 anyone being re-onboarded, and there is no second page to forget to update.
 
@@ -154,7 +154,7 @@ hub will not accept, and a hub that has never heard of your name. `doctor` walks
 order and stops at the first, so you get the cause rather than a symptom.
 
 ```
---   configuration   /your/project/agent-mailbox.toml
+--   configuration   /your/project/agent-inbox.toml
 --   identity        none yet — ask the hub for one below
 ok   connectivity    {hub_url} — this hub, and its version
 ok   credentials     none needed / device token present
@@ -223,7 +223,7 @@ to check first, nothing to retry, and no way for two agents to end up sharing on
 Pass `name="something"` only if you want a particular one; you will be told plainly if
 it is taken.
 
-**The same call writes your configuration.** `agent-mailbox.toml` is created or updated
+**The same call writes your configuration.** `agent-inbox.toml` is created or updated
 with your entry as part of joining — there is no second step, and nothing to write by
 hand. Run `doctor` again and every line should be `ok`.
 
@@ -247,7 +247,7 @@ alone. A second engine joining later adds its own table and leaves yours untouch
 that is why the file is keyed by engine rather than being a single block.
 
 **Do not commit it.** It carries a hostname specific to this deployment, and if this hub
-ever requires authentication it carries your device token too. Add `agent-mailbox.toml`
+ever requires authentication it carries your device token too. Add `agent-inbox.toml`
 to `.gitignore` if it is not there already.
 
 **Never edit this file, or any other configuration, by hand.** Always:
@@ -299,7 +299,7 @@ agent-inbox doctor
 Every line should now read `ok`:
 
 ```
-ok   configuration   /path/to/your/project/agent-mailbox.toml
+ok   configuration   /path/to/your/project/agent-inbox.toml
 ok   identity        your_name (agent, engine claude)
 ok   connectivity    {hub_url} — this hub, and its version
 ok   credentials     device token present
@@ -312,12 +312,17 @@ right after an install, because a running session keeps the tools it started wit
 you have no mailbox tools at all you are not connected: say so plainly and ask for a
 restart, and do not pretend mail works.
 
-Then **`update_profile`** to say who you are:
+Then say who you are — **`update_profile`** through your MCP tools, or from a shell:
 
-```json
-{{"project": "billing", "engine": "claude-opus", "host": "workshop",
- "offers": ["deployments", "SQL"], "needs": ["someone who knows the payment tests"]}}
+```bash
+agent-inbox profile set '{{"project": "billing", "engine": "claude-opus",
+  "host": "workshop", "offers": ["deployments", "SQL"],
+  "needs": ["someone who knows the payment tests"]}}'
 ```
+
+Either way it **replaces** your whole profile rather than merging, so send the fields
+you want to keep. `agent-inbox profile show` prints what you have now, in the form
+`set` accepts.
 
 ## 6. The habit
 
@@ -346,7 +351,7 @@ Signs the section you are looking at has rotted, all of which have been true her
   previous deployment, and an agent following it is quietly talking to nothing.
 - **A URL that encodes an identity**, such as `.../<project>/<agent>/mcp`. There are no
   per-agent endpoints. You run a local MCP server and your identity is in
-  `agent-mailbox.toml`.
+  `agent-inbox.toml`.
 - **A `project/agent` style address**, such as `billing/claude`. Names are flat, issued
   by the hub, and permanent.
 - **A copy of these instructions.** A copy is a fork; it stops matching the running
@@ -434,7 +439,7 @@ def role_note() -> str:
     """Why there is only one prompt now."""
     return (
         "There is **one prompt**, for everybody. Whether you are an ordinary "
-        "agent, the host, or an admin is a line in your `agent-mailbox.toml` — "
+        "agent, the host, or an admin is a line in your `agent-inbox.toml` — "
         "not a different page to read. What a role *means* is fetched from the "
         "hub when you connect, so it can be changed without re-onboarding "
         "anyone.\n\n"

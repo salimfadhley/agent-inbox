@@ -5,7 +5,7 @@ name). It runs as an MCP server for an agent, as a terminal client for a human, 
 the hub itself — and in every mode it is the thing that **owns the local
 configuration**.
 
-That ownership is the point. Nobody hand-writes ``agent-mailbox.toml``: the first time
+That ownership is the point. Nobody hand-writes ``agent-inbox.toml``: the first time
 an engine runs here it claims a name and records itself, and because the file persists,
 every later run is already configured. A second engine in the same directory gets its
 own entry and does not disturb the first. `config` is how anything in either file is
@@ -67,7 +67,7 @@ PROJECT_ONLY = ("name", "role")
 EPILOG = """\
 WHERE YOU RUN IT MATTERS. Identity is per project, so anything acting as an agent —
 join, config, doctor, ping, inbox, send, read, reply, agents, whoami, role, hub — reads
-agent-mailbox.toml from the directory you are in, searching upwards and stopping at the
+agent-inbox.toml from the directory you are in, searching upwards and stopping at the
 repository root. Run those inside the project. A shared token may live machine-wide
 (`config set --global token <token>`), because a credential admits the machine rather
 than naming an agent.
@@ -126,7 +126,7 @@ class EngineNotConfigured(click.ClickException):
 
     Distinct from EngineUnresolved on purpose: there the caller said nothing and must
     choose, here they chose and the choice does not exist. Falling through to the
-    generic "write agent-mailbox.toml in your project root" told people to create a
+    generic "write agent-inbox.toml in your project root" told people to create a
     file that was open in front of them.
     """
 
@@ -212,7 +212,7 @@ class AliasedGroup(click.Group):
     "--engine",
     "engine",
     metavar="ENGINE",
-    help="which engine's entry in agent-mailbox.toml to act as (claude, codex, …). "
+    help="which engine's entry in agent-inbox.toml to act as (claude, codex, …). "
     "An agent session is detected automatically; a human shell in a project with more "
     "than one agent must say.",
 )
@@ -566,6 +566,86 @@ def config_unset(ctx: click.Context, is_global: bool, name: str) -> int:
         return 1
     click.echo(f"unset {name}")
     return 0
+
+
+# -- profile -----------------------------------------------------------------
+
+
+def _parse_profile(raw: str) -> dict[str, Any]:
+    """A profile from JSON text, or a refusal a caller can act on.
+
+    Two refusals rather than one, because they need different fixes: text that is not
+    JSON at all, and JSON that is not an object. A list parses perfectly well and is
+    still not a profile.
+    """
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(
+            f"that is not valid JSON: {exc}. A profile looks like "
+            '\'{"project": "billing", "engine": "claude-opus"}\''
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise click.ClickException(
+            f"a profile must be a JSON object, not {type(parsed).__name__}. "
+            'It maps names to values: \'{"project": "billing"}\''
+        )
+    return parsed
+
+
+@cli.group(cls=AliasedGroup, invoke_without_command=False)
+def profile() -> None:
+    """Say who you are here — what you work on, what you can help with.
+
+    The hub asks every agent for this at onboarding. It is how another agent deciding
+    whether to write to you can tell what you are for, and it is what the roster and the
+    console overview are built from.
+
+    Free-form on purpose: your *name* is opaque and permanent, so everything descriptive
+    lives here instead, where it can change without your identity changing.
+    """
+
+
+@profile.command("show")
+@click.pass_context
+def profile_show(ctx: click.Context) -> int:
+    """Print your current profile, as the JSON `profile set` accepts.
+
+    Worth running before you set anything: setting **replaces**, so this is how you see
+    what you are about to overwrite — and its output can go straight back in.
+    """
+    client = _client(ctx)
+    _print(client.whois(client.config.name).get("profile") or {})
+    return 0
+
+
+@profile.command("set")
+@click.argument("json_text", metavar="JSON")
+@click.pass_context
+def profile_set(ctx: click.Context, json_text: str) -> int:
+    """Set your profile from a JSON object — this **replaces** the whole thing.
+
+    Not a merge: send the fields you want to keep, or they are gone. That is what the
+    hub does, and what the MCP tool does, so all three surfaces agree. `profile show`
+    prints what you have now, in the form this accepts.
+
+        agent-inbox profile set '{"project": "billing", "engine": "claude-opus"}'
+    """
+    _print(_client(ctx).update_profile(_parse_profile(json_text)))
+    return 0
+
+
+@cli.command("update-profile", hidden=True)
+@click.argument("json_text", metavar="JSON")
+@click.pass_context
+def update_profile(ctx: click.Context, json_text: str) -> int:
+    """Deprecated spelling of `profile set`, kept because the MCP tool is called this.
+
+    An agent reading `update_profile` in MCP-oriented text and trying it at a shell
+    should find the command, not a dead end that teaches it the step does not exist.
+    Hidden from `--help` so the canonical form is the one people learn.
+    """
+    return int(ctx.invoke(profile_set, json_text=json_text))
 
 
 @config.command("path")

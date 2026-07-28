@@ -209,7 +209,7 @@ def build_app(
         if auth_store is not None:
             await auth_store.__aenter__()
         logger.info(
-            "agent-mailbox serving %s as %s, storing at %s (auth: %s)",
+            "agent-inbox serving %s as %s, storing at %s (auth: %s)",
             config.public_url,
             config.hub_name,
             config.db,
@@ -247,7 +247,7 @@ def build_app(
 
 
 def main(*, reset_user_table: bool = False) -> None:
-    """Entry point for the container and for `agent-mailbox serve`.
+    """Entry point for the container and for `agent-inbox serve`.
 
     *reset_user_table* is the way back into a hub whose operator cannot log in: start
     once with it, read the fresh password out of the log, then **take it off**. It is a

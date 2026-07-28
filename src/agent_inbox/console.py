@@ -813,14 +813,14 @@ def build_console(client: HubClient) -> Litestar:
                 "repeat per project:</p>"
                 f'<pre>token = "{html.escape(secret)}"</pre>'
                 "<p>Any agent on that machine can confirm it with "
-                "<code>agent-mailbox doctor</code>.</p>"
+                "<code>agent-inbox doctor</code>.</p>"
                 if name == SHARED_ACTOR
                 else "<p>Give it to the agent and have it run:</p>"
-                f"<pre>agent-mailbox join {html.escape(name)} "
+                f"<pre>agent-inbox join {html.escape(name)} "
                 f"--token {html.escape(secret)}</pre>"
-                "<p>That writes the token into <code>agent-mailbox.toml</code> in the "
+                "<p>That writes the token into <code>agent-inbox.toml</code> in the "
                 "agent's project root, under its own engine's entry, and it is sent "
-                "automatically from then on. <code>agent-mailbox doctor</code> "
+                "automatically from then on. <code>agent-inbox doctor</code> "
                 "confirms it works.</p>"
             )
         )

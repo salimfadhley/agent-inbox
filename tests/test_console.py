@@ -24,7 +24,13 @@ import pytest
 from litestar.testing import TestClient
 
 from agent_inbox import __version__
-from agent_inbox.client import SESSION_COOKIE, ClientError, Config, HubClient
+from agent_inbox.client import (
+    CONFIG_NAME,
+    SESSION_COOKIE,
+    ClientError,
+    Config,
+    HubClient,
+)
 from agent_inbox.console import _freshness, build_console
 from agent_inbox.prompts import MINIMUM_CLIENT
 
@@ -268,7 +274,7 @@ def test_a_minted_token_is_shown_once_with_what_to_do_with_it(
     assert got.status_code == 200
     assert "secret-shown-once" in got.text
     assert "only time it can be read" in got.text
-    assert "agent-mailbox join rosemary_nasrin --token secret-shown-once" in got.text
+    assert "agent-inbox join rosemary_nasrin --token secret-shown-once" in got.text
     # and it now appears in the list, so the page reflects the mint that just happened
     assert "laptop" in got.text
 
@@ -438,7 +444,7 @@ def test_there_is_exactly_one_prompt(console: TestClient) -> None:
     # satisfy "all the same" and pin nothing at all
     assert all(r.status_code == 200 for r in got.values())
     assert len({r.text for r in got.values()}) == 1, "roles served different prompts"
-    assert "agent-mailbox.toml" in console.get("/prompts").text
+    assert CONFIG_NAME in console.get("/prompts").text
 
 
 def test_the_full_prompt_is_plain_text_at_a_role_url(console: TestClient) -> None:
@@ -492,7 +498,7 @@ def test_the_prompt_explains_the_config_file_it_writes(console: TestClient) -> N
     matters most, because it carries a deployment's hostname and may carry a token.
     """
     text = console.get("/prompts/agent").text
-    assert "agent-mailbox.toml" in text
+    assert CONFIG_NAME in text
     assert "[agents." in text, "the per-engine table is not shown"
     assert ".gitignore" in text, "the prompt does not say to keep it out of git"
 
@@ -952,12 +958,16 @@ def test_the_prompts_call_the_project_by_its_real_name(console: TestClient) -> N
         assert "**agent-mailbox** lets" not in text
 
 
-def test_the_config_filename_is_left_alone(console: TestClient) -> None:
-    """`agent-mailbox.toml` is a real filename on disk, not a name for the project.
+def test_the_prompt_names_the_real_config_filename(console: TestClient) -> None:
+    """The prompt must name the file actually written, not a name for the project.
 
-    Renaming it in prose only would send agents looking for a file that is not there.
+    Naming the wrong one sends agents looking for a file that is not there. This test
+    used to assert the old filename for exactly that reason; the file was renamed in
+    v0.25.0 and the prompt had not followed, so the test pinned the old truth. Its
+    intent is unchanged — only the filename it guards.
     """
-    assert "agent-mailbox.toml" in console.get("/prompts/agent").text
+    text = console.get("/prompts/agent").text
+    assert CONFIG_NAME in text, f"the prompt must name {CONFIG_NAME}"
 
 
 def test_a_failed_install_routes_to_doctor_rather_than_reading_as_fatal(

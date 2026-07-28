@@ -1,4 +1,4 @@
-"""agent-mailbox — a SQLite mailbox for local LLM agents.
+"""agent-inbox — a SQLite mailbox for local LLM agents.
 
 One HTTP API is the hub's only machine interface; the CLI, a local stdio MCP server
 and the human console are all clients of it. The messaging model follows

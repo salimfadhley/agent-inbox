@@ -9,6 +9,7 @@ harmless the first time, wrong as a diagnosis, and invisible without this test.
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 from typing import Any
 
@@ -724,3 +725,129 @@ class TestOutputIsAlwaysUtf8:
                 return len(text)
 
         force_utf8(Bare())  # must not raise
+
+
+class TestProfileFromTheCli:
+    """The hub tells every agent to describe itself; only MCP could do it. Issue #4.
+
+    Read and write are one package here, not a command and a nice-to-have: the write
+    REPLACES the whole profile, so a caller who cannot see the current value is being
+    asked to overwrite something they cannot read. `show` is what makes `set` safe.
+    """
+
+    class _Hub:
+        stored: dict[str, Any] = {}
+
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+            type(self).stored = dict(profile)
+            return {"preferredUsername": self.config.name, "profile": dict(profile)}
+
+        def whois(self, name: str) -> dict[str, Any]:
+            return {"preferredUsername": name, "profile": dict(type(self).stored)}
+
+    def _joined(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://hub:8081"\n\n[agents.claude]\nname = "rosemary_nasrin"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setattr("agent_inbox.cli.HubClient", self._Hub)
+        self._Hub.stored = {}
+
+    def test_a_profile_can_be_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._joined(tmp_path, monkeypatch)
+        assert main(["profile", "set", '{"project": "billing"}']) == 0
+        assert self._Hub.stored == {"project": "billing"}
+
+    def test_a_profile_can_be_read(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        self._joined(tmp_path, monkeypatch)
+        main(["profile", "set", '{"project": "billing"}'])
+        capsys.readouterr()
+        assert main(["profile", "show"]) == 0
+        assert "billing" in capsys.readouterr().out
+
+    def test_show_output_is_valid_input_to_set(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """FR-008. Otherwise `show` then edit then `set` is a retyping exercise."""
+        self._joined(tmp_path, monkeypatch)
+        original = {"project": "billing", "offers": ["python", "sql"]}
+        main(["profile", "set", json.dumps(original)])
+        capsys.readouterr()
+        main(["profile", "show"])
+        shown = capsys.readouterr().out
+        assert main(["profile", "set", shown]) == 0
+        assert self._Hub.stored == original, "a round trip must not alter the profile"
+
+    def test_setting_replaces_rather_than_merges(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Identical to MCP. Two surfaces of one API must not disagree about this."""
+        self._joined(tmp_path, monkeypatch)
+        main(["profile", "set", '{"project": "billing", "engine": "claude"}'])
+        main(["profile", "set", '{"project": "payments"}'])
+        assert self._Hub.stored == {"project": "payments"}, "omitted fields must go"
+
+    def test_malformed_json_is_named_not_a_traceback(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        self._joined(tmp_path, monkeypatch)
+        assert main(["profile", "set", "{not json"]) != 0
+        err = capsys.readouterr().err
+        assert "JSON" in err or "json" in err
+        assert "Traceback" not in err
+
+    def test_a_non_object_is_refused(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A profile is a mapping. A list parses as JSON and is still wrong."""
+        self._joined(tmp_path, monkeypatch)
+        for bad in ('["a", "b"]', '"a string"', "42"):
+            assert main(["profile", "set", bad]) != 0, f"{bad} should be refused"
+
+    def test_an_empty_object_clears_the_profile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Legitimate: replace semantics means {} is how you say 'nothing'."""
+        self._joined(tmp_path, monkeypatch)
+        main(["profile", "set", '{"project": "billing"}'])
+        assert main(["profile", "set", "{}"]) == 0
+        assert self._Hub.stored == {}
+
+    def test_update_profile_is_an_alias(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FR-009, ludmila_coe's suggestion. It catches the agent reading
+        `update_profile` in MCP-oriented text and translating it literally at a shell —
+        which is exactly the agent this issue is about."""
+        self._joined(tmp_path, monkeypatch)
+        assert main(["update-profile", '{"project": "billing"}']) == 0
+        assert self._Hub.stored == {"project": "billing"}
+
+    def test_the_help_says_it_replaces(self) -> None:
+        """A caller who assumes merge loses fields silently, so the help must say so."""
+        from click.testing import CliRunner
+
+        from agent_inbox.cli import cli
+
+        text = CliRunner().invoke(cli, ["profile", "set", "--help"]).output
+        assert "replace" in text.lower()
