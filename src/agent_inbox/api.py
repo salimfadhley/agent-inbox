@@ -624,9 +624,7 @@ class Api:
         if request.url.query:
             path = f"{path}?{request.url.query}"
         headers = {k.lower(): v for k, v in request.headers.items()}
-        if not verify_request(
-            claim, public, request.method, path, headers, body=body
-        ):
+        if not verify_request(claim, public, request.method, path, headers, body=body):
             return None
         # The document's own `owner` must live at the origin we trusted, or a trusted
         # peer's document could name someone else as the signer.
@@ -1012,9 +1010,7 @@ class Api:
             raise HTTPException(status_code=404, detail="no such thread")
         return self.wire.collection([self.wire.note(m) for m in turns])
 
-    async def federation_inbox(
-        self, name: str, request: Request
-    ) -> dict[str, Any]:
+    async def federation_inbox(self, name: str, request: Request) -> dict[str, Any]:
         """Accept one `Create`/`Note` from a configured peer.
 
         Every check runs **before** delivery, and that ordering is the requirement: a
