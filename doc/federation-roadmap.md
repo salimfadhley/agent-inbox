@@ -230,6 +230,35 @@ Three things that line up proves: a federating hub answers, a non-federating one
 even about whether a name exists, and the actor document a peer sees has five keys — no
 `profile`, no `lastSeen`, no `outbox`.
 
+#### What Step 3 got wrong
+
+Three server-side request forgery holes, all found by outside review, none by writing the
+code. A hostile peer controls the server at whatever URL an operator types.
+
+1. **Redirects were followed.** `urlopen` follows them by default and the scheme check ran
+   against the URL the operator typed, not the one fetched. `302 Location:
+   http://169.254.169.254/` reaches cloud metadata. Refused outright now — a hub's
+   well-known documents are at fixed paths on its own origin, so a redirect is a
+   misconfiguration at best.
+
+2. **The origin check compared strings.** `href.startswith(base)` passed for
+   `https://good.example@127.0.0.1:8443/x`, which starts with `https://good.example` and
+   resolves to loopback, because everything before the `@` is userinfo. Origins are
+   compared parsed now, and credentials in an address are refused.
+
+3. **The timeout was an idle timeout.** It resets on every byte, so a peer dripping one
+   byte every nine seconds held the request indefinitely. There are two clocks now.
+
+**The tests for these needed writing twice**, and that is the reusable lesson. The first
+redirect test asserted only that an error was raised — but an unreachable metadata address
+raises too, so it could not tell "refused" from "followed and failed". It now redirects to
+a second local server that records being hit, and asserts the target was never touched.
+The first disguised-URL test used an input the old check would also have refused, so it
+discriminated nothing; it now asserts its own input defeats the old check before using it.
+
+Verified by removal, and the third proved itself unusually directly: with the deadline
+disabled the test hangs and has to be killed, which is precisely the behaviour it guards.
+
 ### Steps 4, 5, 6 … — one function pair at a time
 
 Candidates, roughly in dependency order. Each is a step, not a phase:
