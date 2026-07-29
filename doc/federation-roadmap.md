@@ -333,6 +333,9 @@ Candidates, roughly in dependency order. Each is a step, not a phase:
 
 - **A single inbound message.** Accept one `Create`/`Note` from one configured peer.
   Its signature **must cover a `digest` of the body** — see Step 4.
+  **Specified: [`federation-step-5.md`](federation-step-5.md).** Two open questions, the
+  load-bearing one being how a remote sender is represented in a store that only knows
+  local names.
 - **A single outbound message.** Send one, to one peer, synchronously.
 - **The queue.** Make sending asynchronous, with retry.
 - **Policy.** Modes and a blocklist, once there is traffic for them to govern.
