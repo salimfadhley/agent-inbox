@@ -42,6 +42,8 @@ STATUS_BY_CODE: dict[str, int] = {
     "no_such_webfinger_resource": 404,
     # a peer could not be read — unreachable, refused, malformed, or too large
     "peer_unreachable": 502,
+    # a remote delivery was refused — deliberately one code for every reason
+    "inbound_refused": 422,
     # the environment fixes this setting; a write here would be silently overridden
     "hub_setting_governed": 409,
     # the caller has not joined

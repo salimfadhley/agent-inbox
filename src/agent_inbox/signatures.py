@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime, parsedate_to_datetime
+from hmac import compare_digest
 from urllib.parse import urlsplit
 
 from agent_inbox.keys import SigningKey, verify
@@ -60,25 +61,50 @@ def _signing_string(
     return "\n".join(lines).encode()
 
 
+def body_digest(body: bytes) -> str:
+    """The `Digest` header value for a body, in the shape the fediverse sends."""
+    from base64 import b64encode
+    from hashlib import sha256
+
+    return "SHA-256=" + b64encode(sha256(body).digest()).decode()
+
+
 def sign_request(
-    key: SigningKey, key_id: str, method: str, url: str, *, now: datetime | None = None
+    key: SigningKey,
+    key_id: str,
+    method: str,
+    url: str,
+    *,
+    body: bytes | None = None,
+    now: datetime | None = None,
 ) -> dict[str, str]:
     """Headers proving this hub made this request.
 
     `key_id` is the actor-document fragment a verifier fetches to find our public key —
     the same `#main-key` the actor document publishes.
+
+    **When there is a body, `digest` joins the covered set and is not optional.** A
+    signature over method, host and date says only "this hub sent *a* request to this
+    path" — it authorises any body at all, so an attacker who captures one can swap
+    the content and keep the signature. That is worse than no signature, because it
+    looks like proof.
     """
+    from base64 import b64encode
+
     parts = urlsplit(url)
     path = parts.path or "/"
     if parts.query:
         path = f"{path}?{parts.query}"
     when = format_datetime(now or datetime.now(UTC), usegmt=True)
     headers = {"host": parts.netloc, "date": when}
-    material = _signing_string(method, path, headers, SIGNED_HEADERS)
-    from base64 import b64encode
+    covered_names = SIGNED_HEADERS
+    if body is not None:
+        headers["digest"] = body_digest(body)
+        covered_names = (*SIGNED_HEADERS, "digest")
+    material = _signing_string(method, path, headers, covered_names)
 
     signature = b64encode(key.sign(material)).decode()
-    covered = " ".join(SIGNED_HEADERS)
+    covered = " ".join(covered_names)
     return {
         **headers,
         "Signature": (
@@ -123,6 +149,7 @@ def verify_request(
     path: str,
     headers: dict[str, str],
     *,
+    body: bytes | None = None,
     now: datetime | None = None,
 ) -> bool:
     """Whether this request really came from the holder of `public_pem`.
@@ -145,5 +172,16 @@ def verify_request(
         when = when.replace(tzinfo=UTC)
     if abs((now or datetime.now(UTC)) - when) > MAX_CLOCK_SKEW:
         return False
+
+    if body is not None:
+        # **A signature that does not cover the body authorises any body.** The caller
+        # passing a body is asserting there is one, so a signature that omits `digest`
+        # is refused outright rather than verified over what it does cover.
+        if "digest" not in claim.headers:
+            return False
+        sent = headers.get("digest", "")
+        if not compare_digest(sent, body_digest(body)):
+            return False
+
     material = _signing_string(method, path, headers, claim.headers)
     return verify(public_pem, material, claim.signature)

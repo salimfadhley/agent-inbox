@@ -93,6 +93,14 @@ _SCHEMA = (
         note    TEXT NOT NULL DEFAULT ''
     )
     """,
+    # Activity ids already delivered. FR-5: a peer that retries must not double-deliver,
+    # and "have I seen this" is the only way to know.
+    """
+    CREATE TABLE IF NOT EXISTS seen_activities (
+        activity_id TEXT PRIMARY KEY,
+        seen        TEXT NOT NULL DEFAULT ''
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS hub_settings (
         key   TEXT PRIMARY KEY,
@@ -228,6 +236,19 @@ class SqliteStore:
         return int(row[0]) if row else 0
 
     # -- hub settings ------------------------------------------------------
+
+    async def seen_activity(self, activity_id: str) -> bool:
+        cursor = await self._execute(
+            "SELECT 1 FROM seen_activities WHERE activity_id=?", (activity_id,)
+        )
+        return await cursor.fetchone() is not None
+
+    async def remember_activity(self, activity_id: str, seen: str) -> None:
+        await self._execute(
+            "INSERT OR IGNORE INTO seen_activities (activity_id, seen) VALUES (?, ?)",
+            (activity_id, seen),
+        )
+        await self._db.commit()
 
     async def peers(self) -> dict[str, str]:
         """Origins this hub trusts, mapped to when each was added."""

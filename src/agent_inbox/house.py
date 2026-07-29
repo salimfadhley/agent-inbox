@@ -104,6 +104,7 @@ class House:
         cc: Sequence[str] = (),
         in_reply_to: str | None = None,
         document: dict[str, object] | None = None,
+        remote_sender: str | None = None,
     ) -> ObjectRecord:
         recipients = (to,) if isinstance(to, str) else tuple(to)
         attempt = Attempt(
@@ -123,6 +124,7 @@ class House:
                 cc=cc,
                 in_reply_to=in_reply_to,
                 document=document,
+                remote_sender=remote_sender,
             )
         except Exception as exc:
             await self._record(Outcome(attempt, ok=False, error=exc))

@@ -39,7 +39,7 @@ from litestar.exceptions import HTTPException
 from litestar.handlers.base import BaseRouteHandler
 from litestar.openapi import OpenAPIConfig
 
-from agent_inbox import __version__
+from agent_inbox import __version__, addressing
 from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
 from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
@@ -50,6 +50,7 @@ from agent_inbox.errors import (
     store_busy_handler,
 )
 from agent_inbox.exceptions import (
+    AddressError,
     HubSettingGoverned,
     InvalidHubName,
     MailboxError,
@@ -66,6 +67,7 @@ from agent_inbox.federation import (
 )
 from agent_inbox.house import House
 from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
+from agent_inbox.inbound import InboundRefused, parse_activity, read_create
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.naming import validate_hub_name
 from agent_inbox.peers import fetch_actor_document, peer_origin
@@ -576,7 +578,9 @@ class Api:
         await mailbox.set_hub_setting(PRIVATE_KEY_SETTING, minted.private_pem)
         return minted
 
-    async def verified_peer(self, request: Request) -> str | None:
+    async def verified_peer(
+        self, request: Request, *, body: bytes | None = None
+    ) -> str | None:
         """The peer that signed this request, or None.
 
         None means *not verified*, and every caller must treat it as "stranger" rather
@@ -620,7 +624,9 @@ class Api:
         if request.url.query:
             path = f"{path}?{request.url.query}"
         headers = {k.lower(): v for k, v in request.headers.items()}
-        if not verify_request(claim, public, request.method, path, headers):
+        if not verify_request(
+            claim, public, request.method, path, headers, body=body
+        ):
             return None
         # The document's own `owner` must live at the origin we trusted, or a trusted
         # peer's document could name someone else as the signer.
@@ -1006,17 +1012,58 @@ class Api:
             raise HTTPException(status_code=404, detail="no such thread")
         return self.wire.collection([self.wire.note(m) for m in turns])
 
-    async def federation_inbox(self, name: str) -> Response:
-        return Response(
-            status_code=501,
-            content={
-                "code": "not_implemented",
-                "detail": (
-                    "This hub does not federate. Delivery from other mailboxes is "
-                    "mission 0024 (Pen Pals) and mission 0025 (fediverse profile)."
-                ),
-            },
+    async def federation_inbox(
+        self, name: str, request: Request
+    ) -> dict[str, Any]:
+        """Accept one `Create`/`Note` from a configured peer.
+
+        Every check runs **before** delivery, and that ordering is the requirement: a
+        refused message must provably never reach a mailbox. The tests assert on the
+        recipient's inbox rather than on this function's return, because a 4xx with the
+        message delivered anyway is exactly the failure the ordering prevents.
+
+        Every refusal is the same refusal. Distinguishing "no such actor" from "not a
+        peer" from "bad signature" would tell a stranger which was true, and the first
+        two are what must stay unsaid.
+        """
+        mailbox = self.house.mailbox
+        if not federates(await mailbox.hub_settings()):
+            raise InboundRefused("this hub does not accept mail from other hubs")
+
+        raw = await request.body()
+        # Bounded and digest-checked before parsing: a signature that does not cover the
+        # body authorises any body, so verification comes first and it must see the
+        # bytes we actually received.
+        sender = await self.verified_peer(request, body=raw)
+        if sender is None:
+            raise InboundRefused("that delivery was not signed by a peer of this hub")
+
+        message = read_create(parse_activity(raw), sender)
+
+        if await mailbox.seen_activity(message.activity_id):
+            # FR-5: a retry is a no-op, not an error and not a second message.
+            return {"delivered": False, "reason": "already seen"}
+
+        # `local_name` refuses `@local` and anything not addressed here, which is what
+        # keeps the non-egress promise true from the outside as well as the inside.
+        try:
+            recipients = tuple(
+                addressing.local_name(one, mailbox.hub_name)
+                for one in message.recipients
+            )
+        except AddressError as refusal:
+            raise InboundRefused("that delivery names nobody here") from refusal
+
+        await self.house.send(
+            caller="",
+            to=recipients,
+            body=message.body,
+            subject=message.subject,
+            in_reply_to=message.in_reply_to,
+            remote_sender=message.sender,
         )
+        await mailbox.remember_activity(message.activity_id)
+        return {"delivered": True}
 
 
 def _refuse_blind_addressing(raw: dict[str, Any]) -> None:
@@ -1541,8 +1588,8 @@ def build_api(
         return await api.inbox(name, caller, view=view, since=since)
 
     @post("/actors/{name:str}/inbox")
-    async def federation_inbox(name: str) -> Response:
-        return await api.federation_inbox(name)
+    async def federation_inbox(name: str, request: Request) -> dict[str, Any]:
+        return await api.federation_inbox(name, request)
 
     @post(
         "/actors/{name:str}/outbox",

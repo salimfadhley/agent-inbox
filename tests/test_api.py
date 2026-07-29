@@ -413,10 +413,25 @@ class TestForeignProperties:
 
 
 class TestFederationIsAbsent:
-    def test_the_federation_inbox_says_not_yet(self, client: TestClient) -> None:
+    def test_a_hub_that_does_not_federate_accepts_no_mail(
+        self, client: TestClient
+    ) -> None:
+        """This used to assert a 501 — "the software cannot do this". It can now, so
+        the claim changed even though the behaviour a caller sees did not: a hub that
+        has not switched federation on still accepts nothing.
+        """
         r = client.post(f"/actors/{ROSEMARY}/inbox", json={})
-        assert r.status_code == 501
-        assert "does not federate" in r.json()["detail"]
+        assert r.status_code == 422
+        assert "does not accept mail from other hubs" in r.text
+
+    def test_the_refusal_does_not_say_whether_the_recipient_exists(
+        self, client: TestClient
+    ) -> None:
+        """Same answer for a real actor and an invented one."""
+        real = client.post(f"/actors/{ROSEMARY}/inbox", json={})
+        invented = client.post("/actors/nobody_at_all/inbox", json={})
+        assert real.status_code == invented.status_code
+        assert real.json()["detail"] == invented.json()["detail"]
 
 
 class TestNoLogicHere:

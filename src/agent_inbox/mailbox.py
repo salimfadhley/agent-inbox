@@ -88,6 +88,12 @@ class Mailbox:
     async def remove_peer(self, origin: str) -> None:
         await self._store.remove_peer(origin)
 
+    async def seen_activity(self, activity_id: str) -> bool:
+        return await self._store.seen_activity(activity_id)
+
+    async def remember_activity(self, activity_id: str) -> None:
+        await self._store.remember_activity(activity_id, self._now())
+
     @property
     def hub_name(self) -> str:
         """What this mailbox calls itself. It also always answers to ``local``."""
@@ -205,6 +211,7 @@ class Mailbox:
         cc: Sequence[str] = (),
         in_reply_to: str | None = None,
         document: dict[str, object] | None = None,
+        remote_sender: str | None = None,
     ) -> ObjectRecord:
         """Send a message. Every actor addressed receives their own copy.
 
@@ -212,7 +219,22 @@ class Mailbox:
         **silently starts its own thread** instead of joining. The silence is the point:
         an error would confirm which threads exist, which is what the refusal protects.
         """
-        sender = (await self._require_actor(caller)).name
+        # `remote_sender` is a sender **already authorised elsewhere** and identified by
+        # its actor URI — a peer whose signature verified and whose origin we trust.
+        #
+        # `_require_actor` does two jobs, and only one applies to such a sender.
+        # *Authorisation* — is this a real actor entitled to send — was answered
+        # cryptographically at the federation boundary, and asking again against a local
+        # table is asking the wrong hub. *Resolution* turns an address into a local
+        # name, which a remote sender has not got and must not be given (ADR 0003: the
+        # identifier is a URI, and minting one here would imply a continuity we cannot
+        # observe).
+        #
+        # Everything after this line is unchanged and must stay so: audience
+        # resolution, the disclosure protections from mission 0020, and per-reader read
+        # tracking all still run. That is what makes this a widened contract rather
+        # than a second delivery path.
+        sender = remote_sender or (await self._require_actor(caller)).name
         raw = (to,) if isinstance(to, str) else tuple(to)
         recipients = tuple(self._local(one) for one in raw)
         copies = tuple(self._local(one) for one in cc)

@@ -97,6 +97,14 @@ class MessageStore(Protocol):
         """Origins this hub trusts, mapped to when each was added."""
         ...
 
+    async def seen_activity(self, activity_id: str) -> bool:
+        """Whether this activity has already been delivered."""
+        ...
+
+    async def remember_activity(self, activity_id: str, seen: str) -> None:
+        """Record an activity as delivered. Idempotent."""
+        ...
+
     async def add_peer(self, origin: str, added: str, note: str = "") -> None:
         """Trust a hub. Idempotent."""
         ...
@@ -122,6 +130,7 @@ class InMemoryStore:
         self._reads: dict[str, dict[str, ReadRecord]] = {}
         self._hub_settings: dict[str, str] = {}
         self._peers: dict[str, str] = {}
+        self._seen: dict[str, str] = {}
 
     async def claim_name(self, actor: ActorRecord) -> bool:
         if actor.name in self._actors:
@@ -187,6 +196,12 @@ class InMemoryStore:
 
     async def remove_peer(self, origin: str) -> None:
         self._peers.pop(origin, None)
+
+    async def seen_activity(self, activity_id: str) -> bool:
+        return activity_id in self._seen
+
+    async def remember_activity(self, activity_id: str, seen: str) -> None:
+        self._seen.setdefault(activity_id, seen)
 
 
 _conforms: MessageStore = InMemoryStore()
