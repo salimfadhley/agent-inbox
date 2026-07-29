@@ -44,6 +44,8 @@ STATUS_BY_CODE: dict[str, int] = {
     "peer_unreachable": 502,
     # a remote delivery was refused — deliberately one code for every reason
     "inbound_refused": 422,
+    # this hub will not send that — refused before anything left
+    "delivery_refused": 422,
     # the environment fixes this setting; a write here would be silently overridden
     "hub_setting_governed": 409,
     # the caller has not joined

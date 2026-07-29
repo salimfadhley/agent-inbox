@@ -180,3 +180,118 @@ def test_insecure_transport_is_what_makes_this_reachable(hubs) -> None:
         assert "scheme" in str(refused.value)
     finally:
         os.environ["AGENT_INBOX_FEDERATION_INSECURE"] = "true"
+
+
+class TestSendingToAPeer:
+    """Step 6: this hub initiates, for the first time.
+
+    Every step before this was inbound — another hub connected to us and a test could
+    fake that. Here *we* resolve a hostname, open a socket and sign a POST, which is why
+    these run against two real servers rather than the in-process harness.
+    """
+
+    @staticmethod
+    def _keys(hub: Hub):
+        from agent_inbox.api import Api
+
+        key = asyncio.run(Api(hub.house, hub.base).signing_key())
+        return key, f"{hub.base}/actors/sender#main-key"
+
+    def test_a_remote_recipient_resolves_to_an_inbox(self, hubs) -> None:
+        from agent_inbox.outbound import resolve
+
+        alpha, beta = hubs
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        assert who.actor_uri.endswith("/actors/alice")
+        assert who.inbox.endswith("/actors/alice/inbox")
+        assert who.origin == peer_origin(beta.base)
+
+    def test_a_message_reaches_an_actor_on_the_other_hub(self, hubs) -> None:
+        """The whole point of the step, over a real socket."""
+        from agent_inbox.outbound import deliver, resolve
+
+        alpha, beta = hubs
+        asyncio.run(alpha.house.join("sender"))
+        # **Peering is mutual, and the two directions mean different things.** Beta
+        # lists alpha so alpha's signature counts on the way in; alpha lists beta
+        # because a hub should not send mail to one its operator never configured.
+        asyncio.run(beta.house.mailbox.add_peer(peer_origin(alpha.base), "2026-07-29"))
+        asyncio.run(alpha.house.mailbox.add_peer(peer_origin(beta.base), "2026-07-29"))
+
+        key, key_id = self._keys(alpha)
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        deliver(
+            who,
+            {
+                "type": "Create",
+                "id": f"{alpha.base}/act/step6",
+                "object": {
+                    "type": "Note",
+                    "to": ["alice"],
+                    "content": "sent from alpha",
+                    "summary": "step six",
+                },
+            },
+            key=key,
+            key_id=key_id,
+            settings=asyncio.run(alpha.house.mailbox.hub_settings()),
+            peers=asyncio.run(alpha.house.mailbox.peers()),
+        )
+
+        landed = asyncio.run(beta.house.observe_mailbox("alice"))
+        assert [m.content for m in landed] == ["sent from alpha"]
+        assert landed[0].attributed_to.startswith(alpha.base)
+
+    def test_a_hub_that_does_not_federate_sends_nothing(self, hubs) -> None:
+        """Checked inside `deliver`, from settings read at that moment — which is what
+        stops a queue getting between the decision and the send (FR-050)."""
+        from agent_inbox.outbound import DeliveryRefused, deliver, resolve
+
+        alpha, beta = hubs
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        key, key_id = self._keys(alpha)
+
+        with pytest.raises(DeliveryRefused) as refused:
+            deliver(
+                who,
+                {
+                    "type": "Create",
+                    "id": "x",
+                    "object": {"type": "Note", "to": ["alice"]},
+                },
+                key=key,
+                key_id=key_id,
+                settings={},  # federation absent — as if it had just been switched off
+                peers=asyncio.run(alpha.house.mailbox.peers()),
+            )
+        assert "does not federate" in str(refused.value)
+
+    def test_a_hub_we_do_not_trust_is_refused(self, hubs) -> None:
+        from agent_inbox.outbound import DeliveryRefused, deliver, resolve
+
+        alpha, beta = hubs
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        key, key_id = self._keys(alpha)
+
+        with pytest.raises(DeliveryRefused) as refused:
+            deliver(
+                who,
+                {
+                    "type": "Create",
+                    "id": "x",
+                    "object": {"type": "Note", "to": ["alice"]},
+                },
+                key=key,
+                key_id=key_id,
+                settings={"federation": "enabled"},
+                peers={},  # nobody trusted
+            )
+        assert "not a peer" in str(refused.value)
+
+    def test_an_unknown_actor_is_reported_rather_than_delivered(self, hubs) -> None:
+        from agent_inbox.outbound import DeliveryRefused, resolve
+
+        _, beta = hubs
+        with pytest.raises(DeliveryRefused) as refused:
+            resolve(f"nobody_here@beta.localhost:{beta.port}")
+        assert "nobody_here" in str(refused.value), "the refusal must name who"
