@@ -38,7 +38,7 @@ identity: `name`, `title`, `description`. No federation behaviour at all.
 *Status: in flight.* This is `a-hub-has-a-name-of-its-own-01KYMD90` WP04. Storage,
 precedence and the API beneath it are built and green.
 
-### Step 2 — passive identity
+### Step 2 — passive identity ✅ **done**
 
 A hub can be **looked at** by another hub. It answers questions about itself and nothing
 else. Nothing is fetched, nothing is sent, nothing is trusted.
@@ -120,6 +120,17 @@ setting; `federates: false` is hardcoded in the descriptor. So the first half of
 Demonstrable on its own: try to enable federation on a fresh hub, be refused; name the hub,
 enable it, see `GET /` change.
 
+**Shipped.** A hub can be looked at, and a hub that has not chosen to federate cannot.
+
+| Surface | When federation is off | When it is on |
+|---|---|---|
+| `/.well-known/nodeinfo`, `/nodeinfo/2.1` | `404` | the NodeInfo 2.1 document |
+| `/.well-known/webfinger` | `404` | resolves an account to its actor document |
+| `/actors/{name}` to a **verified** caller | full document | full document |
+| `/actors/{name}` to anyone else | as before — `401` when enforcing | barebones only |
+
+Everything below was verified against primary sources or found by review, not asserted.
+
 #### Step 2 decisions (owner, 2026-07-29)
 
 - **NodeInfo, not an invention.** `/.well-known/nodeinfo` and `/nodeinfo/2.1`, the schema
@@ -141,6 +152,36 @@ Note the deliberate split: the *test* harness is in-process, the *demo* is two r
 
 Then, gated on 2a: the `/.well-known/agent-inbox` descriptor, WebFinger, and the thin public
 actor document.
+
+#### What Step 2 got wrong, and how
+
+Four defects, none of them found by writing the code. Worth recording because the *way*
+each was found is the reusable part.
+
+1. **A non-enforcing hub published every agent's profile.** The thin-document gate only
+   applied when the hub enforced auth, so `AUTH_MODE=off` plus federation served full
+   actor documents — profile, project, last-seen — to anyone. Found by the **two-hub
+   harness on its first end-to-end run**, which is the argument for building it before
+   the features that need it. The rule is now: *a hub that cannot tell its own agents
+   from strangers must assume stranger.*
+
+2. **`/doctor` was an existence oracle.** It is deliberately unguarded, for a good
+   reason — the caller who most needs it is the one whose credential is broken. But it
+   reported whether a claimed name existed, so a stranger could enumerate the roster by
+   guessing. Its own docstring already promised "never who else is here". Found by
+   **outside review**, looking outside the routes it was asked about.
+
+3. **NodeInfo disclosed a private hub's roster size.** Served unconditionally on a
+   bootstrap-deadlock argument that was simply wrong: enabling federation is a local act
+   needing no peer, so nothing deadlocks. Found by **outside review**.
+
+4. **A GET and a POST sharing one console path broke both.** Not a security issue, but it
+   cost the most time. Every other form in this console posts to its own path; the
+   convention existed and I had not noticed it was one.
+
+The pattern: the harness caught what only two hubs could reveal, and the review caught
+what only a reader without the author's assumptions could. Neither would have found the
+other's.
 
 ### Step 3 — active identity
 
