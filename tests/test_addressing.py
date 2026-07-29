@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_inbox.addressing import LOCAL, Address, local_name, parse
+from agent_inbox.addressing import LOCAL, Address, local_name, parse, split_recipients
 from agent_inbox.exceptions import (
     AddressError,
     DeliversToNobody,
@@ -307,3 +307,49 @@ class TestDistinctFailures:
             assert error.code == code
             assert issubclass(error, MailboxError)
         assert len(set(codes.values())) == len(codes), "codes must be distinct"
+
+
+class TestSplittingRecipients:
+    """The widening federation needs, kept out of `local_name`.
+
+    `local_name` means "the local name, or refuse", and that is the boundary this module
+    exists to keep. The fork happens above it so the rules below never learn that remote
+    recipients exist.
+    """
+
+    def test_local_and_remote_are_separated(self) -> None:
+        local, remote = split_recipients(
+            ("alice", "bob@saltclub", "carol@beta.example"), "saltclub"
+        )
+        assert local == ("alice", "bob")
+        assert remote == ("carol@beta.example",)
+
+    def test_at_local_never_ends_up_remote(self) -> None:
+        """The oldest guarantee in the mailbox, now that this hub can actually send.
+
+        And it holds **by construction**: `@local` is local to every hub, so it resolves
+        through the local branch. It is a property of the addressing model rather than a
+        rule somebody has to remember, which is why it survives a step that added
+        egress.
+        """
+        for hub in ("saltclub", "local", "anything_at_all"):
+            local, remote = split_recipients(("alice@local",), hub)
+            assert local == ("alice",), f"@local stopped being local on {hub!r}"
+            assert remote == ()
+
+    def test_a_hubs_own_name_is_local(self) -> None:
+        local, remote = split_recipients(("alice@saltclub",), "saltclub")
+        assert local == ("alice",)
+        assert remote == ()
+
+    def test_the_same_address_is_remote_to_a_different_hub(self) -> None:
+        """The premise for the test above: `@saltclub` is not magic, it is *this*
+        hub."""
+        local, remote = split_recipients(("alice@saltclub",), "pepperclub")
+        assert local == ()
+        assert remote == ("alice@saltclub",)
+
+    def test_nothing_is_lost_or_duplicated(self) -> None:
+        given = ("a", "b@local", "c@saltclub", "d@beta.example", "e@gamma.example")
+        local, remote = split_recipients(given, "saltclub")
+        assert len(local) + len(remote) == len(given)

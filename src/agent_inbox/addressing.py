@@ -78,6 +78,37 @@ def parse(text: str, *, default_hub: str = DEFAULT_HUB) -> Address:
     return Address(name=name.lower(), hub=(hub or default_hub).lower())
 
 
+def split_recipients(
+    addresses: tuple[str, ...], hub_name: str = LOCAL
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Partition addresses into local names and remote addresses.
+
+    The widening federation needs, and it is deliberately **not** a change to
+    :func:`local_name`. That function means "the local name, or refuse", and it is the
+    boundary this module exists to keep: above it the world is addresses, below it the
+    rules deal only in names. Letting it return something that is not a local name would
+    dissolve the very split that lets the rules stay hub-agnostic.
+
+    So the fork happens here, above it, and the rules below never learn that remote
+    recipients exist.
+
+    **`@local` can never end up in the remote half**, and by construction rather than by
+    a check: an address ending `@local` is local to every hub, so it resolves through
+    the first branch and stays. That is what makes the non-egress promise hold even now
+    that this hub can send — the guarantee is a property of the addressing model, not a
+    rule somebody has to remember to apply.
+    """
+    local: list[str] = []
+    remote: list[str] = []
+    for text in addresses:
+        address = parse(text)
+        if address.is_local_to(hub_name):
+            local.append(address.name)
+        else:
+            remote.append(str(address))
+    return tuple(local), tuple(remote)
+
+
 def local_name(text: str, hub_name: str = LOCAL) -> str:
     """The local actor name an address refers to, refusing anything we cannot reach.
 
