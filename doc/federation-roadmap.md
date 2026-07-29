@@ -183,7 +183,7 @@ The pattern: the harness caught what only two hubs could reveal, and the review 
 what only a reader without the author's assumptions could. Neither would have found the
 other's.
 
-### Step 3 — active identity
+### Step 3 — active identity ✅ **done**
 
 The same functions, in the other direction: this hub can **ask another hub** who it is.
 
@@ -192,6 +192,43 @@ The same functions, in the other direction: this hub can **ask another hub** who
 - Report `Ready` / `Warning` / `Failed`, with the reason.
 
 The demo: type another hub's URL into the Settings tab and see it identified.
+
+**Shipped.** `src/agent_inbox/peers.py` — `identify(url)` follows NodeInfo's two hops and
+returns what that hub says it is. Wired into the Settings tab: type an address, press
+Check.
+
+Most of the module is what it refuses to do, because a peer's descriptor is untrusted
+input from a machine we have not verified:
+
+| Guard | Why |
+|---|---|
+| `https` only, plus `http` to loopback | An allowlist. A denylist of schemes is a guess about what exists |
+| Bounded time and size, checked before parsing | A hostile peer must not cost us unbounded work |
+| Path, query and fragment discarded | A peer is an origin; keeping the rest lets a typo point us at any URL on that host |
+| NodeInfo link must be on the same host | Otherwise a descriptor can make us fetch a third party |
+| Free text clipped | A peer does not decide how much we store |
+| Everything escaped and labelled as *claimed* | An operator must not mistake a peer's title for something we verified |
+
+### The demo
+
+`uv run python doc/demo/two_hubs.py` — two real hubs on real ports, one reading the other.
+The suite covers all of it in-process; this exists because passing tests that never crossed
+a socket are not proof that two hubs interoperate.
+
+```
+  A nodeinfo index  200  -> http://localhost:8101/nodeinfo/2.1
+  A webfinger alice 200  -> http://localhost:8101/actors/alice
+  A actor alice     200  keys: @context,id,inbox,preferredUsername,type
+  B nodeinfo index  404
+  B webfinger alice 404
+
+A asks B who it is:      refused — B does not federate
+A asks itself who it is: agent-inbox …, federating=True, title='The Salt Club', agents=3
+```
+
+Three things that line up proves: a federating hub answers, a non-federating one is silent
+even about whether a name exists, and the actor document a peer sees has five keys — no
+`profile`, no `lastSeen`, no `outbox`.
 
 ### Steps 4, 5, 6 … — one function pair at a time
 
