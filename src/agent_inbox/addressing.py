@@ -11,10 +11,14 @@ and for the same reason.
 
 Every hub therefore answers to two names: its own, and ``local``.
 
-This mailbox does not federate yet. A message to another hub is **refused, loudly**,
-rather than silently going nowhere — so an agent learns immediately, and so that
-federation later turns a clear error into a delivery rather than changing what silence
-meant.
+**This mailbox does not carry mail between hubs yet**, whatever its federation
+setting says. Identity federation arrived first — a hub can be discovered, and can
+discover others (:mod:`agent_inbox.peers`) — but no message crosses a hub boundary
+in either direction.
+
+A message to another hub is therefore **refused, loudly**, rather than silently going
+nowhere: an agent learns immediately, and delivery later turns a clear error into a
+delivery rather than changing what silence meant.
 """
 
 from __future__ import annotations
@@ -84,7 +88,7 @@ def local_name(text: str, hub_name: str = LOCAL) -> str:
     address = parse(text)
     if not address.is_local_to(hub_name):
         raise RemoteMailbox(
-            f"{address} is on another mailbox, and this one does not federate yet — "
-            f"reachable addresses end in @{LOCAL} or @{hub_name}"
+            f"{address} is on another mailbox, and this hub does not carry mail "
+            f"between hubs yet — reachable addresses end in @{LOCAL} or @{hub_name}"
         )
     return address.name

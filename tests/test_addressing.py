@@ -95,7 +95,7 @@ class TestNonEgress:
         Federation later turns this error into a delivery, rather than changing what
         silence meant.
         """
-        with pytest.raises(AddressError, match="does not federate yet"):
+        with pytest.raises(AddressError, match="does not carry mail between hubs"):
             local_name("trevor_mahmood@elsewhere")
 
 
@@ -156,7 +156,7 @@ class TestRoundTrip:
 
     async def test_sending_off_this_mailbox_is_refused(self, mailbox: Mailbox) -> None:
         await mailbox.join("rosemary_nasrin")
-        with pytest.raises(AddressError, match="does not federate yet"):
+        with pytest.raises(AddressError, match="does not carry mail between hubs"):
             await mailbox.send("rosemary_nasrin", "someone@another_hub", "hello")
 
     async def test_a_hub_with_its_own_name_still_answers_to_local(
