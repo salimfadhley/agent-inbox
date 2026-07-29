@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlparse
 from anyio.to_thread import run_sync
 from mcp.server.fastmcp import FastMCP
 
+from agent_inbox import staleness
 from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
@@ -287,6 +288,26 @@ def _client_name() -> str | None:
         return None
 
 
+def _with_notice(result: Any) -> Any:
+    """Attach a staleness notice to a tool result, when there is one to attach.
+
+    Appended to results rather than put in the server instructions. Instructions are
+    read once at session start and truncated at ``INSTRUCTION_BUDGET``; spending that
+    scarce, permanently-paid budget on something usually irrelevant would cost every
+    session to help a few. A result costs nothing when there is nothing to say, and
+    reaches the agent while it is already reading output.
+
+    Only dict results are touched, and only if they have no ``notice`` of their own —
+    a tool that says something itself is not overridden by housekeeping.
+    """
+    if not isinstance(result, dict) or "notice" in result:
+        return result
+    message = staleness.notice()
+    if message:
+        return {**result, "notice": message}
+    return result
+
+
 async def _guard(call: Any) -> Any:
     """Run a call and turn any failure into words the agent can act on.
 
@@ -302,7 +323,7 @@ async def _guard(call: Any) -> Any:
         # Imported by name: `import anyio` does not bind the submodule, and it only
         # resolved before because mcp happens to import it. Relying on another
         # package's import side effect is a break waiting for a refactor.
-        return await run_sync(call)
+        return _with_notice(await run_sync(call))
     except NotConfigured as exc:
         return {
             "ok": False,
@@ -359,7 +380,14 @@ async def ping() -> dict[str, Any]:
     It says nothing about anyone else. A hub that answers does not mean the agent you
     want to reach is running, or will read anything soon.
     """
-    return await _guard(lambda: _client().ping())
+
+    def _ping() -> Any:
+        answer = _client().ping()
+        if isinstance(answer, dict):
+            staleness.note_hub_version(answer.get("version"))
+        return answer
+
+    return await _guard(_ping)
 
 
 @mcp.tool()
