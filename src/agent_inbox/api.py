@@ -1300,7 +1300,21 @@ def build_api(
                 # since "revoked" and "wrong" call for different actions.
                 token_state = "revoked"
 
-        known = await house.mailbox.whois(claimed) if claimed else None
+        # **Whether a name exists is only answered to a caller the hub can identify.**
+        # On an enforcing hub this route was an existence oracle: an unauthenticated
+        # stranger sending X-Agent-Name learned `known: true` for a real agent and
+        # `known: false` otherwise, and could enumerate the roster by guessing. The
+        # docstring above already promised "never who else is here" — this makes it
+        # true. Found by outside review, 2026-07-29.
+        #
+        # A hub that does not enforce answers as before: it has no roster to protect
+        # that the identity header does not already give away.
+        may_answer_existence = (not enforced) or verified is not None
+        known = (
+            await house.mailbox.whois(claimed)
+            if claimed and may_answer_existence
+            else None
+        )
 
         # Credentials are judged before identity, because on an enforcing hub they
         # block the very step that would fix an unknown name: joining is guarded too,
@@ -1313,6 +1327,11 @@ def build_api(
             verdict = (
                 "no token presented, and this hub requires one for everything, "
                 "including joining — ask an operator to mint you one"
+            )
+        elif enforced and not may_answer_existence:
+            verdict = (
+                "present a credential and ask again — this hub will not say whether a "
+                "name exists to a caller it cannot identify"
             )
         elif not claimed:
             verdict = "you sent no name — join, and one will be issued to you"
@@ -1345,7 +1364,9 @@ def build_api(
             },
             "you": {
                 "claimed": claimed,
-                "known": known is not None,
+                # `null` where the hub declines to say, which is not the same as
+                # `false`. A caller debugging a name deserves the difference.
+                "known": (known is not None) if may_answer_existence else None,
                 "verified": verified,
                 "token": token_state,
             },

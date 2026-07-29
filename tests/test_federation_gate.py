@@ -306,3 +306,71 @@ class TestTheThinActorDocument:
             c.post("/actors", json={"preferredUsername": "alice"})
             body = c.get("/actors/alice").json()
         assert "profile" in body, "a LAN hub's own console still needs the full record"
+
+
+class TestDoctorIsNotAnExistenceOracle:
+    """`/doctor` is deliberately unguarded, and that made it a roster oracle.
+
+    It is unguarded for a good reason: the caller who most needs it is the one whose
+    credential is missing or revoked, and refusing them would answer with the very
+    status they came to understand. But on an enforcing hub it reported whether a
+    claimed name existed, so a stranger could enumerate agents by guessing.
+
+    Found by outside review, 2026-07-29. The route's own docstring already promised
+    "never who else is here"; this makes that true.
+    """
+
+    @staticmethod
+    def _enforcing_with(actor: str):
+        import asyncio
+
+        from agent_inbox.auth.service import AuthService
+        from agent_inbox.auth.store import InMemoryAuthStore
+
+        house = a_hub("saltclub")
+        asyncio.run(house.join(actor))
+        auth = AuthService(InMemoryAuthStore(), secret_key="k" * 32)
+        return build_api(house, HUB, auth=auth, auth_mode="enforce")
+
+    def test_a_real_name_and_a_made_up_one_are_indistinguishable(self) -> None:
+        app = self._enforcing_with("alice")
+        with TestClient(app=app) as c:
+            real = c.get("/doctor", headers={"X-Agent-Name": "alice"}).json()
+            fake = c.get("/doctor", headers={"X-Agent-Name": "nobody_here"}).json()
+
+        assert real["you"]["known"] == fake["you"]["known"]
+        assert real["verdict"] == fake["verdict"]
+
+    def test_it_says_it_will_not_say_rather_than_saying_no(self) -> None:
+        """`null` is not `false`. A caller debugging a name deserves the difference."""
+        app = self._enforcing_with("alice")
+        with TestClient(app=app) as c:
+            body = c.get("/doctor", headers={"X-Agent-Name": "alice"}).json()
+        assert body["you"]["known"] is None
+
+    def test_it_still_answers_at_all(self) -> None:
+        """The reason it is unguarded must survive the fix."""
+        app = self._enforcing_with("alice")
+        with TestClient(app=app) as c:
+            body = c.get("/doctor", headers={"X-Agent-Name": "alice"}).json()
+        assert body["hub"]["authMode"] == "enforce"
+        assert body["you"]["token"] == "not presented"
+        assert body["verdict"]
+
+    def test_a_lan_hub_is_unchanged(self) -> None:
+        """A hub with auth off has no roster to protect that the header does not
+        already give away, and its agents still need doctor to be useful."""
+        import asyncio
+
+        house = a_hub("lan")
+        asyncio.run(house.join("bob"))
+        with TestClient(app=build_api(house, HUB)) as c:
+            assert c.get("/doctor", headers={"X-Agent-Name": "bob"}).json()["you"][
+                "known"
+            ]
+            assert (
+                c.get("/doctor", headers={"X-Agent-Name": "ghost"}).json()["you"][
+                    "known"
+                ]
+                is False
+            )
