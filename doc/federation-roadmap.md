@@ -295,6 +295,38 @@ be worse than none, and that is the trap waiting in the next step.
 The private key is kept out of `HUB_SETTING_KEYS`, so no route can report or write it, and
 the key type redacts itself however it is printed.
 
+#### What Step 4 got wrong
+
+**A valid signature was treated as identity.** `verified_peer()` fetched the key at
+whatever `keyId` the request named, verified against it, and returned the owner. But
+anyone can publish an actor document with their own key and sign correctly — so every
+stranger was a "verified peer" and got the rich actor document.
+
+Verification proves *who signed*. It says nothing about *whether we trust them*. Peers
+now exist as a trust list, deliberately separate from settings: a setting answers "how is
+this hub set up", a peer row answers "whose signature counts". Two conditions now — the
+signature verifies, **and** the signer's origin is one we were told to trust.
+
+A hub with no peers verifies nobody. That is every hub until an operator adds one.
+
+**Replay inside the skew window is possible and unfixed.** The only guard is a covered
+`date`; there is no one-use state, so a captured signed GET can be resent for up to five
+minutes. Mastodon has the same property. Recorded rather than fixed — a seen-signature
+cache is its own step, and for a GET returning public data a replay is worth little.
+
+**Three of my security tests have now been vacuous**, each caught only by deleting the
+guard and watching them still pass:
+
+| Test | Why it passed anyway |
+|---|---|
+| Redirect SSRF | The metadata address is unreachable here, so it failed either way |
+| Disguised host | The input would have been refused by the old check too |
+| Stranger with a valid signature | `evil.example` does not resolve, so the fetch failed first |
+
+The fix each time was the same: **make the attack actually possible before asserting it
+fails.** A real local server serving the hostile response, not a hostname that happens not
+to exist.
+
 ### Steps 5, 6 … — one function pair at a time
 
 Candidates, roughly in dependency order. Each is a step, not a phase:
