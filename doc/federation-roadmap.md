@@ -30,13 +30,21 @@ an operator configures. It is the smallest possible step and it was worth taking
 
 *Built: `a-hub-has-a-name-of-its-own-01KYMD90` WP01–WP03. 695 tests green.*
 
-### Step 1 — all the settings in the UI
+### Step 1 — all the settings in the UI ✅ **done**
 
 A Settings tab with sections. Federation is the first section, holding the hub's own
 identity: `name`, `title`, `description`. No federation behaviour at all.
 
-*Status: in flight.* This is `a-hub-has-a-name-of-its-own-01KYMD90` WP04. Storage,
-precedence and the API beneath it are built and green.
+**Shipped.** A Settings tab with sections, Federation first, holding `name`, `title` and
+`description`. A field the environment governs renders disabled and names the variable the
+hub reports — not a hardcoded one, since a deployment configured through the legacy
+`AGENT_MAILBOX_` prefix would otherwise be told to edit something that is not in effect.
+
+Writes carry the version they read, so a page rendered while the environment governed a
+field cannot store the deployment's value over the operator's own. Refusals are shown with
+the hub's own words rather than "invalid input".
+
+*Built: `a-hub-has-a-name-of-its-own-01KYMD90` WP04, plus Step 3's peer check.*
 
 ### Step 2 — passive identity ✅ **done**
 
