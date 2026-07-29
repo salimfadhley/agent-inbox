@@ -40,6 +40,8 @@ STATUS_BY_CODE: dict[str, int] = {
     "federation_refused": 409,
     # webfinger: absent, not this hub, or not federating — deliberately one answer
     "no_such_webfinger_resource": 404,
+    # a peer could not be read — unreachable, refused, malformed, or too large
+    "peer_unreachable": 502,
     # the environment fixes this setting; a write here would be silently overridden
     "hub_setting_governed": 409,
     # the caller has not joined

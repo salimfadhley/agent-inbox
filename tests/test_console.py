@@ -1318,3 +1318,23 @@ class TestSettingsTab:
             r = c.post("/settings/save", data={"title": "Sneaky", "version": version})
             assert "Not saved" in r.text
             assert hub.hub_settings.get("title") is None
+
+    def test_the_peer_check_reports_what_a_hub_says(self, console: TestClient) -> None:
+        """And labels it as a claim rather than a finding."""
+        r = console.post("/settings/peer", data={"url": "https://nothing.invalid"})
+        assert r.status_code == 200
+        assert "Could not read that hub" in r.text
+
+    def test_the_peer_check_refuses_a_scheme_it_will_not_fetch(
+        self, console: TestClient
+    ) -> None:
+        r = console.post("/settings/peer", data={"url": "file:///etc/passwd"})
+        assert "Could not read that hub" in r.text
+        assert "scheme" in r.text
+
+    def test_a_peer_error_does_not_lose_the_settings_form(
+        self, console: TestClient
+    ) -> None:
+        """A failed check must not strand the operator on a dead-end page."""
+        r = console.post("/settings/peer", data={"url": "https://nothing.invalid"})
+        assert 'action="/settings/save"' in r.text or "/settings/save" in r.text

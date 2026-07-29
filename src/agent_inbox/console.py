@@ -41,6 +41,8 @@ from agent_inbox import __version__
 from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING
 from agent_inbox.client import SESSION_COOKIE, ClientError, HubClient
+from agent_inbox.exceptions import MailboxError
+from agent_inbox.peers import identify
 from agent_inbox.prompts import bootstrap, onboarding, role_note
 
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
@@ -1510,7 +1512,10 @@ def build_console(client: HubClient) -> Litestar:
         return Redirect("/", cookies=_relay_cookie(set_cookie))
 
     def _settings_page(
-        settings: dict[str, Any], hub: dict[str, Any] | None, note: str = ""
+        settings: dict[str, Any],
+        hub: dict[str, Any] | None,
+        note: str = "",
+        peer_result: str = "",
     ) -> str:
         """Everything an operator configures, in sections.
 
@@ -1559,6 +1564,15 @@ def build_console(client: HubClient) -> Litestar:
             "<p class='muted'>How this hub identifies itself. Federation itself is not "
             "built yet — these are the fields it will use, and they are worth setting "
             "now because the hub's name appears in every address on it.</p>"
+            "<h3>Check another hub</h3>"
+            "<p class='muted'>Ask a hub who it is. Nothing is stored and no peering "
+            "happens — this reads its public NodeInfo document, which is what a peer "
+            "would read of us.</p>"
+            f"{peer_result}"
+            "<form method='post' action='/settings/peer'>"
+            "<p><input name='url' placeholder='https://hub.example' size='40'>"
+            " <button type='submit'>Check</button></p></form>"
+            "<h3>This hub</h3>"
             "<form method='post' action='/settings/save'>"
             f'<input type="hidden" name="version" value="{version}">'
             + "".join(rows)
@@ -1616,6 +1630,57 @@ def build_console(client: HubClient) -> Litestar:
             media_type=MediaType.HTML,
         )
 
+    @post("/settings/peer", status_code=200, sync_to_thread=True)
+    def settings_peer(request: Request, data: Form) -> Response:
+        """Ask another hub who it is, and show the answer.
+
+        Reads only. Nothing is stored, no peering is arranged, and the hub being asked
+        learns nothing about us beyond that someone fetched a public document.
+
+        Everything shown is **that hub's claim**, not our finding, and the page says so
+        — an operator reading a peer's title should not mistake it for something we
+        verified.
+        """
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        url = str(data.get("url", "")).strip()
+        if not url:
+            block = "<p class='muted'>Give a hub's address to check it.</p>"
+        else:
+            try:
+                who = identify(url)
+            except MailboxError as refusal:
+                block = (
+                    "<p class='warn'><strong>Could not read that hub.</strong> "
+                    f"{html.escape(str(refusal))}</p>"
+                )
+            else:
+                rows = [
+                    ("Address", who.base),
+                    ("Software", f"{who.software} {who.version}"),
+                    ("Federating", "yes" if who.federates else "no"),
+                ]
+                if who.title:
+                    rows.append(("Title", who.title))
+                if who.description:
+                    rows.append(("Description", who.description))
+                if who.users is not None:
+                    rows.append(("Agents", str(who.users)))
+                cells = "".join(
+                    f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>"
+                    for k, v in rows
+                )
+                block = (
+                    "<table><tbody>" + cells + "</tbody></table>"
+                    "<p class='muted'>Everything above is what that hub says about "
+                    "itself. None of it is verified.</p>"
+                )
+
+        status, body, _ = client.auth_call("GET", "/hub/settings", session=sid)
+        return Response(
+            _settings_page(body or {}, hub, "", block), media_type=MediaType.HTML
+        )
+
     def _gate(request: Request) -> Response | None:
         """Require a session for the console's own pages once the hub authenticates.
 
@@ -1658,6 +1723,7 @@ def build_console(client: HubClient) -> Litestar:
             maintenance_purge,
             settings_view,
             settings_save,
+            settings_peer,
             token_index,
             tokens,
             mint,
