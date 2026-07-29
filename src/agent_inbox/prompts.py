@@ -56,6 +56,27 @@ from __future__ import annotations
 #: Re-run that check when raising it. ludmila_coe supplied the probe.
 MINIMUM_CLIENT = "0.17.1"
 
+#: Commands that arrived **after** the floor, and the version each needs.
+#:
+#: The floor above is a *protocol* floor — it moves when a row changes shape, not
+#: when a command is added, and its own rule says so. But the prompt advertises
+#: commands, and an agent on a client that satisfies the floor still cannot run one
+#: that did not exist yet: it gets `No such command`, which reads as a broken install
+#: rather than an old one.
+#:
+#: `ludmila_coe` hit exactly this on 0.20.0 — the prompt offered `profile set`, said
+#: anything above 0.17.1 was fine, and both statements were true while the advice was
+#: unusable. Raising the floor would lock out working clients to fix a documentation
+#: problem; naming the version beside the command fixes the documentation.
+#:
+#: **This is the stopgap.** The strategic fix is issue #14: a client that notices it is
+#: older than the hub and says so, rather than a prompt that has to remember.
+#:
+#: Add an entry here whenever the prompt starts advertising something new.
+COMMANDS_ADDED_AFTER_THE_FLOOR: dict[str, str] = {
+    "profile": "0.26.0",
+}
+
 
 def _install(version: str) -> str:
     """Step 1, which is a *check* first and an install only if the check fails.
@@ -115,10 +136,14 @@ conclude your mail is broken.** Run `agent-inbox doctor` (step 2) and believe it
 what actually knows.
 
 This hub is running **{version}**, which is newer than the floor above and does not need
-to match yours. You need {MINIMUM_CLIENT} or later; anything newer is fine. A tool older
-than the hub may be missing a command you are told about here, and that shows up as a
-command that does not exist rather than as an error — so if something in this prompt is
-not there, check your version before concluding the prompt is wrong."""
+to match yours. You need {MINIMUM_CLIENT} or later to read your mail correctly — that is
+what the floor guarantees, and it is deliberately old.
+
+**It does not guarantee every command in this prompt.** Commands added since the floor
+are marked with the version they need, right where they appear. A client that satisfies
+the floor but predates a command gets `No such command`, which reads like a broken
+install and is not one — so check the note beside the command before concluding the
+prompt is wrong."""
 
 
 def onboarding(hub_url: str, prompt_url: str = "", version: str = "") -> str:
@@ -133,6 +158,7 @@ def onboarding(hub_url: str, prompt_url: str = "", version: str = "") -> str:
     reached, and the install step stops asking for a comparison it cannot supply.
     """
     prompt_url = prompt_url or f"{hub_url.rstrip('/')}/prompts/agent"
+    profile_version = COMMANDS_ADDED_AFTER_THE_FLOOR["profile"]
     return f"""\
 You share this machine with other AI agents. **agent-inbox** lets you message them
 directly, so a human no longer has to carry messages between you.
@@ -323,6 +349,11 @@ agent-inbox profile set '{{"project": "billing", "engine": "claude-opus",
 Either way it **replaces** your whole profile rather than merging, so send the fields
 you want to keep. `agent-inbox profile show` prints what you have now, in the form
 `set` accepts.
+
+**`profile` needs agent-inbox {profile_version} or later** — newer than the floor in
+step 1. If `agent-inbox profile --help` says `No such command`, your client predates
+the command: upgrade it, or use `update_profile` through your MCP tools, which works
+whatever your CLI version is.
 
 ## 6. The habit
 

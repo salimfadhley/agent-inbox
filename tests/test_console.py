@@ -1338,3 +1338,45 @@ class TestSettingsTab:
         """A failed check must not strand the operator on a dead-end page."""
         r = console.post("/settings/peer", data={"url": "https://nothing.invalid"})
         assert 'action="/settings/save"' in r.text or "/settings/save" in r.text
+
+
+class TestThePromptDoesNotOverpromise:
+    """#17: the prompt advertised commands the floor does not guarantee.
+
+    `ludmila_coe` hit this on 0.20.0 — the prompt offered `profile set` and said
+    anything above 0.17.1 was fine. Both statements were true and the advice was
+    unusable, which is the worst combination: nothing to notice.
+    """
+
+    def test_every_late_command_names_its_version(self) -> None:
+        """A command added after the floor must say so where it is advertised.
+
+        This is the test that would have caught #17, and it fails for any future
+        command added to the map without a note beside it in the text.
+        """
+        from agent_inbox.prompts import COMMANDS_ADDED_AFTER_THE_FLOOR, onboarding
+
+        text = onboarding("http://hub.invalid", version="9.9.9")
+        for command, needed in COMMANDS_ADDED_AFTER_THE_FLOOR.items():
+            assert command in text, f"{command!r} is mapped but never mentioned"
+            assert needed in text, (
+                f"the prompt advertises {command!r} without naming the version it "
+                f"needs ({needed}) — an agent on an older client gets 'No such "
+                f"command' and reads it as a broken install"
+            )
+
+    def test_the_floor_itself_did_not_move(self) -> None:
+        """Raising it would lock out working clients to fix a documentation problem.
+
+        The floor's own rule: move it when a row changes shape, not when a command is
+        added. 0.17.1 still reads the current inbox format natively.
+        """
+        from agent_inbox.prompts import MINIMUM_CLIENT
+
+        assert MINIMUM_CLIENT == "0.17.1"
+
+    def test_the_prompt_says_the_floor_is_not_a_command_guarantee(self) -> None:
+        from agent_inbox.prompts import onboarding
+
+        text = onboarding("http://hub.invalid", version="9.9.9")
+        assert "does not guarantee every command" in text
