@@ -70,7 +70,7 @@ from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
 from agent_inbox.inbound import InboundRefused, parse_activity, read_create
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.naming import validate_hub_name
-from agent_inbox.peers import fetch_actor_document, peer_origin
+from agent_inbox.peers import fetch_actor_document, insecure_federation, peer_origin
 from agent_inbox.signatures import parse_signature, verify_request
 from agent_inbox.wire import (
     BLIND_FIELDS,
@@ -488,6 +488,10 @@ class Api:
         actors = await self.house.directory()
         metadata: dict[str, Any] = {
             "federation": resolved["federation"].value,
+            # Said out loud, for the same reason `authenticated` is: a peer deciding
+            # whether to trust us is entitled to know we accept unencrypted federation,
+            # and a posture that cannot be seen from outside is the worst kind.
+            **({"insecureTransport": True} if insecure_federation() else {}),
             # Not the hub's `name`: that never crosses the wire, which is
             # what makes renaming free. Presentation only.
             **{
@@ -1502,6 +1506,10 @@ def build_api(
                 "version": __version__,
                 "authMode": auth_mode,
                 "credentialRequired": enforced,
+                # An operator should be able to find this out without reading the
+                # compose file. Only mentioned when true: a line saying "secure: yes"
+                # on every hub is noise that trains people not to read it.
+                **({"insecureFederation": True} if insecure_federation() else {}),
             },
             "you": {
                 "claimed": claimed,

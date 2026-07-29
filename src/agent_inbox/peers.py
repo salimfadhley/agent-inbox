@@ -12,13 +12,16 @@ is charter directive 7's second bullet arriving over HTTP rather than in a messa
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
 from agent_inbox.exceptions import MailboxError
+from agent_inbox.hub_settings import env_with_source
 from agent_inbox.keys import SigningKey
 from agent_inbox.signatures import sign_request
 
@@ -44,6 +47,25 @@ ALLOWED_SCHEMES = ("https",)
 #: Narrow by design: an explicit opt-in for loopback only, not "http when you feel
 #: like it".
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+#: A deployment may widen that to plain HTTP anywhere. **Environment only.**
+#:
+#: This exists because two hubs on a private network — containers on one host, or two
+#: boxes on a LAN — cannot reach each other over HTTPS without a certificate authority
+#: neither of them has. It is also what makes the container test harness possible at
+#: all, and a federation feature that cannot be tested between two real hubs is one
+#: nobody should trust.
+#:
+#: **It is deliberately not settable through the API or the console.** A UI switch with
+#: a warning can be clicked by a tired operator, reached by a stale page, or set by a
+#: compromised console; an environment variable requires someone with access to the
+#: deployment, which is the person whose decision this actually is. That is a stronger
+#: guarantee than any warning text.
+#:
+#: A hub that has it on says so — in its descriptor and in `doctor` — because a peer
+#: deciding whether to trust us is entitled to know we accept unencrypted federation,
+#: and an operator is entitled to find out without reading the compose file.
+INSECURE_ENV = "FEDERATION_INSECURE"
 
 NODEINFO_REL_PREFIX = "http://nodeinfo.diaspora.software/ns/schema/2."
 
@@ -72,6 +94,19 @@ class PeerIdentity:
     users: int | None = None
 
 
+def insecure_federation(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether this deployment has opted into unencrypted federation.
+
+    Read from the environment on every call rather than cached, so a hub that is
+    restarted with it removed stops accepting HTTP immediately — a cached "yes" would
+    outlive the decision that produced it.
+    """
+    found = env_with_source(
+        INSECURE_ENV, environ if environ is not None else os.environ
+    )
+    return bool(found) and found[0].strip().lower() in ("1", "true", "yes", "on")
+
+
 def _origin(url: str) -> tuple[str, str, str]:
     """Parse a URL into (scheme, host, port-or-empty), refusing what we will not fetch.
 
@@ -93,11 +128,12 @@ def _origin(url: str) -> tuple[str, str, str]:
     if not host:
         raise PeerUnreachable(f"{url!r} names no host")
     if parts.scheme not in ALLOWED_SCHEMES and not (
-        parts.scheme == "http" and host in LOOPBACK_HOSTS
+        parts.scheme == "http" and (host in LOOPBACK_HOSTS or insecure_federation())
     ):
         raise PeerUnreachable(
             f"{parts.scheme!r} is not a scheme this hub will fetch — https only, "
-            "except http to a hub on this machine"
+            "except http to a hub on this machine, or anywhere when this deployment "
+            f"sets AGENT_INBOX_{INSECURE_ENV}"
         )
     port = f":{parts.port}" if parts.port else ""
     return parts.scheme, host, port

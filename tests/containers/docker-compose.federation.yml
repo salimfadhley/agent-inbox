@@ -1,0 +1,62 @@
+# Two hubs, two containers, one network — the test the in-process harness cannot be.
+#
+#   docker compose -f tests/containers/docker-compose.federation.yml up -d
+#   uv run python tests/containers/federate.py
+#   docker compose -f tests/containers/docker-compose.federation.yml down -v
+#
+# What this catches that tests/federation/ and doc/demo/two_hubs.py cannot:
+#
+#   * It runs the **shipped image**, not the source tree. A file missing from the
+#     image, a wrong entrypoint, an environment variable read at the wrong layer —
+#     none of those are visible to a test that imports the package.
+#   * **Real hostnames.** `alpha` and `beta` resolve over a container network, so
+#     WebFinger's host matching and the peer origin checks meet something other than
+#     `localhost`, which is the one degenerate case every other test uses.
+#   * **Separate filesystems and separate stores.** Any accidental shared state shows
+#     up here and nowhere else.
+#   * **Persistence.** The peer list and the seen-activity table are on volumes, so a
+#     restart proves they survive one.
+#
+# Both hubs set AGENT_INBOX_FEDERATION_INSECURE, because two containers cannot do
+# HTTPS to each other without a certificate authority neither of them has. That switch
+# is environment-only by design, and this file is exactly the case it exists for.
+#
+# This runs the **released image**, not the working tree — the same artifact an
+# operator deploys. Testing a locally-built image would prove the source works and say
+# nothing about what was published, which is the half that has actually broken before.
+# So the order is: release, then run this against the release.
+
+name: agent-inbox-federation-test
+
+services:
+  alpha:
+    image: salimfadhley/agent-inbox:${AGENT_INBOX_VERSION:-latest}
+    command: ["serve"]
+    environment:
+      AGENT_INBOX_HUB_NAME: alpha
+      # How *beta* reaches it, not how the host does — this is baked into every
+      # identifier alpha hands out, and a wrong value sends its peer nowhere.
+      AGENT_INBOX_PUBLIC_URL: http://alpha:8080
+      AGENT_INBOX_FEDERATION_INSECURE: "true"
+      AGENT_INBOX_AUTH_MODE: "off"
+    volumes:
+      - alpha-data:/data
+    ports:
+      - "18101:8080"
+
+  beta:
+    image: salimfadhley/agent-inbox:${AGENT_INBOX_VERSION:-latest}
+    command: ["serve"]
+    environment:
+      AGENT_INBOX_HUB_NAME: beta
+      AGENT_INBOX_PUBLIC_URL: http://beta:8080
+      AGENT_INBOX_FEDERATION_INSECURE: "true"
+      AGENT_INBOX_AUTH_MODE: "off"
+    volumes:
+      - beta-data:/data
+    ports:
+      - "18102:8080"
+
+volumes:
+  alpha-data:
+  beta-data:
