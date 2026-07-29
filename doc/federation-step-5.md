@@ -86,7 +86,50 @@ federated identity can mean here, not a detail of one step.*
 | FR-10 | The body is bounded before it is parsed. An oversized or malformed payload is refused without being deserialised. |
 | FR-11 | Every acceptance and every refusal is recorded with its reason, in enough detail to answer "why did this message arrive" and "why did that one not". |
 | FR-12a | A remote actor is stored by its **actor URI**, which is its identifier (ADR 0003). No identifier is minted for it. No surface presents it as an identity this hub verified — it is a claim by its hub, for as long as that hub keeps making it. |
-| FR-12 | Delivery goes through the existing core. A second delivery path would bypass the messaging rules and the per-reader read tracking, which is the duplication ADR 0005 forbids. |
+| FR-12 | Delivery goes through the existing core. A second delivery path would bypass the messaging rules and the per-reader read tracking, which is the duplication ADR 0005 forbids. **This requires a change to `Mailbox.send`'s contract — see below.** |
+
+## The one thing that must change in the core
+
+`Mailbox.send` opens with:
+
+```python
+sender = (await self._require_actor(caller)).name
+```
+
+and `_require_actor` resolves through `_local()` → `addressing.local_name()`, which
+**refuses anything not local**. The sender must be an existing local actor row with a
+name, enforced at two layers.
+
+That is incompatible with FR-12a, which says a remote actor is stored by its URI and no
+identifier is minted for it. As first written this spec asked for both, which cannot be
+done.
+
+### The resolution
+
+`_require_actor` is doing two jobs at once, and only one of them applies here:
+
+1. **Authorisation** — is this a real actor entitled to send? For a remote sender that
+   question is already answered, cryptographically, at the federation boundary: the
+   signature verified and the origin is a known peer. Asking again against a local table
+   is asking the wrong hub.
+2. **Resolution** — turn an address into the name the rules use. A remote sender has no
+   local name and should not be given one.
+
+So `send` gains a way to accept a sender that is **already authorised and identified by
+URI**. Not a bypass: everything after that first line — audience resolution, the
+disclosure protections from mission 0020, per-reader read tracking — still runs, and that
+is what FR-12 actually cares about. What changes is only who is allowed to be the sender.
+
+### What must not happen
+
+- **A second delivery path.** Writing an `ObjectRecord` directly would skip audience
+  resolution, and mission 0020's thread disclosure is exactly what that skipping causes.
+- **Minting a local actor to satisfy the signature.** That is FR-12a's false precision
+  arriving through the back door, and it puts strangers on the roster.
+- **Relaxing `local_name()`.** Its refusal is the `@local` non-egress guarantee. It must
+  keep refusing; the sender simply stops going through it.
+
+*This is the only core change the step needs. Everything else is additive.*
 
 ## Test matrix
 
