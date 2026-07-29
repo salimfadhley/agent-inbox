@@ -1,0 +1,102 @@
+{
+  "entries": [
+    {
+      "created_at": "2026-07-28T15:57:45.529793Z",
+      "decision_id": "01KYMQ4GNS4B1PRD6WJ6W75DRG",
+      "final_answer": "Purely local. The hub name never crosses the wire; the domain is the sole federated identity, per D-05 and C-008 (Lemmy's answer). Renaming therefore orphans nothing.",
+      "input_key": "hub_name_scope",
+      "mission_id": "01KYJY10WCA0RC9KWGXXCYX1CG",
+      "mission_slug": "manual-activitypub-federation-v1-01KYJY10",
+      "opened_by": "cli",
+      "options": [
+        "purely local",
+        "advertised not addressable",
+        "federated addressing uses it"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Is the hub name visible to other hubs, or purely local?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T15:57:46.212287Z",
+      "resolved_by": null,
+      "slot_key": "specify.identity.name-scope",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    },
+    {
+      "created_at": "2026-07-28T15:58:57.371014Z",
+      "decision_id": "01KYMQ6PTT9J16PCA5H8FF66QX",
+      "final_answer": "Lists are stored-only. Scalars keep env-over-stored precedence; peer lists and blocklists live only in the store and are edited through the UI. No environment equivalent, so no merge semantics and no second configuration shape.",
+      "input_key": "list_config_precedence",
+      "mission_id": "01KYJY10WCA0RC9KWGXXCYX1CG",
+      "mission_slug": "manual-activitypub-federation-v1-01KYJY10",
+      "opened_by": "cli",
+      "options": [
+        "lists stored-only",
+        "env pins whole list",
+        "env entries merge"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Does env-over-stored precedence apply to peer lists and blocklists?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T15:58:58.067402Z",
+      "resolved_by": null,
+      "slot_key": "specify.config.list-precedence",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    },
+    {
+      "created_at": "2026-07-28T16:00:06.211663Z",
+      "decision_id": "01KYMQ8T23YB16YY7Y88EZPVVD",
+      "final_answer": "The agent sets its own visibility, as a profile field edited through the existing profile surface. Lemmy's answer (C-008), consistent with how profiles already work, and no operator bottleneck.",
+      "input_key": "visibility_owner",
+      "mission_id": "01KYJY10WCA0RC9KWGXXCYX1CG",
+      "mission_slug": "manual-activitypub-federation-v1-01KYJY10",
+      "opened_by": "cli",
+      "options": [
+        "agent sets its own",
+        "operator only",
+        "agent narrows operator widens"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Who controls an actor's federation visibility?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T16:00:06.902016Z",
+      "resolved_by": null,
+      "slot_key": "specify.actors.visibility-owner",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    },
+    {
+      "created_at": "2026-07-28T16:01:59.780476Z",
+      "decision_id": "01KYMQC8Z4CKN86Y3R79T06BCB",
+      "final_answer": "Full capabilities, unauthenticated, as FR-017 already asks. Matches nodeinfo across the fediverse (C-008). A peer cannot compatibility-check what it cannot see, which is FR-016's purpose.",
+      "input_key": "descriptor_disclosure",
+      "mission_id": "01KYJY10WCA0RC9KWGXXCYX1CG",
+      "mission_slug": "manual-activitypub-federation-v1-01KYJY10",
+      "opened_by": "cli",
+      "options": [
+        "full capabilities",
+        "reachability only",
+        "boolean plus gated detail"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "How much does the unauthenticated peer descriptor disclose?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T16:02:00.454491Z",
+      "resolved_by": null,
+      "slot_key": "specify.descriptor.disclosure",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    }
+  ],
+  "mission_id": "01KYJY10WCA0RC9KWGXXCYX1CG",
+  "version": 1
+}

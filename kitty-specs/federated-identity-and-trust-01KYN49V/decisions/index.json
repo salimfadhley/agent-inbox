@@ -1,0 +1,77 @@
+{
+  "entries": [
+    {
+      "created_at": "2026-07-28T20:47:56.847139Z",
+      "decision_id": "01KYN7QVXF2ADJ1W0KHZ1X89MD",
+      "final_answer": "Advisory, but enabling over a Warning requires explicit confirmation and the warning text is recorded in the audit entry. Blocking would make Warning indistinguishable from Failed. C-008 gives no steer: Lemmy has no equivalent check.",
+      "input_key": "warning_blocks_enable",
+      "mission_id": "01KYN49VBXZ2G7GSB6AZ9Q6H9N",
+      "mission_slug": "federated-identity-and-trust-01KYN49V",
+      "opened_by": "cli",
+      "options": [
+        "advisory with confirmation",
+        "blocks enabling",
+        "annotate only, no confirmation"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Does a Warning result block enabling a peer, or only annotate it?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T20:47:57.532243Z",
+      "resolved_by": null,
+      "slot_key": "specify.peers.warning-semantics",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    },
+    {
+      "created_at": "2026-07-28T20:47:58.215716Z",
+      "decision_id": "01KYN7QX8706MRGW27FF2E13N5",
+      "final_answer": "Always served, reporting mode honestly. Requiring federation to be on creates a bootstrap deadlock between two fresh hubs. The disclosure objection is empty: GET / already publishes federates:false unauthenticated today.",
+      "input_key": "descriptor_when_disabled",
+      "mission_id": "01KYN49VBXZ2G7GSB6AZ9Q6H9N",
+      "mission_slug": "federated-identity-and-trust-01KYN49V",
+      "opened_by": "cli",
+      "options": [
+        "always served",
+        "only when enabled"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Is the peer descriptor served while federation is disabled?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T20:47:58.890256Z",
+      "resolved_by": null,
+      "slot_key": "specify.descriptor.availability",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    },
+    {
+      "created_at": "2026-07-28T21:06:44.926013Z",
+      "decision_id": "01KYN8T9HXADTFM3B2TK9DZH4X",
+      "final_answer": "CLI only. ADR 0005 already makes the CLI a first-class client. Removes the dependency on issue #21's Settings re-org, keeps the mission pure backend plus CLI, and makes it smaller and likelier to converge. The console section becomes its own mission after #21.",
+      "input_key": "operator_surface",
+      "mission_id": "01KYN49VBXZ2G7GSB6AZ9Q6H9N",
+      "mission_slug": "federated-identity-and-trust-01KYN49V",
+      "opened_by": "cli",
+      "options": [
+        "CLI only",
+        "console section",
+        "both minimal"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Does the operator surface belong in this mission, or is CLI-only enough?",
+      "rationale": null,
+      "resolved_at": "2026-07-28T21:06:45.749738Z",
+      "resolved_by": null,
+      "slot_key": "specify.surface.operator-client",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    }
+  ],
+  "mission_id": "01KYN49VBXZ2G7GSB6AZ9Q6H9N",
+  "version": 1
+}

@@ -1,0 +1,1330 @@
+OpenAI Codex v0.145.0
+--------
+workdir: /Users/salimfadhley/workspace/agent-inbox
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019faa30-e9c2-7f10-a97e-d1ae0d073848
+--------
+user
+You are reviewing a software mission's planning artefacts. Answer ONE question.
+
+QUESTION: The analysis below claims 100% requirement coverage (68/68) and a
+'sound' task breakdown. Test that claim. Is there any requirement that is MAPPED
+to a work package but NOT actually implementable from the subtasks of the package
+that claims it -- i.e. the mapping is bookkeeping rather than delivery?
+
+For each such requirement give: the requirement id, the package claiming it, and
+what the package's subtasks would have to do but do not. Prefer three real gaps
+over twenty weak ones. If the coverage claim holds, say so plainly and name the
+two mappings you consider thinnest and why they nonetheless hold.
+
+Also state whether the analysis MISSED anything that should block implementation.
+Do not restate the documents, do not propose a redesign, do not comment on style.
+
+=== SPEC ===
+# Spec - Manual ActivityPub Federation V1
+
+## What This Is
+
+`agent-inbox` can exchange addressed mail with other servers using a narrow
+ActivityPub-compatible profile.
+
+Federation is manual and opt-in by default. A fresh server federates with nobody. Human
+operators use a Federation UI tab to configure the server identity, peer servers,
+blocklists, warning-gated experimental modes, and actor visibility.
+
+V1 is direct server-to-server federation only. It does not introduce a bridge, tunnel,
+relay, public timeline, groups, or broad social-network behavior.
+
+## Revision — what changed since this was drafted
+
+Drafted 2026-07-28 00:22. Later the same day, hub identity was designed and specified as
+its own mission, [`a-hub-has-a-name-of-its-own-01KYMD90`](../a-hub-has-a-name-of-its-own-01KYMD90/spec.md)
+([#15](https://github.com/salimfadhley/agent-inbox/issues/15)), because federation could not
+be built on an identity that was an address. Several decisions taken there land directly on
+this spec, and this revision records them rather than leaving two documents to disagree.
+
+**Identity is now four things, not two.** This spec had `federation_base_url` plus a
+human-readable display name and summary. The hub-identity mission separates:
+
+| Field | Kind | Configurable | This spec's old name |
+|---|---|---|---|
+| public URL | **address** — many per hub, not identity | environment only | `federation_base_url` |
+| `name` | **identity**, the `@hub` part, validated as an address component | yes | *had no equivalent* |
+| `title` | display | yes | "display name" |
+| `description` | prose | yes | "summary" |
+
+`name` is the addition. It is the right-hand side of `name@hub`, it is validated to the same
+rule as an agent name, and it did not exist as a concept when this spec was written.
+
+**Federated identity is domain-based, and we build no registry.** Adopted from the
+fediverse: Lemmy and Mastodon identify an instance by its domain, and never built a name
+registry because domain registration already is one. So `name` is the *local, friendly*
+form and the domain is what settles collisions across hubs. A friendly-name registry is
+deferred to [#16](https://github.com/salimfadhley/agent-inbox/issues/16) with a recorded
+trigger, and should be closed unbuilt if domain-qualified addressing proves tolerable.
+
+**The hub `name` never crosses the wire** (clarified 2026-07-28, decision
+`01KYMQ4GNS4B1PRD6WJ6W75DRG`). It is a *local* convenience only: on this hub an agent types
+`alice@saltclub`, and a remote hub addresses the same actor as `@alice@hub.example`. The
+domain is the sole federated identity. Nothing in a peer descriptor, actor document,
+WebFinger response, or activity carries the friendly name.
+
+That is Lemmy's answer, so C-008 selects it by default — and it is what makes FR-051 true
+rather than merely asserted: renaming orphans nothing precisely because nothing outside the
+hub ever held the name. The cost accepted is two address forms, friendly locally and
+domain-qualified across hubs. Mastodon lives with the same split.
+
+**Two consequences for this spec.** First, renaming a hub needs **no forwarding, aliases or
+grace periods** — nothing outside the hub ever held the friendly name, so a rename orphans
+nothing. Second, changing the **domain** is the genuinely painful operation, which
+strengthens FR-015 rather than weakening it: the fediverse's answer to a domain change is
+"don't", and we inherit a decade of operational evidence along with the registry.
+
+**A hub called `local` cannot switch federation on.** Not merely blocked from federating —
+blocked from *enabling the mode*, so a hub with federation on and no name is not a reachable
+state. `local` remains the default and is a permitted name, because most hubs are private
+and never federate; the constraint appears where the consequence is and nowhere else.
+
+**The Federation tab already exists.** FR-001 proposed it; the hub-identity mission built it
+as a deliberate placeholder holding the three identity fields, on the operator's instruction
+to get the settings system working before the feature that needs it. This mission adds
+peers, modes, blocklists and delivery state to a tab that is already there.
+
+**Hub settings already have a home and a precedence rule.** The hub-identity mission added
+the first hub-level settings storage — beside the mail in the existing SQLite file, no new
+mount — with a fixed rule: **the environment always wins, and overriding never erases.** A
+field fixed by the environment renders *disabled and naming the variable*, because a control
+that silently loses its value on restart looks exactly like it worked. Federation
+configuration must use that mechanism, not invent a second one.
+
+## Problem
+
+The mailbox is currently local to one hub. Operators want separate `agent-inbox` servers
+to exchange mail while preserving the product's core properties:
+
+- local-first operation;
+- one small deployable service;
+- explicit trust boundaries;
+- mail as data, never instructions;
+- per-recipient inbox semantics;
+- no accidental broadcast into another operator's fleet.
+
+ActivityPub already names most of the concepts we need: actors, actor documents, inboxes,
+`Create`, `Note`, `to`, `cc`, and `inReplyTo`. V1 should use those shapes directly,
+while staying much smaller than a general Fediverse implementation.
+
+### What is already built
+
+This is not a greenfield edge. Earlier work deliberately cut the seams federation will
+widen, and this spec must inherit them rather than rediscover them:
+
+- **`GET /` reports `"federates": false`.** The descriptor already carries the flag this
+  mission flips.
+- **A federation inbox route exists and refuses honestly** — `501`, with a reason. It cites
+  superseded mission numbers (0024, 0025) and should be repointed at this mission.
+- **Cross-hub addresses are refused loudly, by design.** `addressing.py` raises
+  `RemoteMailbox` — a distinct exception from `MalformedAddress`, split precisely so that
+  "fix the name" and "this needs federation" stay different answers, "because when
+  federation arrives, this case becomes a delivery while that one still fails."
+- **`local_name()` is the single chokepoint.** The module states the intent outright: keeping
+  the address/name split there is what "lets federation later widen this one function rather
+  than the whole engine." Federation should widen that function.
+- **`@local` is already a non-egress guarantee, enforced in code.** `local` is a reserved
+  alias every hub answers to *in addition to its own name*, and an address ending `@local`
+  "can never be federated, whatever peering is arranged later" — containment an agent gets
+  by choosing an address, with no configuration to get wrong. C-007 is therefore already
+  satisfied by shipped code; this mission must not regress it.
+- **`src/agent_inbox/federation.py`** holds the rule that a hub named `local` cannot enable
+  federation, shipped with a test that fails if the rule is removed. The *switch* was
+  deliberately left to this mission, so that the earlier one did not ship a control that
+  does nothing. **This mission owns the switch and must wire it to that rule.**
+- **The AS2 vocabulary already anticipates peers**, noting that "a federated peer may send
+  extensions" and that unknown properties should be preserved rather than dropped.
+
+## Prior Art And Starting Defaults
+
+The starting operational defaults are borrowed from Lemmy where they fit this product:
+
+- federation has allowlist, blocklist, and open modes;
+- TLS is the normal federation posture;
+- outbound federation is queued instead of blocking the user action;
+- per-target outgoing concurrency defaults to `1`;
+- retries use backoff and do not make the sender wait;
+- duplicate inbound activity ids are remembered so retries are no-ops;
+- inbound processing has a short timeout;
+- fetched collections and remote content are bounded.
+
+Concrete V1 thresholds use Lemmy-inspired values unless planning finds a project-specific
+reason to adjust them:
+
+| Limit | V1 Starting Value | Source/Reason |
+|---|---:|---|
+| Outgoing sends per peer | `1` concurrent request | Lemmy default `concurrent_sends_per_instance` |
+| Inbound activity processing timeout | `9s` | Lemmy shared inbox timeout |
+| Remote fetch budget per object resolution | `100` HTTP fetches | Lemmy federation fetch limit |
+| Directory/page fetch size | `50` items | Lemmy fetch/page maximum |
+| Note body length | `10,000` characters | Lemmy ordinary body limit |
+| Long-form body support | out of scope; hard cap `50,000` if reused internally | Lemmy post body limit |
+| Remote actor display name | `50` characters | Lemmy display name limit |
+| Server summary/profile text | `150` characters initially | Lemmy site summary limit |
+| Remote URL length | `2,000` characters | Lemmy URL length limit |
+| Retry backoff | immediate first retry, exponential `1.25^n`, cap `24h` | Lemmy retry shape |
+
+These are product defaults, not protocol claims. Operators should not see these values
+unless a warning, error, or advanced setting needs to explain them.
+
+### The tie-breaker: when in doubt, do what Lemmy does
+
+Standing principle (owner, 2026-07-28). Where this spec is silent, ambiguous, or where
+planning finds a genuine fork with no clear winner, **the default answer is Lemmy's**.
+
+**Caveat, applied consistently.** Lemmy's behaviour is cited here from established protocol
+knowledge and from the defaults table above, which was taken from its docs and source. Where
+a clarification turns on *what Lemmy actually does* rather than on our own reasoning, planning
+should re-read the source before relying on it — the same caveat this project's competitive
+survey already applies to its federation claims. The tie-breaker is a default, not a licence
+to assert.
+
+This is not deference for its own sake. Lemmy is a working, deployed, adversarially-tested
+federation implementation at a scale we do not have, and its choices encode a decade of
+operational evidence we would otherwise have to buy. The alternative to copying it is
+inventing, and charter directive 3 is explicit that inventing something a standard already
+names is a sign of unsettled ground.
+
+It has already decided one thing here: hub-name collisions. We adopted the fediverse answer
+— federated identity is domain-based, DNS is the registry, and no friendly-name registry is
+built — rather than inventing one. See the revision note above and
+[#16](https://github.com/salimfadhley/agent-inbox/issues/16).
+
+**Two limits.** Lemmy is human social software, and charter directive 7 is that this product
+is built for LLMs first. Where a Lemmy affordance exists to drive *engagement* — votes,
+karma, ranking, boosts, discovery — it is out, and the spec already says so. And where
+Lemmy's answer conflicts with a binding ADR, the ADR wins. Departing from Lemmy is allowed;
+departing **silently** is not, so record the reason.
+
+## User Scenarios
+
+1. **Default local-only server.** A new server has no peers and cannot send or receive
+   federated mail.
+2. **Add a trusted peer.** An operator adds `https://inkbox.example`, sees its display
+   name, capabilities, key fingerprint, and health status, then enables it.
+3. **LAN experiment over HTTP.** An operator adds `http://workstation.lan:8080`, accepts a
+   clear insecure-transport warning, and uses it only on a trusted isolated LAN.
+4. **Open-mode experiment.** An operator enables open federation after accepting a strong
+   warning that unsolicited remote servers can deliver mail.
+5. **Block a server.** An operator blocks a domain or peer. Inbound is rejected,
+   outbound delivery is suppressed, and pending deliveries to that peer are cancelled or
+   made permanently failed.
+6. **Send to a Fediverse-style address.** A local actor sends to `@alice@example.com`;
+   the server resolves the address via WebFinger, fetches the actor document, and queues
+   delivery to Alice's inbox.
+7. **Receive remote mail.** A permitted remote actor sends `Create/Note` to a local actor.
+   The message lands immediately in the normal inbox/thread flow and is visibly marked as
+   remote.
+8. **Choose actor visibility.** A human or agent can be `local`, `normal`, or
+   `discoverable`. The default is `normal`.
+9. **Edit server profile.** An operator changes the human-readable server display name
+   and summary. Federation identity remains the stable base URL.
+10. **Audit a risky change.** An operator can see who enabled HTTP, open mode, a peer, or
+    a blocklist entry.
+
+## Functional Requirements
+
+| ID | Requirement | Status |
+|---|---|---|
+| FR-001 | **Extend** the existing Federation tab with peer management, federation mode, blocklist, delivery status, and warnings. The tab and the three server-identity fields were built by `a-hub-has-a-name-of-its-own-01KYMD90`; this mission fills the placeholder rather than creating it. | revised |
+| FR-002 | Federation defaults to no peers and no remote delivery. | accepted |
+| FR-003 | Federation trust is server-level: adding a peer authorizes addressed mail exchange with that server, not database access, inbox reads, admin API access, or history access. | accepted |
+| FR-004 | Support federation modes `disabled`, `allowlist`, and warning-gated `open`. | accepted |
+| FR-005 | `allowlist` is the default enabled mode. In allowlist mode, only configured enabled peers may exchange mail. | accepted |
+| FR-006 | `open` mode is experimental and requires a strong UI warning before activation. | accepted |
+| FR-007 | A blocklist is available in every mode and always overrides allowlist/open policy. | accepted |
+| FR-008 | Blocking a peer/domain rejects inbound, suppresses outbound, prevents actor discovery, and cancels or marks pending deliveries to that target as failed. | proposed |
+| FR-009 | HTTPS is the normal allowed scheme for peer URLs, WebFinger, actor documents, and inboxes. | accepted |
+| FR-010 | HTTP can be enabled experimentally with an explicit insecure-transport warning. | accepted |
+| FR-011 | HTTP in open mode requires a stronger warning than HTTP in allowlist mode. | proposed |
+| FR-012 | Schemes other than `https` and explicitly enabled `http` are rejected. This includes `file`, `gopher`, `s3`, `ftp`, and similar non-HTTP schemes. | accepted |
+| FR-013 | Federation has **two** preconditions, both enforced at the moment the mode is enabled: a stable public URL, and a hub `name` that is not `local`. The second is already implemented as `check_may_enable_federation()` in `src/agent_inbox/federation.py`; this mission wires the switch to it. The refusal must say why — a hub called "local" cannot be told apart from every other hub called "local". | revised |
+| FR-014 | The server's editable human-readable fields are `title` (display) and `description` (prose), **already built** and separate from both the public URL and `name`. This mission adds no new server-profile fields; it consumes those. Terminology follows the shipped names — not "display name" and "summary". | revised |
+| FR-015 | Changing the **public URL** is a high-risk identity change and must warn that existing federated actor/activity ids become stale. This is *strengthened* by adopting domain-based federated identity: the domain is now the thing other hubs hold, so changing it is the operation the fediverse's own answer to is "don't". | revised |
+| FR-051 | Changing the hub **`name`**, by contrast, is **not** high-risk and requires no forwarding, aliases, or grace periods — nothing outside the hub ever held the friendly name. What shifts is local only: agents' `@hub` addressing and any convention written into a project. The rename should say so rather than being silent about it. Do not build forwarding machinery: it was built for agents in mission 0012, deleted in 0023, and ADR 0003 names it as existing only to survive identity churn. | new |
+| FR-016 | Expose a safe server descriptor at `/.well-known/agent-inbox` for peer compatibility checks. | accepted |
+| FR-017 | The descriptor includes software name, version, base URL, `title`, `description`, federation mode and capabilities, supported schemes, and public key metadata — **unauthenticated** (clarified 2026-07-28, decision `01KYMQC8Z4CKN86Y3R79T06BCB`). Open capability advertisement is the fediverse norm (nodeinfo) — *asserted from protocol knowledge, not re-read this pass; see the C-008 caveat* — so C-008 selects it, and FR-016's compatibility check is impossible against a descriptor a prospective peer cannot read. It does not carry the hub `name` (FR-048). | revised |
+| FR-052 | Disclosing the mode openly means **open mode is publicly visible**. That is accepted, not overlooked: a hub in open mode is by definition willing to hear from strangers, so the mode tells a stranger nothing the hub is not already doing. The descriptor must still carry no actor data, no counts, and no operator information — FR-030's exclusions apply to it. | new |
+| FR-018 | Support WebFinger resolution for Fediverse-style handles such as `@alice@example.com`, using `acct:alice@example.com` as the resource. | accepted |
+| FR-019 | WebFinger responses for local actors return a JRD with a `self` link to the ActivityPub actor document. | proposed |
+| FR-020 | Full actor URLs may be accepted as an advanced/debug addressing path, but user-facing UI teaches Fediverse-style handles. | proposed |
+| FR-021 | Store canonical remote identity as the actor URI, not the typed handle or display name. | accepted |
+| FR-022 | Local and remote actors may have the same username. Remote actors are always displayed with their domain. | accepted |
+| FR-023 | Add actor federation visibility enum: `local`, `normal`, `discoverable`, **as a profile field the actor edits itself** through the existing profile surface — not a parallel administrative setting (clarified 2026-07-28, decision `01KYMQ8T23YB16YY7Y88EZPVVD`). Lemmy lets users control their own discoverability, so C-008 selects it, and it avoids a second place actor facts live. ADR 0008 is not in tension: that ADR is about *mail* carrying no authority, and an agent choosing its own reachability is not administration of the hub. | revised |
+| FR-024 | Default actor federation visibility is `normal`. | accepted |
+| FR-025 | `local` actors are not discoverable, do not resolve through WebFinger, reject inbound federated mail, and cannot send outbound federated mail as that actor. | accepted |
+| FR-026 | `normal` actors are not listed in the federated directory but can be resolved/addressed if the remote sender knows the exact handle or actor URI. | accepted |
+| FR-027 | `discoverable` actors appear in the federated directory and are addressable, subject to server policy and blocklist. | accepted |
+| FR-053 | Server policy still bounds actor choice: an actor cannot become reachable in `disabled` mode, past the blocklist, or outside the allowlist, whatever it sets. Visibility is the actor's ceiling on its own exposure, never a grant. | new |
+| FR-028 | Humans and agents can opt into `discoverable` or `local`. Groups are out of V1 unless the implementation already makes them trivial. | accepted |
+| FR-029 | Expose a federated directory containing only discoverable actors and minimal profile data. | accepted |
+| FR-030 | Directory data excludes email address, login state, 2FA state, operator/admin status, read state, mailbox stats, and message history. | accepted |
+| FR-031 | V1 supports outbound and inbound `Create` activities wrapping `Note` objects. | accepted |
+| FR-032 | V1 supports `to`, `cc`, and `inReplyTo` for addressed mail and replies. | accepted |
+| FR-033 | V1 rejects unsupported activity types before delivery, including `Follow`, `Like`, `Announce`, `Delete`, `Update`, `Undo`, votes, boosts, and timeline actions. | accepted |
+| FR-034 | Local send succeeds after local persistence; remote delivery happens asynchronously through per-peer queues. | accepted |
+| FR-035 | Remote messages that pass policy, signature, size, and type checks land immediately in the normal inbox/thread flow. | accepted |
+| FR-036 | No quarantine is added in V1. Remote provenance is visible instead. | accepted |
+| FR-037 | Duplicate inbound activity ids are no-ops and do not duplicate delivered messages. | accepted |
+| FR-038 | Federation delivery state is visible in the UI: pending, delivered, failed, suppressed by blocklist, or unsupported. | proposed |
+| FR-039 | Federation uses signed server-to-server HTTP requests. The canonical `agent-inbox` profile uses RFC 9421 HTTP Message Signatures unless planning proves a compatibility shim is required. | proposed |
+| FR-040 | Remote content is sanitized and rendered as remote content, not as trusted instruction. | accepted |
+| FR-041 | All authenticated human operators can manage federation in V1. Finer-grained roles are future work. | accepted |
+| FR-042 | Record audit events for federation mode changes, warning acknowledgements, peer changes, blocklist changes, server profile changes, actor visibility changes, key changes, rejected inbound messages, and failed/cancelled outbound deliveries. | accepted |
+| FR-043 | Federation configuration uses the hub settings mechanism built by `a-hub-has-a-name-of-its-own-01KYMD90` — stored beside the mail in the existing SQLite file, no new mount, no config file. Do not introduce a second configuration source. | new |
+| FR-044 | The environment always wins over stored configuration, and **overriding never erases**: an operator who sets a variable, restarts, then unsets it gets their configured value back. This applies to every federation setting, not only to identity. | new |
+| FR-045 | Any federation field fixed by the environment renders **disabled, saying so and naming the variable**. A greyed control with no explanation reads as broken; one naming the variable reads as governed. | new |
+| FR-049 | Precedence applies to **scalar** settings only — federation mode, public URL, identity fields. **Peer lists and blocklists are stored-only**, edited through the UI, with no environment equivalent (clarified 2026-07-28, decision `01KYMQ6PTT9J16PCA5H8FF66QX`). There is therefore no list-merge semantics and no "which entry won" question, and the settings mechanism needs no widening. A deployment that must pin its allowlist should raise that as its own requirement rather than have it inferred here. | new |
+| FR-046 | Once federation ships, the inbox route's status must change with its meaning. `501 Not Implemented` says *this software cannot do this*, which stops being true the day this mission lands; a hub in `disabled` mode, or one refusing a blocked or non-allowlisted peer, is saying *this hub will not*, which is `403`. Settled on HTTP semantics rather than by asking. Until then the `501` body must stop citing superseded mission numbers (0024, 0025) and cite this mission. | revised |
+| FR-050 | **Outbound authorization is re-derived at send time, from current policy — never carried from queue time.** Every send re-evaluates the whole decision: federation mode, actor visibility, blocklist, peer state and scheme. A delivery that was permitted when queued and is forbidden when it fires must not go out. Found by outside review, 2026-07-28 (charter directive 4). | new |
+| FR-048 | The hub `name` is never emitted on any federated surface — not in the peer descriptor, actor documents, WebFinger responses, or activities. Federated addressing is domain-qualified only. A test must assert this, because it is the property FR-051 depends on. | new |
+| FR-047 | Federation widens `local_name()` in `addressing.py` rather than the messaging engine. That chokepoint exists for this purpose and the module says so; a second address-resolution path would be the duplication ADR 0005 forbids. | new |
+
+## Federation Policy
+
+### Modes
+
+`disabled`
+
+- Reject inbound federation.
+- Do not attempt outbound federation.
+- Keep configured peers and blocklist for later re-enable.
+
+`allowlist`
+
+- Default enabled mode.
+- Only enabled peers can send to this server or receive from this server.
+- Empty allowlist means federation is effectively local-only.
+
+`open`
+
+- Experimental.
+- Accept compatible HTTPS federation from any non-blocked server.
+- If experimental HTTP is also enabled, open mode requires an additional warning.
+- Unsupported signatures, unsupported activity types, oversized payloads, blocked
+  domains, and disallowed actor visibility still reject before delivery.
+
+### Blocklist
+
+The blocklist is an override, not a mode. It applies to every scheme and every federation
+mode.
+
+Blocklist entries may be stored as normalized base URLs/domains, with planning to decide
+the precise representation. Matching must be deterministic and resistant to case,
+trailing slash, and default-port confusion.
+
+## URL And Reachability Policy
+
+V1 direct federation requires both sides to be reachable at their configured base URLs.
+
+- `https://` is allowed by default.
+- `http://` is available only as an experimental setting with a persistent insecure marker
+  in the UI.
+- No other URL scheme is accepted.
+- HTTP peers are visually marked as insecure wherever they appear.
+- A private HTTP node behind NAT cannot federate with a public HTTPS node in V1 unless
+  separate infrastructure makes it directly reachable.
+
+### HTTP Warning Text
+
+When enabling HTTP federation or adding an HTTP peer, the UI must present substantially
+this warning:
+
+> HTTP federation is not encrypted. Anyone on the network path may read traffic, observe
+> message metadata, block delivery, or replay captured requests. Use this only on a
+> trusted isolated LAN.
+
+Open mode plus HTTP must add substantially this warning:
+
+> Open HTTP federation lets any reachable non-blocked server attempt to deliver mail over
+> an unencrypted connection. This can expose message content and metadata to the network
+> and can create unsolicited agent attention cost. Use only for experiments on isolated
+> networks.
+
+## Actor Visibility
+
+Actor visibility is a single enum, not independent booleans:
+
+| Value | Directory | Exact Addressing | Inbound Federated Mail | Outbound Federated Mail |
+|---|---|---|---|---|
+| `local` | no | no WebFinger result | rejected | rejected |
+| `normal` | no | yes | accepted if policy allows | accepted if policy allows |
+| `discoverable` | yes | yes | accepted if policy allows | accepted if policy allows |
+
+Server policy still wins. In `disabled` mode nobody remote can talk to anyone. The
+blocklist always wins. Discoverability is not a trust grant.
+
+System/internal actors are never discoverable unless a later mission explicitly designs
+that exposure.
+
+## WebFinger And Addressing
+
+The primary user-facing remote address format is:
+
+```text
+@alice@example.com
+```
+
+The server resolves it as:
+
+```text
+GET https://example.com/.well-known/webfinger?resource=acct:alice@example.com
+Accept: application/jrd+json
+```
+
+The response must identify an ActivityPub actor document with a `self` link:
+
+```json
+{
+  "subject": "acct:alice@example.com",
+  "aliases": ["https://example.com/actors/alice"],
+  "links": [
+    {
+      "rel": "self",
+      "type": "application/activity+json",
+      "href": "https://example.com/actors/alice"
+    }
+  ]
+}
+```
+
+For experimental HTTP peers, the same shape is allowed over HTTP only when the relevant
+HTTP warning has been accepted and policy allows the target peer.
+
+## Peer Add Flow
+
+When an operator adds a peer URL, the server runs a compatibility check:
+
+1. Normalize the URL and reject unsupported schemes.
+2. Check blocklist first.
+3. Fetch `/.well-known/agent-inbox` if present.
+4. Read display name, base URL, version, federation capabilities, supported schemes, and
+   public key metadata.
+5. Validate the peer URL matches the descriptor's declared base URL or show a warning.
+6. Confirm the peer exposes WebFinger.
+7. Confirm at least one actor can resolve when the operator supplies a handle, or accept
+   descriptor-only readiness for an empty server.
+8. Record key fingerprint and first-seen metadata.
+9. Show `Ready`, `Warning`, or `Failed` with exact reasons.
+
+Adding a peer does not import a directory by default.
+
+## Automatic Fetching And Crawling
+
+V1 allows only shallow, explicit remote fetching:
+
+- peer descriptor during peer add/check;
+- WebFinger for a typed handle;
+- actor document for a resolved actor;
+- inbox URL and public key metadata from the actor document;
+- object fetches required to validate an inbound or replied-to object, bounded by the
+  fetch budget.
+
+V1 does not crawl remote outboxes, followers, following collections, public timelines,
+actor directories, replies, attachments, or arbitrary embedded URLs.
+
+## Delivery Semantics
+
+Outbound:
+
+**Authorization is a send-time decision, not a queue-time one.** This is the finding of the
+outside review on 2026-07-28 and it is the sharpest thing in this section, so it comes
+first. Two sequences, both real, both requiring only that a remote peer can stall a retry:
+
+1. An actor sends while policy allows; the peer returns `503` or times out, holding the
+   delivery pending; the operator sets federation mode to `disabled`; the peer later accepts
+   the retry. A worker trusting the queue-time decision sends a signed `Create/Note` **after
+   federation was turned off** — defeating FR-004's *"do not attempt outbound federation"*
+   and NFR-001's no-egress posture.
+2. The same shape with visibility: an actor is `normal` when it sends, the retry is stalled,
+   the actor sets itself to `local`, and the retry then succeeds — defeating FR-025, which
+   says a `local` actor *"cannot send outbound federated mail as that actor"*, and SC-007.
+
+Note what makes these different from the blocklist case: FR-008 already requires pending
+deliveries to a blocked peer to be cancelled or failed, so **that** one is covered. Mode and
+visibility had no equivalent, because neither is a property of the *target* — they are
+properties of this hub and of the sender, and a queue keyed by peer does not notice them
+changing. Re-deriving the whole decision at send time (FR-050) closes all three uniformly
+and removes the need to remember which properties have their own cancellation path.
+
+- Persist the local message first.
+- Resolve remote recipients to actor URIs and inbox URLs.
+- Queue one delivery per target peer/inbox.
+- Default to one concurrent send per peer.
+- Retry failed sends with backoff.
+- Show delivery state in the Federation tab and message details.
+- Cancelling/removing/blocking a peer suppresses pending delivery to that peer.
+
+Inbound:
+
+- Enforce global mode, blocklist, peer policy, scheme policy, signature validity, actor
+  visibility, type support, size limits, and duplicate activity id checks before delivery.
+- Deliver accepted mail immediately.
+- Store remote actor URI, typed/display handle, server/domain, and activity id.
+- Mark remote provenance visibly in UI and API responses.
+
+Remote delivery does not affect local read state. Remote peers cannot read local inboxes
+or thread history through federation.
+
+## ActivityPub Profile
+
+V1 emits and accepts only:
+
+- actor documents for local humans and agents;
+- `Create` activities wrapping `Note`;
+- `summary` as subject, if present;
+- `content` as body;
+- `to` / `cc` as recipients;
+- `inReplyTo` for replies;
+- public key metadata required for request signature verification;
+- server descriptor metadata for `agent-inbox` peers.
+
+Unsupported ActivityPub fields may be ignored if safe. Unsupported activities are
+rejected with a clear reason and audit event.
+
+## Server Profile
+
+**Superseded in part.** Server identity is settled by
+`a-hub-has-a-name-of-its-own-01KYMD90` and is not re-specified here. The field names below
+are the shipped ones.
+
+Already built, editable, and consumed by this mission:
+
+- `name` — the `@hub` part; validated as an address component; `local` blocks enabling
+  federation;
+- `title` — display;
+- `description` — prose.
+
+This mission may add, if planning finds them necessary:
+
+- an optional contact field;
+- icon/avatar, future work unless trivial.
+
+Restricted fields:
+
+- the **public URL** (address, environment-only — never editable in the UI, and never
+  identity);
+- signing keys;
+- federation mode;
+- HTTP/open warnings.
+
+Restricted fields are still manageable by operators, but require dedicated flows with
+warnings and audit events. Any field the environment governs renders disabled and names the
+variable (FR-045).
+
+## Audit Log
+
+Federation must record enough audit data to answer "who opened the door?" and "why was
+this message accepted or rejected?"
+
+Each audit entry includes:
+
+- timestamp;
+- acting human username for admin actions;
+- action type;
+- target peer/domain/actor/activity if applicable;
+- before/after values where safe;
+- warning acknowledgement id/version where applicable;
+- rejection/failure reason for automated decisions.
+
+## Non-Functional Requirements
+
+| ID | Requirement | Threshold | Status |
+|---|---|---|---|
+| NFR-001 | Federation is off by default. | A newly started server has no remote ingress or egress without operator action. | accepted |
+| NFR-002 | Federation is bounded. | Payload sizes, fetch budgets, directory pages, retry loops, and processing timeouts have enforced limits. | accepted |
+| NFR-003 | Remote content is visibly remote. | API and UI include remote actor URI/handle and server/domain wherever remote mail is shown. | accepted |
+| NFR-004 | Remote content is not instruction. | Inbound remote messages are framed as untrusted message data in UI/API/tool surfaces. | accepted |
+| NFR-005 | UI warnings are unavoidable for risky modes. | HTTP and open mode require explicit operator acknowledgement before activation. | accepted |
+| NFR-006 | Peer failures are diagnosable. | Federation tab shows peer health and recent delivery/rejection reasons. | proposed |
+| NFR-007 | Implementation preserves one API. | CLI, MCP, console, and federation call the API/server behavior rather than opening storage directly. | accepted |
+
+## Constraints
+
+| ID | Constraint | Status |
+|---|---|---|
+| C-001 | Do not invent names for concepts already named by ActivityStreams/ActivityPub. | accepted |
+| C-002 | Federation is an edge capability; it must not rewrite the mailbox core into a social network. | accepted |
+| C-003 | Groups are future work unless they are mechanically free from the actor model. | accepted |
+| C-004 | Bridge/NAT relay mode is future work and not part of V1. | accepted |
+| C-005 | Roles are future work. In V1 every authenticated human is an operator. | accepted |
+| C-006 | No public self-registration is introduced by this mission. | accepted |
+| C-008 | **When in doubt, do what Lemmy does.** Where this spec is silent or planning finds a genuine fork, Lemmy's behaviour is the default. Departures are permitted and must be recorded with their reason; the two standing exceptions are engagement mechanics (charter directive 7) and anything conflicting with a binding ADR. | new |
+| C-007 | `@local` must never be federated. **Already enforced** in `addressing.py`: `local` is a reserved alias every hub answers to *in addition to its own name*, and the non-egress promise is described there as containment "an agent gets by choosing an address — visible by inspection, with no configuration to get wrong". This mission must not regress it. Note the interaction with `local` being also the default *name*: on an unnamed hub the alias and the name coincide, which is harmless because such a hub cannot enable federation at all (FR-013). | revised |
+
+## Dependencies
+
+| Depends on | Why | State |
+|---|---|---|
+| `a-hub-has-a-name-of-its-own-01KYMD90` | Supplies `name`, `title`, `description`, the settings storage and precedence rule, the Federation tab, and the `local` gate this mission wires the switch to | specified, planned, tasked, analysis verdict `ready`; **not yet implemented** |
+| [#16](https://github.com/salimfadhley/agent-inbox/issues/16) | A friendly-name registry, deferred with a trigger. Not required: domain-based identity settles collisions | deferred, should be closed unbuilt if domain-qualified addressing proves tolerable |
+
+Charter directive 3 applies directly: *settle a foundation before building on it — before
+building layer N, ask whether layer N−1 is actually settled.* Layer N−1 here is hub
+identity. It is settled on paper and not yet in code, which is the ordering this mission
+must respect.
+
+## Success Criteria
+
+| ID | Outcome |
+|---|---|
+| SC-001 | A new server shows no configured peers and cannot federate until an operator enables direct federation. |
+| SC-002 | An operator can add an HTTPS peer, verify descriptor/WebFinger/signing capability, and see readiness in the Federation tab. |
+| SC-003 | An operator can add an HTTP peer only after accepting the insecure LAN warning; the peer remains visibly marked insecure. |
+| SC-004 | In allowlist mode, mail exchanges only with enabled peers and blocklist entries override that permission. |
+| SC-005 | In open mode, compatible non-blocked HTTPS senders can deliver `Create/Note` and the UI records that open mode warning was accepted. |
+| SC-006 | `@alice@example.com` resolves through WebFinger to a canonical actor URI and inbox URL. |
+| SC-007 | `local`, `normal`, and `discoverable` actor visibility states behave as specified for directory listing, WebFinger, inbound, and outbound federation. |
+| SC-008 | Remote messages that pass validation land immediately in normal inbox/thread views and are visibly marked with remote provenance. |
+| SC-009 | Duplicate inbound activity ids do not create duplicate messages. |
+| SC-010 | Unsupported activity types, oversized content, blocked domains, invalid signatures, disallowed schemes, and `local` recipients are rejected before delivery and audited. |
+| SC-011 | Local send does not wait for remote delivery; delivery state is visible and retry behavior is bounded. |
+| SC-012 | Federation base URL, server profile, warnings, peer list, blocklist, actor visibility, and delivery decisions have audit coverage. |
+
+## Out Of Scope
+
+- Federation bridge, NAT relay, tunneled inbox, or delegated public identity.
+- Public timeline, feeds, likes, boosts, follows, votes, or social engagement mechanics.
+- Cross-server groups or group discovery.
+- Attachments/media federation unless an existing local attachment model makes a safe
+  subset trivial.
+- End-to-end encryption.
+- Full Fediverse compatibility with every implementation.
+- Role-based federation administration.
+- Remote read/unread state.
+- Remote inbox browsing or message history export.
+- Automatic remote crawling.
+
+## References
+
+- W3C ActivityPub Recommendation: https://www.w3.org/TR/activitypub/
+- W3C ActivityStreams Core: https://www.w3.org/TR/activitystreams-core/
+- RFC 7033 WebFinger: https://datatracker.ietf.org/doc/html/rfc7033
+- RFC 9421 HTTP Message Signatures: https://datatracker.ietf.org/doc/rfc9421/
+- Lemmy federation docs: https://join-lemmy.org/docs/administration/federation_getting_started.html
+- Lemmy ActivityPub integration docs: https://join-lemmy.org/docs/contributors/05-federation.html
+- Lemmy source inspected for defaults: LemmyNet/lemmy commit `7d4b7b4`
+- Hub identity mission: `kitty-specs/a-hub-has-a-name-of-its-own-01KYMD90/spec.md`
+- ADR 0003, identity is a surrogate key: `doc/decisions/0003-identity-is-a-surrogate-key.md`
+- ADR 0005, one API, every client is a client: `doc/decisions/0005-one-api-every-client-is-a-client.md`
+- ADR 0008, no actor has authority: `doc/decisions/0008-no-actor-has-authority.md`
+
+=== TASKS ===
+# Work Packages: Manual ActivityPub Federation V1
+
+**Inputs**: design documents in `kitty-specs/manual-activitypub-federation-v1-01KYJY10/`
+**Prerequisites**: `spec.md`, `plan.md`, and the outside review in `research/`
+**Branch**: planning base `feat/federation`; completed changes merge into `feat/federation`.
+
+**Tests**: included throughout, and several subtasks require a test to be **proved by
+removing the code it guards and watching it fail**. This project has shipped four tests that
+passed with the fix removed and caught all four that way. In a mission where the failure mode
+is silent disclosure, an unproved test is worse than none — it is believed.
+
+**Organization**: 80 subtasks (`T001`–`T080`) roll into 14 work packages
+(`WP01`–`WP14`), 5–7 subtasks each. This is the largest mission in the project.
+
+## ⛔ Sequencing gate
+
+**No work package here may start until `a-hub-has-a-name-of-its-own-01KYMD90` is implemented
+and merged.** Federation depends on the hub `name`, the settings storage, the precedence rule
+and the `local` gate that mission builds. Charter directive 3: if layer N−1 is not settled,
+settling it *is* the work.
+
+## Two decisions still owed by the operator
+
+1. **A new runtime dependency.** Outbound federation needs an async HTTP client; the project
+   has none and uses stdlib `urllib.request`. See `plan.md` Technical Context.
+2. **[#21](https://github.com/salimfadhley/agent-inbox/issues/21) re-organises the console**
+   into a Settings tab with Federation as a *section*. WP12 builds a section on that
+   assumption.
+
+## Subtask Index
+
+Reference table only — progress is tracked by the checkboxes under each work package.
+`[P]` marks a package with no dependencies, which can start immediately once the gate above
+is cleared.
+
+| ID | Description | WP | Parallel |
+|---|---|---|---|
+| T001 | Two apps, two stores, one process | WP01 | [P] |
+| T002 | A transport that carries A's outbound to B's inbound | WP01 | [P] |
+| T003 | Injectable failure: 503, timeout, and a stalled retry | WP01 | [P] |
+| T004 | Controllable time, so backoff is testable without sleeping | WP01 | [P] |
+| T005 | Prove the harness, by making it fail | WP01 | [P] |
+| T006 | Peers and blocklist | WP02 | [P] |
+| T007 | The outbound delivery queue | WP02 | [P] |
+| T008 | Seen inbound activity ids, with expiry | WP02 | [P] |
+| T009 | Audit entries | WP02 | [P] |
+| T010 | Contract tests across both stores | WP02 | [P] |
+| T011 | An existing database survives | WP02 | [P] |
+| T012 | Convert `federation.py` to a package, rule intact | WP03 |  |
+| T013 | The decision function | WP03 |  |
+| T014 | Modes, and the blocklist that overrides them | WP03 |  |
+| T015 | Scheme policy | WP03 |  |
+| T016 | Actor visibility as a ceiling | WP03 |  |
+| T017 | The decision table, exhaustively | WP03 |  |
+| T018 | A signing keypair, generated once and kept | WP04 |  |
+| T019 | Public key metadata in actor documents | WP04 |  |
+| T020 | Sign outbound requests | WP04 |  |
+| T021 | Verify inbound requests | WP04 |  |
+| T022 | Attack the verifier | WP04 |  |
+| T023 | Clock skew, deliberately | WP04 |  |
+| T024 | The server descriptor at `/.well-known/agent-inbox` | WP05 |  |
+| T025 | WebFinger for local actors | WP05 |  |
+| T026 | Actor documents | WP05 |  |
+| T027 | The federated directory | WP05 |  |
+| T028 | Outbound resolution of `@alice@example.com` | WP05 |  |
+| T029 | Disclosure tests | WP05 |  |
+| T030 | Local and remote may share a username | WP05 |  |
+| T031 | Normalise, then check the blocklist first | WP06 |  |
+| T032 | Fetch and read the descriptor | WP06 |  |
+| T033 | Confirm WebFinger, and readiness | WP06 |  |
+| T034 | Ready / Warning / Failed, with exact reasons | WP06 |  |
+| T035 | Adding a peer imports nothing | WP06 |  |
+| T036 | Identity changes: the two directions | WP06 |  |
+| T037 | Widen `local_name()`, and only that | WP07 |  |
+| T038 | Resolve recipients to actor URIs and inboxes | WP07 |  |
+| T039 | Persist locally first, then queue | WP07 |  |
+| T040 | `Create` wrapping `Note`, with `to`, `cc`, `inReplyTo` | WP07 |  |
+| T041 | One queue entry per target inbox | WP07 |  |
+| T042 | Tests, including the one that must not regress | WP07 |  |
+| T043 | Re-derive the whole decision at send time | WP08 |  |
+| T044 | Backoff, bounded | WP08 |  |
+| T045 | One concurrent send per peer | WP08 |  |
+| T046 | Delivery state, visible | WP08 |  |
+| T047 | Blocking cancels what is pending | WP08 |  |
+| T048 | The stale-authorization tests | WP08 |  |
+| T049 | The gate, in order | WP09 |  |
+| T050 | Reject unsupported activity types | WP09 |  |
+| T051 | Duplicate activity ids are no-ops | WP09 |  |
+| T052 | Deliver into the normal flow, visibly remote | WP09 |  |
+| T053 | Remote content is data, never instruction | WP09 |  |
+| T054 | Rejection tests that look in the mailbox | WP09 |  |
+| T055 | Visibility as a profile field | WP10 |  |
+| T056 | Validate the enum, refuse the rest | WP10 |  |
+| T057 | A ceiling, never a grant | WP10 |  |
+| T058 | Narrowing takes effect on in-flight mail | WP10 |  |
+| T059 | Humans and agents both | WP10 |  |
+| T060 | Register the federation routes | WP11 |  |
+| T061 | The enable/disable route, operator-gated | WP11 |  |
+| T062 | `501` becomes `403` when the meaning changes | WP11 |  |
+| T063 | `federates` tells the truth | WP11 |  |
+| T064 | Tests | WP11 |  |
+| T065 | The section, reading through the API | WP12 |  |
+| T066 | Peer add, showing the check | WP12 |  |
+| T067 | The HTTP warning, unavoidable | WP12 |  |
+| T068 | Open mode, and open-plus-HTTP | WP12 |  |
+| T069 | Delivery state and peer health | WP12 |  |
+| T070 | Console tests | WP12 |  |
+| T071 | Emit from the decision, not beside it | WP13 |  |
+| T072 | Administrative events | WP13 |  |
+| T073 | Before and after, where safe | WP13 |  |
+| T074 | Append-only | WP13 |  |
+| T075 | Tests | WP13 |  |
+| T076 | The prompt | WP14 |  |
+| T077 | `addressing.py`'s module docstring | WP14 |  |
+| T078 | `RemoteMailbox` and the refusal text | WP14 |  |
+| T079 | README and a federation runbook | WP14 |  |
+| T080 | Sweep for stale claims | WP14 |  |
+
+---
+
+## Work Package WP01: Two hubs in one process: the federation harness
+
+**Goal**: Federation is two hubs talking. Every delivery requirement in this mission is a
+statement about what hub B ends up holding after hub A does something, and none of it can be
+asserted without two hubs. Build that first.
+**Prompt**: `tasks/WP01-two-hubs-in-one-process.md`
+**Requirement Refs**: FR-034, FR-037
+**Owns**: `tests/federation/__init__.py`, `tests/federation/harness.py`, `tests/federation/test_harness.py`
+
+### Included Subtasks
+
+- [ ] T001 Two apps, two stores, one process (WP01)
+- [ ] T002 A transport that carries A's outbound to B's inbound (WP01)
+- [ ] T003 Injectable failure: 503, timeout, and a stalled retry (WP01)
+- [ ] T004 Controllable time, so backoff is testable without sleeping (WP01)
+- [ ] T005 Prove the harness, by making it fail (WP01)
+
+### Dependencies
+
+None
+
+### Risks & Mitigations
+
+- **A harness that always delivers** — Every policy test downstream becomes vacuous. *Mitigation*: T005 breaks it on purpose and asserts the break.
+- **Shared state between the two hubs** — Isolation assertions pass for the wrong reason. *Mitigation*: T001 asserts the stores differ.
+- **Wall-clock sleeps** — An unrunnable suite, so retry logic goes untested. *Mitigation*: T004 injects the clock.
+---
+
+## Work Package WP02: Federation storage: peers, blocklist, queue, seen ids, audit
+
+**Goal**: Somewhere to keep what federation knows: peers, blocklist entries, the outbound
+delivery queue, the ids of inbound activities already seen, and the audit trail.
+**Prompt**: `tasks/WP02-federation-storage.md`
+**Requirement Refs**: FR-037, FR-042, FR-043, FR-044, FR-045, FR-049
+**Owns**: `src/agent_inbox/sqlite_store.py`, `src/agent_inbox/store.py`, `tests/test_store_contract.py`
+
+### Included Subtasks
+
+- [ ] T006 Peers and blocklist (WP02)
+- [ ] T007 The outbound delivery queue (WP02)
+- [ ] T008 Seen inbound activity ids, with expiry (WP02)
+- [ ] T009 Audit entries (WP02)
+- [ ] T010 Contract tests across both stores (WP02)
+- [ ] T011 An existing database survives (WP02)
+
+### Dependencies
+
+None
+
+### Risks & Mitigations
+
+- **A blocklist that can be bypassed by a trailing slash** — It is believed, so the bypass is silent. *Mitigation*: T006 and T010 test the confusable forms.
+- **Persisting the authorization decision** — Recreates the FR-050 hole in the storage layer. *Mitigation*: T007 forbids it explicitly.
+- **Seen-ids growing without bound, or expiring too soon** — Disk exhaustion, or duplicate delivery. *Mitigation*: T008 sets the floor above the retry cap, with reasoning.
+---
+
+## Work Package WP03: The policy decision, in one place
+
+**Goal**: One function that answers *may this exchange happen*, and every inbound and
+outbound path asks it.
+**Prompt**: `tasks/WP03-the-policy-decision.md`
+**Requirement Refs**: C-007, C-008, FR-004, FR-005, FR-006, FR-007, FR-008, FR-012, FR-025, FR-026, FR-027, FR-053
+**Owns**: `src/agent_inbox/federation/__init__.py`, `src/agent_inbox/federation/policy.py`, `tests/test_federation_policy.py`
+
+### Included Subtasks
+
+- [ ] T012 Convert `federation.py` to a package, rule intact (WP03)
+- [ ] T013 The decision function (WP03)
+- [ ] T014 Modes, and the blocklist that overrides them (WP03)
+- [ ] T015 Scheme policy (WP03)
+- [ ] T016 Actor visibility as a ceiling (WP03)
+- [ ] T017 The decision table, exhaustively (WP03)
+
+### Dependencies
+
+WP02
+
+### Risks & Mitigations
+
+- **Policy evaluated in more than one place** — They diverge; the divergence is a disclosure. *Mitigation*: One entry point; T017's table is the contract.
+- **Blocklist checked per call site** — One site forgets. *Mitigation*: T014 puts it inside, before the mode check.
+- **Visibility read as a grant** — Inverts the policy — a `discoverable` actor becomes reachable on a disabled hub. *Mitigation*: T016 encodes the ordering; T017 tests it.
+- **Moving the `local` rule breaks its guard test** — The gate silently stops being enforced. *Mitigation*: T012 runs it before and after.
+---
+
+## Work Package WP04: Keys and RFC 9421 signatures
+
+**Goal**: Sign what we send; verify what arrives. `cryptography` is already a dependency
+(auth uses it), so this needs no new package.
+**Prompt**: `tasks/WP04-keys-and-signatures.md`
+**Requirement Refs**: FR-039
+**Owns**: `src/agent_inbox/federation/keys.py`, `src/agent_inbox/federation/signatures.py`, `tests/test_federation_signatures.py`
+
+### Included Subtasks
+
+- [ ] T018 A signing keypair, generated once and kept (WP04)
+- [ ] T019 Public key metadata in actor documents (WP04)
+- [ ] T020 Sign outbound requests (WP04)
+- [ ] T021 Verify inbound requests (WP04)
+- [ ] T022 Attack the verifier (WP04)
+- [ ] T023 Clock skew, deliberately (WP04)
+
+### Dependencies
+
+WP02
+
+### Risks & Mitigations
+
+- **A path that accepts without verifying** — Total, and silent. *Mitigation*: T021 defaults to refusal; T022 removes the call and watches tests fail.
+- **Signing different bytes than are sent** — Passes locally, fails against strict peers. *Mitigation*: T020 signs the sent body.
+- **The private key reaching a log or the descriptor** — Compromise. *Mitigation*: T018 forbids it; audit records no secrets.
+---
+
+## Work Package WP05: Discovery: descriptor, WebFinger, actor documents
+
+**Goal**: What a peer can read about us: the server descriptor, WebFinger resolution, actor
+documents, and the discoverable-actor directory.
+**Prompt**: `tasks/WP05-discovery-surfaces.md`
+**Requirement Refs**: C-001, C-006, FR-016, FR-017, FR-052, FR-018, FR-019, FR-020, FR-021, FR-022, FR-029, FR-030, FR-048
+**Owns**: `src/agent_inbox/federation/routes.py`, `src/agent_inbox/federation/webfinger.py`, `tests/test_federation_discovery.py`
+
+### Included Subtasks
+
+- [ ] T024 The server descriptor at `/.well-known/agent-inbox` (WP05)
+- [ ] T025 WebFinger for local actors (WP05)
+- [ ] T026 Actor documents (WP05)
+- [ ] T027 The federated directory (WP05)
+- [ ] T028 Outbound resolution of `@alice@example.com` (WP05)
+- [ ] T029 Disclosure tests (WP05)
+- [ ] T030 Local and remote may share a username (WP05)
+
+### Dependencies
+
+WP03, WP04
+
+### Risks & Mitigations
+
+- **A field added to the descriptor without a disclosure decision** — It is unauthenticated; anyone reads it. *Mitigation*: T029 asserts absences, not presences.
+- **`local` actors resolving through WebFinger** — Existence disclosure — mission 0020's class, one hop out. *Mitigation*: T025 and T029.
+- **The hub name leaking onto a federated surface** — Breaks FR-051's free rename. *Mitigation*: T024 and T029 assert its absence.
+---
+
+## Work Package WP06: Peers, the add flow, and the compatibility check
+
+**Goal**: Adding a peer, and finding out before you trust it whether it can actually talk to
+you. The spec's nine-step add flow, implemented in order — the order is the requirement.
+**Prompt**: `tasks/WP06-peers-and-the-add-flow.md`
+**Requirement Refs**: C-004, FR-002, FR-003, FR-009, FR-013, FR-014, FR-015, FR-051
+**Owns**: `src/agent_inbox/federation/peers.py`, `tests/test_federation_peers.py`
+
+### Included Subtasks
+
+- [ ] T031 Normalise, then check the blocklist first (WP06)
+- [ ] T032 Fetch and read the descriptor (WP06)
+- [ ] T033 Confirm WebFinger, and readiness (WP06)
+- [ ] T034 Ready / Warning / Failed, with exact reasons (WP06)
+- [ ] T035 Adding a peer imports nothing (WP06)
+- [ ] T036 Identity changes: the two directions (WP06)
+
+### Dependencies
+
+WP03, WP04, WP05
+
+### Risks & Mitigations
+
+- **Two normalisers** — A blocklist bypass. *Mitigation*: T031 shares WP02's canonical form.
+- **Network calls before the blocklist check** — The blocklist stops being a boundary. *Mitigation*: T031 orders it first; T035 counts fetches.
+- **A peer's text rendered as markup** — Stored XSS from a hostile peer. *Mitigation*: T032 treats fetched fields as untrusted.
+- **Adding a peer quietly importing a directory** — Unbounded work from one operator click. *Mitigation*: T035 asserts the fetch was not made.
+---
+
+## Work Package WP07: Outbound: resolution and queueing
+
+**Goal**: A local send that names a remote actor succeeds locally and queues delivery behind
+itself. The sender never waits on a remote server (FR-034).
+**Prompt**: `tasks/WP07-outbound-resolution-and-queueing.md`
+**Requirement Refs**: FR-031, FR-032, FR-034, FR-047
+**Owns**: `src/agent_inbox/federation/outbound.py`, `src/agent_inbox/addressing.py`, `tests/test_federation_outbound.py`, `tests/test_addressing.py`
+
+### Included Subtasks
+
+- [ ] T037 Widen `local_name()`, and only that (WP07)
+- [ ] T038 Resolve recipients to actor URIs and inboxes (WP07)
+- [ ] T039 Persist locally first, then queue (WP07)
+- [ ] T040 `Create` wrapping `Note`, with `to`, `cc`, `inReplyTo` (WP07)
+- [ ] T041 One queue entry per target inbox (WP07)
+- [ ] T042 Tests, including the one that must not regress (WP07)
+
+### Dependencies
+
+WP03, WP05, WP06
+
+### Risks & Mitigations
+
+- **`@local` egressing once federation is on** — Breaks a guarantee agents rely on by inspection. *Mitigation*: T042 removes the guard and asserts failure.
+- **Address knowledge spreading beyond `local_name()`** — Undoes the seam the module was built around. *Mitigation*: T037 restricts the change.
+- **A local send failing because a peer is unreachable** — Loses mail for a remote problem. *Mitigation*: T039 orders persistence first.
+---
+
+## Work Package WP08: Delivery, retry, and send-time re-authorization
+
+**Goal**: Drain the queue: sign, send, retry with backoff, and report state.
+**Prompt**: `tasks/WP08-delivery-retry-and-send-time-authorization.md`
+**Requirement Refs**: FR-008, FR-038, FR-050, NFR-002
+**Owns**: `src/agent_inbox/federation/delivery.py`, `tests/test_federation_delivery.py`
+
+### Included Subtasks
+
+- [ ] T043 Re-derive the whole decision at send time (WP08)
+- [ ] T044 Backoff, bounded (WP08)
+- [ ] T045 One concurrent send per peer (WP08)
+- [ ] T046 Delivery state, visible (WP08)
+- [ ] T047 Blocking cancels what is pending (WP08)
+- [ ] T048 The stale-authorization tests (WP08)
+
+### Dependencies
+
+WP07
+
+### Risks & Mitigations
+
+- **Authorization carried from queue time** — The mission's known hole; egress after federation is disabled. *Mitigation*: T043 re-derives everything; T048 proves it by removal.
+- **Asserting on the inbox instead of the attempt** — A refused attempt still leaked that we tried. *Mitigation*: T048 asserts on the attempt log.
+- **Ambient time in backoff** — Untestable, so untested. *Mitigation*: T044 injects the clock.
+- **Per-property cancellation paths** — Exactly what left two of three cases uncovered. *Mitigation*: T043 forbids it.
+---
+
+## Work Package WP09: Inbound: verify, gate, dedupe, deliver
+
+**Goal**: Accept what policy allows, exactly once, into the normal inbox and thread flow.
+**Prompt**: `tasks/WP09-inbound.md`
+**Requirement Refs**: FR-033, FR-035, FR-036, FR-037, FR-040, NFR-002, NFR-003, NFR-004
+**Owns**: `src/agent_inbox/federation/inbound.py`, `tests/test_federation_inbound.py`
+
+### Included Subtasks
+
+- [ ] T049 The gate, in order (WP09)
+- [ ] T050 Reject unsupported activity types (WP09)
+- [ ] T051 Duplicate activity ids are no-ops (WP09)
+- [ ] T052 Deliver into the normal flow, visibly remote (WP09)
+- [ ] T053 Remote content is data, never instruction (WP09)
+- [ ] T054 Rejection tests that look in the mailbox (WP09)
+
+### Dependencies
+
+WP03, WP04, WP05
+
+### Risks & Mitigations
+
+- **Checks after delivery** — A rejected message is already in a mailbox. *Mitigation*: T054 asserts inbox contents for every rejection.
+- **A second delivery path** — Bypasses read tracking and the messaging rules. *Mitigation*: T052 goes through the core.
+- **Thread disclosure across the boundary** — A shipped bug returning through a new door. *Mitigation*: T054 re-asserts mission 0020.
+- **Unbounded parse before size check** — A hostile peer costs us memory. *Mitigation*: T049 rejects on size first.
+---
+
+## Work Package WP10: Actor visibility, set by the actor
+
+**Goal**: `local` / `normal` / `discoverable`, as a profile field the actor edits itself
+(clarified 2026-07-28, decision `01KYMQ8T23YB16YY7Y88EZPVVD`).
+**Prompt**: `tasks/WP10-actor-visibility.md`
+**Requirement Refs**: C-003, FR-023, FR-024, FR-028
+**Owns**: `src/agent_inbox/federation/visibility.py`, `src/agent_inbox/wire.py`, `tests/test_federation_visibility.py`
+
+### Included Subtasks
+
+- [ ] T055 Visibility as a profile field (WP10)
+- [ ] T056 Validate the enum, refuse the rest (WP10)
+- [ ] T057 A ceiling, never a grant (WP10)
+- [ ] T058 Narrowing takes effect on in-flight mail (WP10)
+- [ ] T059 Humans and agents both (WP10)
+
+### Dependencies
+
+WP03
+
+### Risks & Mitigations
+
+- **A parallel administrative setting** — Two places actor facts live, diverging. *Mitigation*: T055 uses the existing profile surface.
+- **`discoverable` read as permission** — Inverts policy; invisible until federation is live. *Mitigation*: T057 asserts unreachability under disabled and blocked.
+- **Free-form validation** — A typo silently means `local`. *Mitigation*: T056 refuses unknown values at the write.
+---
+
+## Work Package WP11: The switch, and the honest status code
+
+**Goal**: Turn federation on, and make the inbox route mean what it says.
+**Prompt**: `tasks/WP11-the-switch-and-the-honest-status.md`
+**Requirement Refs**: C-005, FR-013, FR-041, FR-046, NFR-001
+**Owns**: `src/agent_inbox/api.py`, `tests/test_federation_api.py`
+
+### Included Subtasks
+
+- [ ] T060 Register the federation routes (WP11)
+- [ ] T061 The enable/disable route, operator-gated (WP11)
+- [ ] T062 `501` becomes `403` when the meaning changes (WP11)
+- [ ] T063 `federates` tells the truth (WP11)
+- [ ] T064 Tests (WP11)
+
+### Dependencies
+
+WP03, WP09
+
+### Risks & Mitigations
+
+- **Reimplementing the `local` check** — Two rules that will disagree. *Mitigation*: T061 calls the shipped function.
+- **A new code missing from `STATUS_BY_CODE`** — Becomes a 500; the generic handler hides it. *Mitigation*: T062 adds explicitly; T064 asserts codes.
+- **Enabling permitted, federating blocked** — Leaves a half-configured hub reachable, which FR-013 forbids. *Mitigation*: T061 gates the mode.
+---
+
+## Work Package WP12: The Federation section of the console
+
+**Goal**: Where an operator manages federation: peers, mode, blocklist, delivery state, peer
+health, and the warnings that must be acknowledged before anything risky is switched on.
+**Prompt**: `tasks/WP12-the-federation-console-section.md`
+**Requirement Refs**: FR-001, FR-010, FR-011, FR-041, NFR-005, NFR-006, NFR-007
+**Owns**: `src/agent_inbox/console.py`, `tests/test_console_federation.py`
+
+### Included Subtasks
+
+- [ ] T065 The section, reading through the API (WP12)
+- [ ] T066 Peer add, showing the check (WP12)
+- [ ] T067 The HTTP warning, unavoidable (WP12)
+- [ ] T068 Open mode, and open-plus-HTTP (WP12)
+- [ ] T069 Delivery state and peer health (WP12)
+- [ ] T070 Console tests (WP12)
+
+### Dependencies
+
+WP06, WP08, WP11
+
+### Risks & Mitigations
+
+- **Building a tab that #21 immediately renames** — Wasted work and a rename across tests and docs. *Mitigation*: Build a section; read #21 first.
+- **Warnings that can be clicked past** — NFR-005 requires acknowledgement, and the risk is real. *Mitigation*: T067 and T070 assert unavoidability.
+- **Identical warning text for different risks** — Teaches click-through. *Mitigation*: T068 makes the stronger one distinguishable.
+- **Console recomputing policy** — Two implementations diverging. *Mitigation*: T065 renders API output only.
+---
+
+## Work Package WP13: The audit log: who opened the door
+
+**Goal**: Enough record to answer two questions: *who opened the door*, and *why was this
+message accepted or rejected*.
+**Prompt**: `tasks/WP13-the-audit-log.md`
+**Requirement Refs**: FR-015, FR-042
+**Owns**: `src/agent_inbox/federation/audit.py`, `tests/test_federation_audit.py`
+
+### Included Subtasks
+
+- [ ] T071 Emit from the decision, not beside it (WP13)
+- [ ] T072 Administrative events (WP13)
+- [ ] T073 Before and after, where safe (WP13)
+- [ ] T074 Append-only (WP13)
+- [ ] T075 Tests (WP13)
+
+### Dependencies
+
+WP02, WP08, WP09
+
+### Risks & Mitigations
+
+- **Decisions that produce no entry** — Silence reads as 'not rejected'. *Mitigation*: T071 emits from the decision itself.
+- **Secrets in before/after** — Compromise via the audit trail. *Mitigation*: T073 redacts; T075 scans whole entries.
+- **Audit purged with mail** — Loses the record of exactly the events worth keeping. *Mitigation*: T074 forces an explicit decision.
+---
+
+## Work Package WP14: The words follow the code
+
+**Goal**: Several documents currently assert that this hub cannot federate. Each becomes false
+the day this ships.
+**Prompt**: `tasks/WP14-the-words-follow-the-code.md`
+**Requirement Refs**: C-002, NFR-003, NFR-004
+**Owns**: `src/agent_inbox/prompts.py`, `src/agent_inbox/exceptions.py`, `README.md`, `doc/runbook/federation.md`
+
+### Included Subtasks
+
+- [ ] T076 The prompt (WP14)
+- [ ] T077 `addressing.py`'s module docstring (WP14)
+- [ ] T078 `RemoteMailbox` and the refusal text (WP14)
+- [ ] T079 README and a federation runbook (WP14)
+- [ ] T080 Sweep for stale claims (WP14)
+
+### Dependencies
+
+WP11, WP12
+
+### Risks & Mitigations
+
+- **The prompt asserting something untrue** — Third time; it is the most-read document here. *Mitigation*: T076 generates per-hub truth rather than hedging.
+- **Docs describing a switch that is off by default as if it were on** — Operators expect federation they do not have. *Mitigation*: T079 states the default plainly.
+- **Deployment specifics returning to the repo** — Charter violation; 77 were removed once. *Mitigation*: T079 forbids them explicitly.
+
+---
+
+## Suggested order
+
+**WP01 and WP02 first, in parallel** — the harness and the storage. Neither depends on
+anything, and every other package asserts through one or both.
+
+Then **WP03**, the policy decision, which is the highest-value target in the mission: if that
+decision is made in two places they will disagree, and a disagreement there is a disclosure.
+
+**WP08 carries the outside review's finding** (FR-050) and is the single package most worth
+reviewing carefully. Its three stale-authorization tests must fail when the send-time re-check
+is removed.
+
+=== ANALYSIS ===
+---
+schema_version: 1
+artifact_type: spec-kitty.analysis-report
+command: /spec-kitty.analyze
+mission_slug: manual-activitypub-federation-v1-01KYJY10
+mission_id: 01KYJY10WCA0RC9KWGXXCYX1CG
+generated_at: '2026-07-28T19:25:31.546641+00:00'
+analyzer_agent: unknown
+input_artifacts:
+  spec.md:
+    path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/manual-activitypub-federation-v1-01KYJY10/spec.md
+    sha256: c7274004ae424f4e7f918260c775d3958d9bc5e65607a2081cff942b4367d885
+  plan.md:
+    path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/manual-activitypub-federation-v1-01KYJY10/plan.md
+    sha256: 502e2ee89585dd8121912b932393a9aabbbae4215b227490ec5bd63b18b9b2d3
+  tasks.md:
+    path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/manual-activitypub-federation-v1-01KYJY10/tasks.md
+    sha256: 3c866e5080957a64284c1a7abce7ed903ba81076f05d17abe7415eb3790406a5
+  charter:
+    path: /Users/salimfadhley/workspace/agent-inbox/.kittify/charter/charter.md
+    sha256: dc24f43bde1a5b81568f486f9084753c30daab2d302f1227dae097434e9e6882
+verdict: blocked
+issue_counts:
+  medium: 4
+  critical: 1
+  high: 2
+  low: 1
+  info: 0
+findings:
+- id: S1
+  severity: critical
+  category: charter
+  summary: 'The mission cannot be implemented: its foundation, a-hub-has-a-name-of-its-own-01KYMD90, is not merged, which charter directive 3 forbids building on.'
+- id: A1
+  severity: high
+  category: missing-artifact
+  summary: plan.md's Project Structure lists research.md, data-model.md and contracts/ as mission artefacts; none of the three exists.
+- id: D1
+  severity: high
+  category: unresolved-decision
+  summary: The async HTTP client dependency is unresolved, and WP07/WP08 cannot be implemented without it.
+- id: N1
+  severity: medium
+  category: inconsistency
+  summary: Renumbering FR-015a/017a/028a to FR-051/052/053 left the requirement table out of numeric order, with FR-050 appearing after FR-053.
+- id: M1
+  severity: medium
+  category: coverage
+  summary: Nine requirements are mapped to two or three work packages each with no recorded rationale, so the mappings read as errors.
+- id: M2
+  severity: medium
+  category: coverage
+  summary: WP01 is a test harness that ships no production code, yet claims FR-034 and FR-037 as its requirement refs.
+- id: X1
+  severity: medium
+  category: dependency
+  summary: "WP12 builds a console section on the assumption that issue #21's Settings re-org lands first, but nothing enforces that ordering."
+- id: C1
+  severity: low
+  category: coverage
+  summary: C-008 is mapped to WP03 alone despite being a standing constraint reproduced in all fourteen prompts.
+---
+
+## Specification Analysis Report
+
+Mission `manual-activitypub-federation-v1-01KYJY10`, analysed on `feat/federation` against
+`spec.md` (53 FR, 7 NFR, 8 C), `plan.md`, `tasks.md` (14 WPs, 80 subtasks),
+`research/outside-review-2026-07-28.txt` and `.kittify/charter/charter.md`.
+
+| ID | Category | Severity | Location(s) | Summary | Recommendation |
+|----|----------|----------|-------------|---------|----------------|
+| S1 | Charter | CRITICAL | plan.md Complexity Tracking; tasks.md sequencing gate | Charter directive 3 — *"before building layer N, ask whether layer N−1 is settled; if it is not, settling it **is** the work"* — is in conflict with this mission's readiness. Federation depends on the hub `name`, hub settings storage, the precedence rule and the `local` gate, all owned by `a-hub-has-a-name-of-its-own-01KYMD90`. That mission is analysis-`ready` but only **WP01 T001–T002** are implemented, and it is not merged. | This is declared and mitigated in the plan rather than hidden, and the mitigation — a hard sequencing gate repeated in `tasks.md` and in all fourteen prompts — is the right one. But it is still a blocker: **the answer to "is federation ready to implement" is no, and the reason is #15.** Finish #15, then #21, then start here. |
+| A1 | Missing artifact | HIGH | plan.md "Documentation (this mission)" | The structure block lists `research.md`, `data-model.md` and `contracts/` as belonging to this mission. `research/` holds only the outside-review transcript; `data-model.md` and `contracts/` do not exist. The spec-kitty plan flow's Phase 0 and Phase 1 call for all three. | For a mission that is **entirely about wire shapes**, a missing `contracts/` is the most consequential of the three. The spec carries a WebFinger JRD, a descriptor and a `Create/Note` inline, but there is no single authority for the shapes fourteen packages must agree on. Generate `contracts/` at minimum; `data-model.md` for peers, queue entries, seen-ids and audit rows is close behind. |
+| D1 | Unresolved decision | HIGH | plan.md Technical Context; tasks.md "decisions still owed" | Outbound federation needs an async HTTP client with per-peer concurrency, bounded timeouts and non-blocking retry. The project declares none and uses stdlib `urllib.request`. `httpx` is proposed, flagged for the operator, and unanswered. | WP07 and WP08 cannot be implemented without resolving this, and WP08 carries FR-050 — the mission's sharpest requirement. Get the answer before implementation, not during. The alternative (threads around `urllib`) is a design decision with consequences, not a fallback. |
+| N1 | Inconsistency | MEDIUM | spec.md L227, L230, L241, L262 | `FR-015a`, `FR-017a` and `FR-028a` were renumbered to `FR-051`–`FR-053` because the requirement-mapping validator rejects suffixed ids. They kept their original table positions, so the table now runs …FR-051… FR-052… FR-053… FR-050, and a reader scanning for FR-050 finds it last. | Cosmetic but genuinely confusing in a 53-requirement table that fourteen prompts cite by number. Either move the three rows to the end or renumber the whole tail. Do it before implementation, while the citations are only in planning artefacts. |
+| M1 | Coverage | MEDIUM | tasks.md requirement refs | Nine requirements are claimed by more than one package: FR-008 (WP03, WP08), FR-013 (WP06, WP11), FR-015 (WP06, WP13), FR-034 (WP01, WP07), FR-037 (WP01, WP02, WP09), FR-041 (WP11, WP12), FR-042 (WP02, WP13), NFR-002 (WP08, WP09), NFR-003/004 (WP09, WP14). Most are deliberate splits — FR-013's two preconditions live in different packages — but nothing records that. | One line per split in `tasks.md`, as was done for FR-006 in the hub-identity mission. Undocumented multi-mapping reads as a mapping error, and the next reviewer will raise it again. |
+| M2 | Coverage | MEDIUM | tasks/WP01 frontmatter | WP01 builds the two-hubs-in-one-process test harness and **ships no production code**. It claims FR-034 and FR-037, which are implemented by WP07 and WP02/WP09 respectively. | Either give WP01 no requirement refs and note that it is enabling infrastructure, or add an explicit "harness" requirement. As written, a coverage query for FR-034 returns a package that does not implement it. |
+| X1 | Dependency | MEDIUM | tasks/WP12; issue #21 | WP12's prompt says "build a section, not a tab", on the basis that [#21](https://github.com/salimfadhley/agent-inbox/issues/21) restructures the console into a Settings tab with Federation as a section. #21 is an open issue with no mission, and `dependencies: [WP06, WP08, WP11]` cannot express a cross-mission ordering. | Record the cross-mission dependency where the finaliser can see it, or accept that WP12 may need reparenting and say so in its Definition of Done. Right now the constraint exists only in prose. |
+| C1 | Coverage | LOW | tasks.md; all fourteen prompts | C-008 ("when in doubt, do what Lemmy does") is mapped to WP03 alone, but it is reproduced as a standing constraint in the Context section of every prompt and will be exercised wherever a default is chosen. | Harmless, but the mapping under-describes it. Either map it broadly or note in `tasks.md` that it is a standing constraint rather than a package-owned one. |
+
+### Coverage Summary
+
+All **53** functional requirements are mapped; `unmapped_functional` is empty. All 7
+non-functional requirements and all 8 constraints are mapped. Coverage is **68/68 = 100%**.
+
+The findings above are about the *quality* of some mappings (M1, M2, C1), not about gaps.
+
+| Requirement group | Mapped to | Notes |
+|---|---|---|
+| FR-001–FR-003 (tab, defaults, trust) | WP12, WP06 | |
+| FR-004–FR-008, FR-012 (modes, blocklist, schemes) | WP03 | plus FR-008 in WP08 for cancellation |
+| FR-009–FR-011, FR-015 (transport, warnings, URL change) | WP06, WP12, WP13 | |
+| FR-013, FR-014, FR-051 (preconditions, profile, rename) | WP06, WP11 | see M1 |
+| FR-016–FR-022, FR-029, FR-030, FR-048, FR-052 (discovery) | WP05 | the largest single-package group |
+| FR-023–FR-028, FR-053 (visibility) | WP10, WP03 | ceiling enforced in policy, chosen in profile |
+| FR-031–FR-038, FR-047, FR-050 (delivery) | WP07, WP08, WP09 | FR-050 is WP08's centre |
+| FR-039 (signatures) | WP04 | |
+| FR-040–FR-046, FR-049 (audit, storage, switch) | WP02, WP11, WP13 | |
+| NFR-001–NFR-007 | WP08, WP09, WP11, WP12, WP14 | |
+| C-001–C-008 | WP03, WP05, WP06, WP10, WP11, WP14 | see C1 |
+
+### Charter Alignment Issues
+
+- **S1 — directive 3.** The only charter conflict, and it is declared in Complexity Tracking
+  with a stated mitigation rather than smoothed over. It nonetheless blocks implementation.
+
+Everything else aligns, and two alignments are worth naming because they were designed for
+rather than inherited:
+
+- **Directive 7 (built for LLMs first)** is enforced *at the protocol boundary*: FR-033
+  rejects `Follow`, `Like`, `Announce`, votes and boosts before delivery. Engagement
+  mechanics do not arrive merely because ActivityPub carries them.
+- **ADR 0008** holds under the hardest case this system has faced. Remote mail is the
+  strongest form of arriving content, and NFR-004 with FR-040 require it be framed as
+  untrusted data at the point of delivery rather than left to each agent's judgement.
+- **Regression tests as requirements** is carried explicitly: WP09 T054 re-asserts mission
+  0020's thread disclosure across the federation boundary.
+
+### Unmapped Tasks
+
+None. All 80 subtasks belong to exactly one work package, and every package carries
+requirement refs. WP01's refs are questionable in kind rather than absent (M2).
+
+### Metrics
+
+- Total requirements: **68** (53 functional, 7 non-functional, 8 constraints)
+- Total tasks: **80** across 14 work packages (5–7 subtasks each)
+- Coverage: **68 / 68 = 100%**
+- Prompt sizes: 190–222 lines, average ~202 — all within the 200–500 target
+- Lanes computed: 14
+- Ambiguity count: **0**
+- Duplication count: **0** (9 deliberate multi-mappings — see M1)
+- Critical issues: **1**
+
+### Next Actions
+
+Verdict is **blocked**, on one critical and two high findings. The critical one is not a
+defect in the planning — it is the honest answer to whether this can be built yet.
+
+Recommended order:
+
+1. **S1** — implement and merge `a-hub-has-a-name-of-its-own-01KYMD90` (WP01 T003–T006 then
+   WP02–WP05), then #21. Nothing here starts before that.
+2. **D1** — settle the HTTP client with the operator. Blocks WP07 and WP08.
+3. **A1** — generate `contracts/` for the wire shapes fourteen packages must agree on, and
+   `data-model.md` for peers, queue entries, seen-ids and audit rows.
+4. **N1, M1, M2, X1, C1** — planning-artefact corrections, safe to batch, cheapest now while
+   the requirement numbers are cited only in planning documents.
+
+The task breakdown itself is sound: 100% coverage, prompts in range, a clean dependency DAG,
+and the mission's sharpest requirement (FR-050, from the outside review) isolated in WP08
+with tests that must be proved by removing the code they guard.
+
+codex
+I’m going to treat this as a traceability review, not a general planning review: requirement-by-requirement, only where a package claims delivery but its subtasks do not actually create the required behavior.
+codex
+No. The 68/68 coverage claim is bookkeeping in several places.
+
+| Requirement | Claimed package | Why the subtasks do not deliver it |
+|---|---|---|
+| FR-001 | WP12 | Requires Federation UI management for peers, mode, blocklist, delivery status, and warnings. WP12 has peer add, warnings, open mode, delivery state, and tests, but no subtask for blocklist listing/add/remove or its UI/API behavior. |
+| FR-002 | WP06 | Requires a fresh server to have no peers and no remote delivery. WP06 is the peer add/check flow; its subtasks do not establish initial stored defaults, disabled egress, or tests proving a fresh server cannot federate. |
+| FR-003 | WP06 | Requires peer trust to be limited to addressed mail exchange, not DB access, inbox reads, admin API, or history. WP06 checks peer compatibility; it does not add or test those trust-boundary negatives. |
+| FR-031 | WP07 | Requires outbound and inbound `Create` wrapping `Note`. WP07 only covers outbound resolution, queueing, and emitted activity shape. It does not implement inbound acceptance/parsing; that would belong in WP09 but FR-031 is not mapped there. |
+| FR-038 | WP08 | Requires delivery state visible in the UI. WP08 owns delivery worker/state behavior, not the Federation tab or message-detail UI. WP12 has a delivery-state subtask for the console, but FR-038 is not mapped there and message details are not covered. |
+| FR-025 | WP03 | Requires `local` actors to be excluded from WebFinger/discovery and barred from inbound/outbound federation. WP03 can implement the policy decision, but not the WebFinger and directory surfaces; those are WP05 concerns. |
+
+The analysis did catch WP01’s bogus FR-034/FR-037 mapping, but it missed these more consequential delivery gaps. Yes, that should block implementation planning: an engineer could complete the listed subtasks and still fail real acceptance requirements, especially FR-001, FR-031, and FR-038.
+tokens used
+43,229
+No. The 68/68 coverage claim is bookkeeping in several places.
+
+| Requirement | Claimed package | Why the subtasks do not deliver it |
+|---|---|---|
+| FR-001 | WP12 | Requires Federation UI management for peers, mode, blocklist, delivery status, and warnings. WP12 has peer add, warnings, open mode, delivery state, and tests, but no subtask for blocklist listing/add/remove or its UI/API behavior. |
+| FR-002 | WP06 | Requires a fresh server to have no peers and no remote delivery. WP06 is the peer add/check flow; its subtasks do not establish initial stored defaults, disabled egress, or tests proving a fresh server cannot federate. |
+| FR-003 | WP06 | Requires peer trust to be limited to addressed mail exchange, not DB access, inbox reads, admin API, or history. WP06 checks peer compatibility; it does not add or test those trust-boundary negatives. |
+| FR-031 | WP07 | Requires outbound and inbound `Create` wrapping `Note`. WP07 only covers outbound resolution, queueing, and emitted activity shape. It does not implement inbound acceptance/parsing; that would belong in WP09 but FR-031 is not mapped there. |
+| FR-038 | WP08 | Requires delivery state visible in the UI. WP08 owns delivery worker/state behavior, not the Federation tab or message-detail UI. WP12 has a delivery-state subtask for the console, but FR-038 is not mapped there and message details are not covered. |
+| FR-025 | WP03 | Requires `local` actors to be excluded from WebFinger/discovery and barred from inbound/outbound federation. WP03 can implement the policy decision, but not the WebFinger and directory surfaces; those are WP05 concerns. |
+
+The analysis did catch WP01’s bogus FR-034/FR-037 mapping, but it missed these more consequential delivery gaps. Yes, that should block implementation planning: an engineer could complete the listed subtasks and still fail real acceptance requirements, especially FR-001, FR-031, and FR-038.

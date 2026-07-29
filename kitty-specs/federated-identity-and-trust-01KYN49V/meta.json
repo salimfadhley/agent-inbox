@@ -1,0 +1,15 @@
+{
+  "coordination_branch": "kitty/mission-federated-identity-and-trust-01KYN49V",
+  "created_at": "2026-07-28T19:47:51.806535+00:00",
+  "flattened": false,
+  "friendly_name": "Federated identity and trust",
+  "mission_id": "01KYN49VBXZ2G7GSB6AZ9Q6H9N",
+  "mission_number": null,
+  "mission_slug": "federated-identity-and-trust-01KYN49V",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances Federated identity and trust on feat/federation-trust so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "Another hub can discover and verify this one, and an operator decides who may talk to it. No mail crosses.",
+  "slug": "federated-identity-and-trust-01KYN49V",
+  "target_branch": "feat/federation-trust",
+  "topology": "coord"
+}
