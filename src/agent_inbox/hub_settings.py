@@ -39,6 +39,12 @@ def env_with_source(name: str, environ: Mapping[str, str]) -> tuple[str, str] | 
 #: address component and always resolves to something; the other two are presentation
 #: and legitimately absent — the state of every hub that existed before them.
 HUB_SETTING_KEYS: tuple[str, ...] = ("name", "title", "description", "federation")
+
+#: Kept in the same table, and deliberately **not** in HUB_SETTING_KEYS: the signing
+#: key is hub state, but it is not a *setting* — nothing reports it, nothing resolves it
+#: against the environment, and no route may write it. Keeping it out of that tuple is
+#: what stops it appearing in `GET /hub/settings` by anyone simply adding a key.
+SECRET_SETTING_KEYS: frozenset[str] = frozenset({"signing_key"})
 _HUB_SETTING_ENV = {
     "name": "HUB_NAME",
     "title": "HUB_TITLE",

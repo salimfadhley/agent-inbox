@@ -66,7 +66,10 @@ from agent_inbox.federation import (
 )
 from agent_inbox.house import House
 from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
+from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.naming import validate_hub_name
+from agent_inbox.peers import fetch_actor_document
+from agent_inbox.signatures import parse_signature, verify_request
 from agent_inbox.wire import (
     BLIND_FIELDS,
     Actor,
@@ -557,6 +560,52 @@ class Api:
         netloc = urlsplit(self.wire.base).netloc.lower()
         return {netloc, netloc.partition(":")[0]}
 
+    async def signing_key(self) -> SigningKey:
+        """This hub's key, minted on first need and kept thereafter.
+
+        Generated lazily rather than at startup: a hub that never federates never needs
+        one, and generating a 2048-bit key on every boot of every test would be a cost
+        with no purpose.
+        """
+        mailbox = self.house.mailbox
+        stored = await mailbox.hub_settings()
+        pem = stored.get(PRIVATE_KEY_SETTING)
+        if pem:
+            return SigningKey(pem)
+        minted = generate()
+        await mailbox.set_hub_setting(PRIVATE_KEY_SETTING, minted.private_pem)
+        return minted
+
+    async def verified_peer(self, request: Request) -> str | None:
+        """The peer that signed this request, or None.
+
+        None means *not verified*, and every caller must treat it as "stranger" rather
+        than as an error to route around. There is one way to return a peer here, and it
+        requires a signature that checks out against a key fetched from the actor
+        document the signature itself names.
+        """
+        claim = parse_signature(request.headers.get("signature", ""))
+        if claim is None:
+            return None
+        try:
+            # The key lives on the actor document the keyId points at. Fetching it is
+            # bounded and origin-checked by the same guards a peer check uses, so a
+            # signature cannot make us fetch an arbitrary URL.
+            document = await asyncio.to_thread(fetch_actor_document, claim.key_id)
+        except MailboxError:
+            return None
+        public = document.get("publicKeyPem")
+        owner = document.get("owner")
+        if not isinstance(public, str) or not isinstance(owner, str):
+            return None
+        path = request.url.path
+        if request.url.query:
+            path = f"{path}?{request.url.query}"
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        if not verify_request(claim, public, request.method, path, headers):
+            return None
+        return owner
+
     async def thin_actor(self, name: str) -> dict[str, Any]:
         """The barebones actor document a stranger gets.
 
@@ -574,12 +623,22 @@ class Api:
         record = await self.house.mailbox.whois(name)
         if record is None:
             raise UnknownActor(f"no actor {name!r} here")
+        actor_id = f"{self.wire.base}/actors/{record.name}"
+        key = await self.signing_key()
         return {
             "@context": "https://www.w3.org/ns/activitystreams",
-            "id": f"{self.wire.base}/actors/{record.name}",
+            "id": actor_id,
             "type": "Person",
             "preferredUsername": record.name,
-            "inbox": f"{self.wire.base}/actors/{record.name}/inbox",
+            "inbox": f"{actor_id}/inbox",
+            # What a peer needs to verify anything we send it. The hub holds one key
+            # and every actor advertises it: agents are not separate principals across
+            # a hub boundary, the hub speaks for them.
+            "publicKey": {
+                "id": f"{actor_id}#main-key",
+                "owner": actor_id,
+                "publicKeyPem": key.public_pem,
+            },
         }
 
     async def health(self) -> dict[str, str]:
@@ -1420,6 +1479,11 @@ def build_api(
         verified = enforcing and await resolve_verified_caller(request) is not None
 
         if verified:
+            return await api.actor(name)
+        if federating and await api.verified_peer(request) is not None:
+            # A peer that proved which hub it is gets what a local agent gets. This is
+            # what the thin/rich split was built for: without signatures there was no
+            # way to ever be verified, so everyone got thin forever.
             return await api.actor(name)
         if federating:
             # **A hub that cannot tell its own agents from strangers must assume

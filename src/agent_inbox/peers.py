@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
 from agent_inbox.exceptions import MailboxError
+from agent_inbox.keys import SigningKey
+from agent_inbox.signatures import sign_request
 
 #: Bounds, so a hostile or broken peer cannot cost us unbounded work. Deliberately
 #: small: a descriptor is a few hundred bytes and anything larger is not one.
@@ -134,10 +136,22 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
         )
 
 
-def _fetch_json(url: str) -> dict[str, object]:
-    """Read a small JSON document, bounded in both time and size."""
+def _fetch_json(
+    url: str, signing: tuple[SigningKey, str] | None = None
+) -> dict[str, object]:
+    """Read a small JSON document, bounded in both time and size.
+
+    When ``signing`` is given — a key and the ``keyId`` naming where its public half
+    can be found — the request is signed, so the hub being asked can tell us from a
+    stranger. Unsigned is still valid: a peer that does not require signatures answers
+    either way, and one that does will simply give us less.
+    """
+    headers = {"Accept": "application/json", "User-Agent": "agent-inbox"}
+    if signing is not None:
+        key, key_id = signing
+        headers.update(sign_request(key, key_id, "GET", url))
     request = urllib.request.Request(  # noqa: S310 — scheme is checked in _permitted
-        url, headers={"Accept": "application/json", "User-Agent": "agent-inbox"}
+        url, headers=headers
     )
     opener = urllib.request.build_opener(_NoRedirects)
     deadline = time.monotonic() + FETCH_DEADLINE_SECONDS
@@ -180,7 +194,7 @@ def _text(value: object, limit: int = 200) -> str | None:
     return value.strip()[:limit]
 
 
-def identify(url: str) -> PeerIdentity:
+def identify(url: str, signing: tuple[SigningKey, str] | None = None) -> PeerIdentity:
     """Ask a hub who it is, following NodeInfo's two hops.
 
     Raises :class:`PeerUnreachable` for everything that goes wrong, including a hub that
@@ -188,7 +202,7 @@ def identify(url: str) -> PeerIdentity:
     to talk to at that address.
     """
     base = _permitted(url)
-    index = _fetch_json(f"{base}/.well-known/nodeinfo")
+    index = _fetch_json(f"{base}/.well-known/nodeinfo", signing)
 
     links = index.get("links")
     href = None
@@ -212,7 +226,7 @@ def identify(url: str) -> PeerIdentity:
     except ValueError as bad:
         raise PeerUnreachable(f"{base} advertises an unusable NodeInfo URL") from bad
 
-    document = _fetch_json(href)
+    document = _fetch_json(href, signing)
     software = document.get("software")
     software = software if isinstance(software, dict) else {}
     metadata = document.get("metadata")
@@ -231,3 +245,21 @@ def identify(url: str) -> PeerIdentity:
         description=_text(metadata.get("description"), 500),
         users=total if isinstance(total, int) and total >= 0 else None,
     )
+
+
+def fetch_actor_document(key_id: str) -> dict[str, object]:
+    """Read the `publicKey` block a `keyId` points at.
+
+    The same bounds as every other fetch — scheme allowlist, no redirects, no userinfo,
+    size and deadline. A signature naming an arbitrary URL must not become a way to make
+    this hub fetch it.
+    """
+    base = _permitted(key_id)
+    url = key_id.split("#")[0]
+    if _origin(url) != _origin(base):
+        raise PeerUnreachable(f"{key_id} names a key outside its own origin")
+    document = _fetch_json(url)
+    block = document.get("publicKey")
+    if not isinstance(block, dict):
+        raise PeerUnreachable(f"{url} publishes no public key")
+    return block

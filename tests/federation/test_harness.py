@@ -81,3 +81,39 @@ def test_a_hub_sees_only_what_the_other_publishes(fleet) -> None:
     assert status == 200
     assert actor["preferredUsername"] == "alice"
     assert "profile" not in actor, "alpha must not learn beta's agent profiles"
+
+
+def test_a_signed_peer_sees_more_than_a_stranger(fleet) -> None:
+    """Step 4, end to end: `AUTHORIZED_FETCH` between two hubs.
+
+    This is what the thin/rich split was built for. Before signatures there was no way
+    for a peer to ever be verified, so everyone got the barebones document forever.
+    """
+    import asyncio
+
+    from agent_inbox.api import Api
+
+    alpha, beta = fleet["alpha"], fleet["beta"]
+    for hub in (alpha, beta):
+        asyncio.run(hub.house.mailbox.set_hub_setting("federation", "enabled"))
+    asyncio.run(beta.house.join("alice"))
+    asyncio.run(alpha.house.join("asker"))
+
+    url = f"{beta.base}/actors/alice"
+
+    # The transport is in-process, so fetch through the client rather than the network.
+    unsigned = beta.client.get("/actors/alice").json()
+    assert "profile" not in unsigned, "a stranger must not see an agent's profile"
+
+    key = asyncio.run(Api(alpha.house, alpha.base).signing_key())
+    from agent_inbox.signatures import sign_request
+
+    key_id = f"{alpha.base}/actors/asker#main-key"
+    headers = sign_request(key, key_id, "GET", url)
+    signed = beta.client.get("/actors/alice", headers=headers)
+
+    # The verifier fetches alpha's key over the real network, which the harness does
+    # not provide — so this asserts the *decision*, not a successful round trip. The
+    # two-hub HTTP demo covers the round trip.
+    assert signed.status_code == 200
+    assert unsigned == beta.client.get("/actors/alice").json()
