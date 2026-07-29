@@ -31,6 +31,23 @@ def a_hub(name: str = LOCAL) -> House:
     return House(Mailbox(InMemoryStore(), hub_name=name))
 
 
+def _federating(house: House, actor: str, **fields: object) -> None:
+    """Switch federation on and put an actor in the store, through public surfaces.
+
+    Joining goes through `house.join`, which is what an agent does, rather than reaching
+    into the store — a test that bypasses the code under test proves less than it looks.
+    """
+    import asyncio
+
+    async def _setup() -> None:
+        await house.mailbox.set_hub_setting("federation", ENABLED)
+        record = await house.join(actor)
+        if fields:
+            await house.update_profile(record.name, dict(fields.get("profile") or {}))
+
+    asyncio.run(_setup())
+
+
 class TestTheRule:
     def test_local_cannot_enable(self) -> None:
         with pytest.raises(FederationRefused) as caught:
@@ -200,3 +217,66 @@ class TestWebFinger:
                 )
             }
         assert codes == {404}
+
+
+class TestTheThinActorDocument:
+    """Three audiences at one URL, and they are not the same.
+
+    An **agent on this hub** presents a device token and gets the full document. A
+    **peer hub** presents nothing and gets only what addressing requires. Anyone else,
+    on a hub that does not federate, is refused exactly as before.
+    """
+
+    @staticmethod
+    def _enforcing(hub_name: str = "saltclub"):
+        from agent_inbox.auth.service import AuthService
+        from agent_inbox.auth.store import InMemoryAuthStore
+
+        house = a_hub(hub_name)
+        auth = AuthService(InMemoryAuthStore(), secret_key="k" * 32)
+        return build_api(house, HUB, auth=auth, auth_mode="enforce"), house
+
+    def test_a_stranger_is_refused_when_the_hub_does_not_federate(self) -> None:
+        app, house = self._enforcing()
+        with TestClient(app=app) as c:
+            assert c.get("/actors/anyone").status_code == 401
+
+    def test_a_stranger_gets_barebones_once_it_federates(self) -> None:
+        app, house = self._enforcing()
+        with TestClient(app=app) as c:
+            _federating(house, "alice")
+            body = c.get("/actors/alice").json()
+
+        assert body["preferredUsername"] == "alice"
+        assert body["inbox"].endswith("/actors/alice/inbox")
+
+    def test_barebones_means_barebones(self) -> None:
+        """The disclosures a full document carries must not be in the public one.
+
+        This is the assertion that stands between federation and publishing a private
+        hub's roster: absence, not presence, is the security property.
+        """
+        app, house = self._enforcing()
+        with TestClient(app=app) as c:
+            _federating(
+                house,
+                "alice",
+                profile={"project": "billing", "purpose": "secret work"},
+                last_seen="2026-07-29T00:00:00Z",
+            )
+            body = c.get("/actors/alice").json()
+
+        # The premise: the *rich* document really does carry these, so their absence
+        # below is the gate working rather than the fields never existing.
+        import asyncio
+
+        from agent_inbox.api import Api
+
+        rich = asyncio.run(Api(house, HUB).actor("alice"))
+        assert rich.profile, "premise failed: the rich document carries no profile"
+        assert rich.last_seen, "premise failed: the rich document has no last_seen"
+
+        for leaked in ("profile", "lastSeen", "outbox", "summary"):
+            assert leaked not in body, f"the public document leaks {leaked!r}"
+        assert "billing" not in str(body)
+        assert "secret work" not in str(body)

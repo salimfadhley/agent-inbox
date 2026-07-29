@@ -56,6 +56,7 @@ from agent_inbox.exceptions import (
     MalformedAddress,
     NameUnavailable,
     NoSuchWebfingerResource,
+    UnknownActor,
 )
 from agent_inbox.federation import (
     ENABLED,
@@ -541,6 +542,31 @@ class Api:
         """
         netloc = urlsplit(self.wire.base).netloc.lower()
         return {netloc, netloc.partition(":")[0]}
+
+    async def thin_actor(self, name: str) -> dict[str, Any]:
+        """The barebones actor document a stranger gets.
+
+        Exactly what addressing requires — an id, a type, the username, and an inbox to
+        deliver to — and nothing else. No profile, no project, no last-seen, no role.
+
+        This is Mastodon's shipped behaviour under `AUTHORIZED_FETCH`, verified from its
+        documentation: *"Profiles will only return barebones technical information when
+        no authentication is supplied."* The alternative — the fediverse default that
+        actor documents are world-readable in full — is right for public social software
+        and wrong for private mail, because it would publish a hub's whole roster.
+
+        Only reachable when federation is enabled; see the route.
+        """
+        record = await self.house.mailbox.whois(name)
+        if record is None:
+            raise UnknownActor(f"no actor {name!r} here")
+        return {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": f"{self.wire.base}/actors/{record.name}",
+            "type": "Person",
+            "preferredUsername": record.name,
+            "inbox": f"{self.wire.base}/actors/{record.name}/inbox",
+        }
 
     async def health(self) -> dict[str, str]:
         """Liveness only — deliberately does not touch the store.
@@ -1342,9 +1368,29 @@ def build_api(
     async def directory() -> Collection:
         return await api.directory()
 
-    @get("/actors/{name:str}", guards=[guard_enforce])
-    async def actor(name: str) -> Actor:
-        return await api.actor(name)
+    @get("/actors/{name:str}")
+    async def actor(name: str, request: Request) -> Any:
+        """Rich to a verified caller; barebones to a federating stranger; else refused.
+
+        Three audiences, and they are not the same. An **agent on this hub** presents a
+        device token and gets the full document. A **peer hub** presents nothing, and
+        gets only what addressing requires (`thin_actor`). Anyone else, on a hub that
+        does not federate, is refused exactly as before.
+
+        The gate is deliberately the hub-level federation switch rather than per-actor
+        visibility, which is a later step: until it exists, a hub that has not chosen to
+        federate discloses nobody, and one that has, discloses only barebones.
+        """
+        if not enforcing:
+            return await api.actor(name)
+        if await resolve_verified_caller(request) is not None:
+            return await api.actor(name)
+        if federates(await api.house.mailbox.hub_settings()):
+            return await api.thin_actor(name)
+        raise NotAuthenticated(
+            "this hub requires authentication for this route — present a device "
+            "token, or ask its operator to enable federation"
+        )
 
     @put("/actors/{name:str}", dependencies={"caller": Provide(provide_caller)})
     async def update_profile(name: str, data: dict[str, Any], caller: str) -> Actor:
