@@ -443,6 +443,11 @@ class Api:
         Two hops by design: this names where the real document lives, so a server can
         add versions without breaking clients pinned to an older one.
         """
+        if not federates(await self.house.mailbox.hub_settings()):
+            # Silent, not an empty link list: a hub that does not federate has no
+            # NodeInfo service, and advertising a document that then refuses would say
+            # "something is here" to exactly the caller who should learn nothing.
+            raise NoSuchWebfingerResource("this hub does not federate")
         return {
             "links": [
                 {
@@ -460,11 +465,20 @@ class Api:
         explicitly free-form — inventing a parallel document would be the thing C-001
         forbids.
 
-        Served whether or not federation is enabled. Requiring it to be on would be a
-        bootstrap deadlock: neither of two fresh hubs could check the other first.
+        **Served only when federation is enabled.** An earlier version served it always,
+        on the grounds that requiring federation first would deadlock two fresh hubs
+        trying to check each other. That argument was wrong: enabling federation is a
+        purely local act needing no peer, so each operator enables first and then adds
+        the other. Nothing deadlocks.
+
+        Meanwhile serving it unconditionally disclosed `usage.users.total` — the size
+        of a private hub's roster — plus its title and description, to anyone who asked
+        a hub that had never chosen to federate. Found by outside review, 2026-07-29.
         """
         mailbox = self.house.mailbox
         stored = await mailbox.hub_settings()
+        if not federates(stored):
+            raise NoSuchWebfingerResource("this hub does not federate")
         resolved = resolve_hub_settings(stored, default_name=mailbox.hub_name)
         actors = await self.house.directory()
         metadata: dict[str, Any] = {

@@ -29,7 +29,14 @@ def test_the_hubs_are_genuinely_separate(fleet) -> None:
 
 
 def test_one_hub_can_read_the_other(fleet) -> None:
-    status, body = fleet.fetch("alpha", f"{fleet['beta'].base}/nodeinfo/2.1")
+    """Only once beta has chosen to federate — a hub that has not is silent."""
+    import asyncio
+
+    beta = fleet["beta"]
+    assert fleet.fetch("alpha", f"{beta.base}/nodeinfo/2.1")[0] == 404
+
+    asyncio.run(beta.house.mailbox.set_hub_setting("federation", "enabled"))
+    status, body = fleet.fetch("alpha", f"{beta.base}/nodeinfo/2.1")
     assert status == 200
     assert body["software"]["name"] == "agent-inbox"
 

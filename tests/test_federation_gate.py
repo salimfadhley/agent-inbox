@@ -116,12 +116,17 @@ class TestTheSwitch:
 class TestNodeInfo:
     """The discovery document the fediverse already agreed on.
 
-    Served whether or not federation is enabled: requiring it to be on first would be a
-    bootstrap deadlock, since neither of two fresh hubs could check the other.
+    Served **only when federation is enabled**. An earlier version served it always, on
+    a bootstrap-deadlock argument that turned out to be wrong: enabling federation is a
+    local act needing no peer, so two fresh hubs each enable and then add the other.
+    Serving it unconditionally disclosed a private hub's roster size, title and
+    description to anyone. Found by outside review, 2026-07-29.
     """
 
     def test_the_index_points_at_the_document(self) -> None:
-        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+        house = a_hub("saltclub")
+        with TestClient(app=build_api(house, HUB)) as c:
+            _federating(house, "alice")
             body = c.get("/.well-known/nodeinfo").json()
         assert body["links"][0]["rel"].endswith("/2.1")
         assert body["links"][0]["href"] == f"{HUB}/nodeinfo/2.1"
@@ -129,7 +134,9 @@ class TestNodeInfo:
     def test_it_carries_every_field_the_schema_requires(self) -> None:
         """All seven are required by the published schema, so none may be omitted even
         where the honest answer is empty."""
-        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+        house = a_hub("saltclub")
+        with TestClient(app=build_api(house, HUB)) as c:
+            _federating(house, "alice")
             body = c.get("/nodeinfo/2.1").json()
         for field in (
             "version",
@@ -145,9 +152,25 @@ class TestNodeInfo:
         assert body["software"]["name"] == "agent-inbox"
         assert body["protocols"] == ["activitypub"]
 
-    def test_it_is_served_when_federation_is_off(self) -> None:
-        with TestClient(app=build_api(a_hub(), HUB)) as c:
-            assert c.get("/nodeinfo/2.1").status_code == 200
+    def test_a_hub_that_does_not_federate_has_no_nodeinfo(self) -> None:
+        """The roster size, title and description of a private hub are not public.
+
+        Both the index and the document are silent, rather than the index advertising a
+        document that then refuses — that would say "something is here" to exactly the
+        caller who should learn nothing.
+        """
+        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+            assert c.get("/.well-known/nodeinfo").status_code == 404
+            assert c.get("/nodeinfo/2.1").status_code == 404
+
+    def test_the_roster_size_is_not_disclosed_before_federating(self) -> None:
+        house = a_hub("saltclub")
+        with TestClient(app=build_api(house, HUB)) as c:
+            import asyncio
+
+            asyncio.run(house.join("alice"))
+            asyncio.run(house.join("bob"))
+            assert "2" not in c.get("/nodeinfo/2.1").text
 
     def test_our_own_fields_live_in_metadata(self) -> None:
         """Where the schema explicitly puts software-specific values, rather than in a
@@ -160,7 +183,9 @@ class TestNodeInfo:
 
     def test_it_never_carries_the_hub_name(self) -> None:
         """The name does not cross the wire — that is what makes renaming free."""
-        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+        house = a_hub("saltclub")
+        with TestClient(app=build_api(house, HUB)) as c:
+            _federating(house, "alice")
             assert "saltclub" not in c.get("/nodeinfo/2.1").text
 
 
