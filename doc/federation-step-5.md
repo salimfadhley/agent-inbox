@@ -4,7 +4,7 @@ Spec and plan for the next federation step. Written in the shape that converged 
 identity, not the 53-requirement shape that did not.
 
 - **Prerequisite:** steps 0–4, all shipped.
-- **Status:** specified, two open questions, not started.
+- **Status:** specified, **one** open question — how a remote sender is represented — not started.
 
 ## What this is
 
