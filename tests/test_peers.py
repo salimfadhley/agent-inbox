@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -275,3 +276,52 @@ class TestServerSideRequestForgery:
         )
         with pytest.raises(PeerUnreachable):
             identify(base)
+
+    def test_a_dripping_peer_cannot_hold_the_request_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The socket timeout is an *idle* timeout: it resets on every byte.
+
+        A peer sending one byte every nine seconds satisfies it forever, so the request
+        needs a wall-clock budget as well. Found by outside review, 2026-07-29.
+
+        The deadline is shortened here rather than waiting for the real one — the
+        behaviour under test is that elapsed time is checked at all.
+        """
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        from agent_inbox import peers
+
+        class Dripper(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(peers.MAX_DESCRIPTOR_BYTES))
+                self.end_headers()
+                for _ in range(peers.MAX_DESCRIPTOR_BYTES):
+                    try:
+                        self.wfile.write(b"x")
+                        self.wfile.flush()
+                    except OSError:
+                        return
+                    time.sleep(0.05)
+
+            def log_message(self, *_: object) -> None:
+                return
+
+        monkeypatch.setattr(peers, "FETCH_DEADLINE_SECONDS", 1)
+        monkeypatch.setattr(peers, "_CHUNK", 1)
+
+        server = HTTPServer(("127.0.0.1", 0), Dripper)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        started = time.monotonic()
+        try:
+            with pytest.raises(PeerUnreachable) as caught:
+                peers.identify(f"http://127.0.0.1:{server.server_port}")
+        finally:
+            server.shutdown()
+
+        elapsed = time.monotonic() - started
+        assert "longer than" in str(caught.value), str(caught.value)
+        assert elapsed < 10, f"the deadline did not stop it; took {elapsed:.1f}s"

@@ -12,6 +12,7 @@ is charter directive 7's second bullet arriving over HTTP rather than in a messa
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -21,8 +22,16 @@ from agent_inbox.exceptions import MailboxError
 
 #: Bounds, so a hostile or broken peer cannot cost us unbounded work. Deliberately
 #: small: a descriptor is a few hundred bytes and anything larger is not one.
+#:
+#: **Two different clocks, and both are needed.** `FETCH_TIMEOUT_SECONDS` is what the
+#: socket enforces, and it is an *idle* timeout — it resets on every byte that arrives.
+#: A peer dripping one byte every nine seconds would satisfy it forever, so
+#: `FETCH_DEADLINE_SECONDS` is a wall-clock budget for the whole read. Found by outside
+#: review, 2026-07-29.
 FETCH_TIMEOUT_SECONDS = 10
+FETCH_DEADLINE_SECONDS = 20
 MAX_DESCRIPTOR_BYTES = 64 * 1024
+_CHUNK = 8 * 1024
 
 #: The only scheme we will fetch. HTTP federation is a later step, if ever, and a
 #: scheme allowlist is the only kind worth having — a denylist is a guess about what
@@ -131,9 +140,24 @@ def _fetch_json(url: str) -> dict[str, object]:
         url, headers={"Accept": "application/json", "User-Agent": "agent-inbox"}
     )
     opener = urllib.request.build_opener(_NoRedirects)
+    deadline = time.monotonic() + FETCH_DEADLINE_SECONDS
     try:
         with opener.open(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
-            raw = response.read(MAX_DESCRIPTOR_BYTES + 1)
+            chunks: list[bytes] = []
+            read = 0
+            while read <= MAX_DESCRIPTOR_BYTES:
+                if time.monotonic() > deadline:
+                    raise PeerUnreachable(
+                        f"{url} took longer than {FETCH_DEADLINE_SECONDS}s to answer"
+                    )
+                chunk = response.read(_CHUNK)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                read += len(chunk)
+            raw = b"".join(chunks)
+    except PeerUnreachable:
+        raise
     except (urllib.error.URLError, OSError) as failure:
         raise PeerUnreachable(f"could not reach {url} — {failure}") from failure
     if len(raw) > MAX_DESCRIPTOR_BYTES:
