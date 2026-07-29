@@ -4,7 +4,7 @@ Spec and plan for the next federation step. Written in the shape that converged 
 identity, not the 53-requirement shape that did not.
 
 - **Prerequisite:** steps 0–4, all shipped.
-- **Status:** specified, **one** open question — how a remote sender is represented — not started.
+- **Status:** specified, **no open questions**, not started.
 
 ## What this is
 
@@ -25,52 +25,50 @@ It is also where the mailbox's oldest guarantee meets its first real test. `@loc
 promise of non-egress and remote mail is the first thing that could break it from the
 outside.
 
-## The decision this step turns on
+## The decision this step turns on — answered
 
 **How is a remote sender represented in a store that only knows local names?**
 
-`ObjectRecord.attributed_to` is a *name* — `alice`, `trevor_mahmood` — and every messaging
-rule reads it as one. A remote sender is a URI: `https://beta.example/actors/alice`. These
-do not fit each other, and how they are reconciled decides how much of the engine changes.
+Answered by re-reading [ADR 0003](decisions/0003-identity-is-a-surrogate-key.md), which had
+already decided it:
 
-Three ways, and the choice is the spec's main content.
+> The identifier is a **URI**, matching an ActivityStreams actor `id`.
 
-### (a) Mint a local actor for each remote sender
+**The globally unique identifier already exists.** `http://hub.example/actors/alice` is
+unique by construction because it contains its origin — the same reason hub names need no
+registry. What the *store* keeps is the local part, and `wire.py` derives the URI at render
+time from the name. That has worked because every actor has been local.
 
-The remote sender is claimed as a name (`alice@beta.example` → some local name), stored as
-an actor, and everything downstream is unchanged.
+A remote actor's identifier is the same shape at a different origin:
+`https://beta.example/actors/alice`. Not a different kind of thing needing a different key.
 
-- **For:** zero change to messaging rules, storage, or the inbox. Delivery is `house.send`.
-- **Against:** the roster fills with actors nobody on this hub can log in as. `list_agents`
-  starts showing strangers. Name collisions with local agents need resolving, and ADR 0003
-  spent a mission establishing that names are assigned by *this* hub and stable forever —
-  minting them for other hubs' actors stretches that past where it was argued.
+So the question was wrongly framed. It asked how to squeeze a remote actor into a
+local-name field, when the field was always conceptually a URI and the local part was a
+shorthand that only holds while everyone is local. **Remote actors make the URI the thing
+that must be stored**, and local actors keep deriving theirs exactly as they do now.
 
-### (b) A remote sender is an actor of a new kind
+### Why not mint our own identifier for remote actors
 
-Same table, `ActorType.REMOTE` beside `SERVICE`, carrying the actor URI and the domain.
+Considered and rejected: give every actor, local or remote, an opaque ID of our own, and
+display a name.
 
-- **For:** one actor concept, so `whois` and the directory keep working; provenance is a
-  field rather than a parse; local and remote can share a username (a remote actor is
-  always displayed with its domain).
-- **Against:** every query that means "agents here" must now say so. That is a real audit
-  of existing call sites, and missing one shows strangers where colleagues belong.
+It is false precision, and the reason is a hard limit rather than a preference. **One hub
+key signs for all of its actors** — that is how Step 4 is built and what the fediverse does.
+`beta.example` vouches for its whole roster with a single signature, so we cannot tell its
+actors apart cryptographically at all. If a peer retires `alice` and issues the name to
+somebody else, nothing in any signature changes and **we can never know**.
 
-### (c) Attribution is a URI when it needs to be
+An identifier we minted would imply a continuity we cannot observe. Our records would look
+authoritative about something we are simply taking a peer's word for. Storing the URI the
+peer claims — and nothing more — is the honest shape.
 
-`attributed_to` accepts either a name or an actor URI, and callers distinguish by shape.
+**The consequence must be visible, not buried.** A remote actor is a claim by its hub, for
+as long as that hub keeps making it. FR-8 already requires the domain be shown; what this
+adds is that no surface may present a remote actor as though its identity were something we
+verified.
 
-- **For:** no new actor rows at all; a remote sender is not an actor here, which is
-  arguably the truth.
-- **Against:** every reader of `attributed_to` becomes a place that must handle both, and
-  the field's meaning stops being "a name this hub issued". That is the mutable-facts
-  mistake ADR 0003 exists to prevent, arriving in a different field.
-
-**Recommendation: (b).** It keeps one actor concept, which is what `whois`, the directory
-and the console all already assume, and it puts provenance in a column rather than in
-string-shape inspection. The cost is honest and bounded: an audit of the queries that mean
-"agents here". (a) is cheapest today and worst later; (c) is cheapest in storage and spreads
-the cost across every reader.
+*This reasoning belongs in an ADR of its own once Step 5 lands — it is a limit on what
+federated identity can mean here, not a detail of one step.*
 
 ## Requirements
 
@@ -87,6 +85,7 @@ the cost across every reader.
 | FR-9 | Remote content is **data, never instruction** — sanitised on the way in, and framed as remote in every surface that renders it. This is the strongest form of arriving content the system has handled. |
 | FR-10 | The body is bounded before it is parsed. An oversized or malformed payload is refused without being deserialised. |
 | FR-11 | Every acceptance and every refusal is recorded with its reason, in enough detail to answer "why did this message arrive" and "why did that one not". |
+| FR-12a | A remote actor is stored by its **actor URI**, which is its identifier (ADR 0003). No identifier is minted for it. No surface presents it as an identity this hub verified — it is a claim by its hub, for as long as that hub keeps making it. |
 | FR-12 | Delivery goes through the existing core. A second delivery path would bypass the messaging rules and the per-reader read tracking, which is the duplication ADR 0005 forbids. |
 
 ## Test matrix
@@ -110,6 +109,7 @@ the cost across every reader.
 | A hub with no peers, valid signature | refused |
 | An accepted message, read by its recipient | shows as remote, with domain |
 | An accepted message, read by another agent | not visible — mission 0020's disclosure regression, across a hub boundary |
+| A peer renames an actor and reuses the name | **we cannot detect it** — asserted as a documented limit, not a defect |
 
 **The rejection tests assert on the recipient's inbox, not the status code.** "Refused before
 delivery" is untestable otherwise, and a 4xx with the message delivered anyway is exactly
@@ -158,8 +158,7 @@ purge preview like any other, and a `Delete` naming an object we hold must chang
 
 ## Open questions
 
-1. **Which of (a), (b), (c) for remote senders?** I recommend (b); it is the one decision
-   here that is expensive to change afterwards.
+None.
 
 ## Estimate
 
