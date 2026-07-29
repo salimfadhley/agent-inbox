@@ -267,12 +267,40 @@ discriminated nothing; it now asserts its own input defeats the old check before
 Verified by removal, and the third proved itself unusually directly: with the deadline
 disabled the test hangs and has to be killed, which is precisely the behaviour it guards.
 
-### Steps 4, 5, 6 … — one function pair at a time
+### Step 4 — a peer can prove who it is when it looks ✅ **done**
+
+`AUTHORIZED_FETCH` in miniature, and it closes a loop Step 2 deliberately left open: the
+thin/rich actor document split shipped with **no way for a peer ever to be verified**, so
+everyone got barebones forever. Signatures are what make the rich half reachable.
+
+The pair: we sign the GETs we make; we verify the GETs we receive.
+
+| | Unsigned | Signed by a real peer |
+|---|---|---|
+| `GET /actors/alice` | 6 keys — id, type, username, inbox, publicKey | 9 keys — adds `profile`, `lastSeen`, `outbox`, `summary` |
+
+Proved between two real hubs over real HTTP, not a stub.
+
+**Choices worth knowing.** RSA-2048 rather than Ed25519, because the fediverse's installed
+base verifies RSA-SHA256 and a key nothing can check is decoration. Draft-cavage rather
+than RFC 9421, for the same reason — the newer standard is better designed and almost
+nothing speaks it. Both follow the standing rule: do the most normal thing for the
+fediverse unless it conflicts with being a developer tool. Neither conflicts.
+
+The signature covers `(request-target)`, `host` and `date`, and deliberately **not** a
+body — every signed request here is a GET. **When something is first POSTed between hubs, a
+`digest` header must join the covered set.** A signature that did not cover the body would
+be worse than none, and that is the trap waiting in the next step.
+
+The private key is kept out of `HUB_SETTING_KEYS`, so no route can report or write it, and
+the key type redacts itself however it is printed.
+
+### Steps 5, 6 … — one function pair at a time
 
 Candidates, roughly in dependency order. Each is a step, not a phase:
 
-- **Keys.** Publish a public key; verify a signature on something already arriving.
 - **A single inbound message.** Accept one `Create`/`Note` from one configured peer.
+  Its signature **must cover a `digest` of the body** — see Step 4.
 - **A single outbound message.** Send one, to one peer, synchronously.
 - **The queue.** Make sending asynchronous, with retry.
 - **Policy.** Modes and a blocklist, once there is traffic for them to govern.
