@@ -79,7 +79,7 @@ the cost across every reader.
 | FR-1 | `POST /actors/{name}/inbox` accepts a `Create` wrapping a `Note` and delivers it to `{name}`'s inbox. The route exists today and returns `501`; it stops doing that. |
 | FR-2 | **The signature must cover a `digest` of the body.** Step 4 signs `(request-target)`, `host` and `date` only, which is correct for a GET and worse than useless for a POST — a signature that does not cover the body authorises any body. The digest is computed over the received bytes and compared before the body is parsed. |
 | FR-3 | The sender must be a **known peer** — the trust list from Step 4 — and the signature must verify. Either failing is the same refusal. A hub with no peers accepts nothing. |
-| FR-4 | Only `Create` wrapping `Note` is accepted. `Follow`, `Like`, `Announce`, `Delete`, `Update`, `Undo` and everything else are refused before delivery, with a reason. Engagement mechanics do not arrive merely because the protocol carries them. |
+| FR-4 | Only `Create` wrapping `Note` is accepted. `Follow`, `Like`, `Announce`, `Update`, `Undo` and the rest are refused before delivery, with a reason — engagement mechanics do not arrive merely because the protocol carries them. **`Delete` is refused for a stronger reason**: a peer cannot reach into our store. See *Our database, our rules*. |
 | FR-5 | A duplicate activity `id` from the same peer is a **no-op**, not an error and not a second message. A peer that retries must not double-deliver. |
 | FR-6 | The recipient must exist and be local. Delivery to an unknown name is refused, and the refusal must not reveal whether the name exists — the same rule the `/doctor` oracle taught. |
 | FR-7 | **`@local` never receives from outside.** An address that promises non-egress must not become reachable by a remote sender, and that is asserted directly rather than assumed from the addressing layer. |
@@ -101,7 +101,9 @@ the cost across every reader.
 | Sender is not a known peer, signature otherwise valid | refused |
 | Unsigned | refused |
 | Stale date, outside the skew window | refused |
-| `Follow`, `Like`, `Announce`, `Delete` | refused, each with a reason |
+| `Follow`, `Like`, `Announce`, `Update`, `Undo` | refused, each with a reason |
+| `Delete` naming an object we hold | refused, **and the object is still there afterwards** |
+| An accepted remote message, at expiry | purged on our schedule like any other |
 | Recipient does not exist | refused, and indistinguishable from a recipient that does |
 | Recipient is `@local` | refused |
 | Body larger than the bound | refused without being parsed |
@@ -128,13 +130,36 @@ hostile case for real, then delete the guard and watch the test fail.
 | Replay defence beyond the date window | Recorded in Step 4 and unchanged; a seen-signature cache is its own step |
 | Threads across hubs | `inReplyTo` pointing at a remote object is accepted and stored, but no thread is fetched or reconstructed |
 
+## Answered
+
+### Our database, our rules (owner, 2026-07-29)
+
+**Our retention schedule applies to everything in our database. A peer cannot force us to
+retain or delete a message.**
+
+Stated as a question about retention, but it settles more than that. Once a message is
+accepted it is *ours* — subject to our expiry, our purge, our schedule — and a peer has no
+say over what happens to it afterwards, in either direction:
+
+- It **expires on our schedule**, not on any lifetime the sender had in mind. A peer cannot
+  make us keep something longer.
+- It **cannot be withdrawn**. This is the real reason FR-4 refuses `Delete`, which had been
+  filed under "engagement mechanics do not arrive with the protocol". That was the weaker
+  argument. The strong one is that a remote `Delete` is a peer reaching into our store, and
+  the answer to that is no regardless of which activity type carries it.
+
+The symmetry is the point: a peer that could compel retention and a peer that could compel
+deletion are the same defect, and both are refused by the same principle. It is ADR 0008 —
+no actor has authority over the mailbox — arriving from outside the hub rather than from
+inside it.
+
+Two consequences worth writing into the tests: an accepted remote message must appear in a
+purge preview like any other, and a `Delete` naming an object we hold must change nothing.
+
 ## Open questions
 
 1. **Which of (a), (b), (c) for remote senders?** I recommend (b); it is the one decision
    here that is expensive to change afterwards.
-2. **Does an accepted remote message count toward retention and purge?** It is a message
-   like any other, so probably yes — but expiring a peer's mail on our own schedule is a
-   choice worth making deliberately rather than inheriting.
 
 ## Estimate
 
