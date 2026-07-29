@@ -61,12 +61,26 @@ class PeerIdentity:
     users: int | None = None
 
 
-def _permitted(url: str) -> str:
-    """Normalise a peer URL, or refuse it with the rule it broke."""
+def _origin(url: str) -> tuple[str, str, str]:
+    """Parse a URL into (scheme, host, port-or-empty), refusing what we will not fetch.
+
+    Returns the *parsed* pieces rather than a string, because comparing origins by
+    string prefix is exploitable: ``https://good.example@127.0.0.1:8443/x`` starts with
+    ``https://good.example`` and yet points at loopback, since everything before the
+    ``@`` is userinfo. Found by outside review, 2026-07-29.
+    """
     parts = urlsplit(url.strip())
     if not parts.scheme or not parts.netloc:
         raise PeerUnreachable(f"{url!r} is not a URL — try https://hub.example")
-    host = parts.hostname or ""
+    if parts.username or parts.password:
+        # Nothing legitimate needs it, and its only use here is to make a URL read as
+        # one host while resolving to another.
+        raise PeerUnreachable(
+            f"{url!r} carries credentials in the address, which this hub will not fetch"
+        )
+    host = (parts.hostname or "").lower()
+    if not host:
+        raise PeerUnreachable(f"{url!r} names no host")
     if parts.scheme not in ALLOWED_SCHEMES and not (
         parts.scheme == "http" and host in LOOPBACK_HOSTS
     ):
@@ -74,9 +88,41 @@ def _permitted(url: str) -> str:
             f"{parts.scheme!r} is not a scheme this hub will fetch — https only, "
             "except http to a hub on this machine"
         )
-    # Drop path, query and fragment: a peer is an origin, and keeping the rest would
-    # let a typo point us at an arbitrary URL on that host.
-    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    port = f":{parts.port}" if parts.port else ""
+    return parts.scheme, host, port
+
+
+def _permitted(url: str) -> str:
+    """Normalise a peer URL to its origin, or refuse it with the rule it broke.
+
+    Drops path, query and fragment: a peer is an origin, and keeping the rest would let
+    a typo point us at an arbitrary URL on that host.
+    """
+    scheme, host, port = _origin(url)
+    return urlunsplit((scheme, f"{host}{port}", "", "", ""))
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects rather than following them.
+
+    ``urlopen`` follows them by default, and a peer that can redirect can send us
+    anywhere: ``302 Location: http://169.254.169.254/`` reaches cloud metadata, and
+    ``http://10.0.0.5:8080/`` reaches whatever is on the internal network. The scheme
+    check ran against the URL the operator typed, not the one actually fetched.
+
+    Refusing outright rather than re-validating: a hub's own well-known documents are
+    at fixed paths on its own origin, so a redirect is a misconfiguration at best.
+    Found by outside review, 2026-07-29.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            newurl,
+            code,
+            f"redirected to {newurl!r}, which this hub will not follow",
+            headers,
+            fp,
+        )
 
 
 def _fetch_json(url: str) -> dict[str, object]:
@@ -84,10 +130,9 @@ def _fetch_json(url: str) -> dict[str, object]:
     request = urllib.request.Request(  # noqa: S310 — scheme is checked in _permitted
         url, headers={"Accept": "application/json", "User-Agent": "agent-inbox"}
     )
+    opener = urllib.request.build_opener(_NoRedirects)
     try:
-        with urllib.request.urlopen(  # noqa: S310
-            request, timeout=FETCH_TIMEOUT_SECONDS
-        ) as response:
+        with opener.open(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
             raw = response.read(MAX_DESCRIPTOR_BYTES + 1)
     except (urllib.error.URLError, OSError) as failure:
         raise PeerUnreachable(f"could not reach {url} — {failure}") from failure
@@ -133,10 +178,15 @@ def identify(url: str) -> PeerIdentity:
                     href = target
     if href is None:
         raise PeerUnreachable(f"{base} does not advertise a NodeInfo document")
-    if not href.startswith(base):
-        # A descriptor that points elsewhere is either misconfigured or trying to make
-        # us fetch a third party. Neither is worth following.
-        raise PeerUnreachable(f"{base} points its NodeInfo at another host")
+    # Compared as parsed origins, never as strings. `startswith` was exploitable by
+    # `https://good.example@127.0.0.1:8443/…`, where the apparent host is userinfo.
+    try:
+        if _origin(href) != _origin(base):
+            raise PeerUnreachable(f"{base} points its NodeInfo at another host")
+    except PeerUnreachable:
+        raise
+    except ValueError as bad:
+        raise PeerUnreachable(f"{base} advertises an unusable NodeInfo URL") from bad
 
     document = _fetch_json(href)
     software = document.get("software")

@@ -177,3 +177,101 @@ class TestWhatItRefusesToDo:
         routes["/nodeinfo/2.1"]["metadata"]["federation"] = "disabled"
         stub(routes)
         assert identify(base).federates is False
+
+
+class TestServerSideRequestForgery:
+    """Both found by outside review, 2026-07-29. Both were exploitable.
+
+    A hostile peer controls the server at the URL an operator types. These are the two
+    ways it could turn that into a request the hub never meant to make.
+    """
+
+    def test_a_redirect_is_refused_not_followed(self) -> None:
+        """`urlopen` follows redirects by default, and the scheme check ran against the
+        URL the operator typed rather than the one actually fetched.
+
+        So a peer answering `302 Location: http://10.0.0.5:8080/` reached the internal
+        network, and `http://169.254.169.254/` reached cloud metadata.
+
+        The redirect here points at a **second local server that records being hit**.
+        Asserting only that an error is raised would pass whether or not the redirect
+        was followed, because an unreachable target raises too — the assertion that
+        discriminates is that the target was never touched.
+        """
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        touched: list[str] = []
+
+        class Secret(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                touched.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *_: object) -> None:
+                return
+
+        secret = HTTPServer(("127.0.0.1", 0), Secret)
+        threading.Thread(target=secret.serve_forever, daemon=True).start()
+        secret_url = f"http://127.0.0.1:{secret.server_port}/internal"
+
+        class Redirector(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(302)
+                self.send_header("Location", secret_url)
+                self.end_headers()
+
+            def log_message(self, *_: object) -> None:
+                return
+
+        hostile = HTTPServer(("127.0.0.1", 0), Redirector)
+        threading.Thread(target=hostile.serve_forever, daemon=True).start()
+        try:
+            with pytest.raises(PeerUnreachable):
+                identify(f"http://127.0.0.1:{hostile.server_port}")
+        finally:
+            hostile.shutdown()
+            secret.shutdown()
+
+        assert touched == [], f"the redirect was followed and reached {touched}"
+
+    def test_userinfo_cannot_disguise_the_real_host(self) -> None:
+        """`https://good.example@127.0.0.1:8443/x` starts with `https://good.example`
+        and points at loopback: everything before the `@` is userinfo.
+
+        The origin check compared strings, so this passed it. It now compares parsed
+        origins, and credentials in an address are refused outright.
+        """
+        with pytest.raises(PeerUnreachable) as caught:
+            identify("https://good.example@127.0.0.1:8443")
+        assert "credentials" in str(caught.value)
+
+    def test_a_descriptor_cannot_point_at_a_disguised_host(self, stub) -> None:
+        """The same trick one hop later, crafted so the *old* check would have passed.
+
+        The old test compared `href.startswith(base)`. This href genuinely starts with
+        the base string and still resolves elsewhere, because everything before the
+        `@` is userinfo — which is the whole point.
+        """
+        base = stub({})
+        disguised = f"{base}@169.254.169.254/nodeinfo/2.1"
+        assert disguised.startswith(base), (
+            "the test input must defeat the prefix check, or it proves nothing"
+        )
+        stub(
+            {
+                "/.well-known/nodeinfo": {
+                    "links": [
+                        {
+                            "rel": "http://nodeinfo.diaspora.software/ns/schema/2.1",
+                            "href": disguised,
+                        }
+                    ]
+                }
+            }
+        )
+        with pytest.raises(PeerUnreachable):
+            identify(base)
