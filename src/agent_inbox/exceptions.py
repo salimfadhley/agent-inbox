@@ -62,6 +62,17 @@ class HubSettingGoverned(MailboxError):
     code = "hub_setting_governed"
 
 
+class NoSuchWebfingerResource(MailboxError):
+    """WebFinger cannot resolve what was asked for.
+
+    Deliberately one answer for several causes — the hub does not federate, the host is
+    not this one, the account does not exist. Distinguishing them would tell a stranger
+    which of those is true, and the first two are exactly what should stay unsaid.
+    """
+
+    code = "no_such_webfinger_resource"
+
+
 class UnknownActor(MailboxError):
     """The **caller** has not joined this mailbox.
 

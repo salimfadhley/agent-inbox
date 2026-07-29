@@ -38,6 +38,8 @@ STATUS_BY_CODE: dict[str, int] = {
     "invalid_hub_name": 422,
     # the hub is not in a state where federation can be switched on
     "federation_refused": 409,
+    # webfinger: absent, not this hub, or not federating — deliberately one answer
+    "no_such_webfinger_resource": 404,
     # the environment fixes this setting; a write here would be silently overridden
     "hub_setting_governed": 409,
     # the caller has not joined

@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import msgspec
 from litestar import Litestar, MediaType, Request, Response, delete, get, post, put
@@ -54,6 +55,7 @@ from agent_inbox.exceptions import (
     MailboxError,
     MalformedAddress,
     NameUnavailable,
+    NoSuchWebfingerResource,
 )
 from agent_inbox.federation import (
     ENABLED,
@@ -433,6 +435,112 @@ class Api:
         # the environment governs, and showing the submission would tell an operator a
         # change landed when it did not.
         return await self.hub_settings()
+
+    async def nodeinfo_index(self) -> dict[str, Any]:
+        """The discovery document every fediverse server serves.
+
+        Two hops by design: this names where the real document lives, so a server can
+        add versions without breaking clients pinned to an older one.
+        """
+        return {
+            "links": [
+                {
+                    "rel": "http://nodeinfo.diaspora.software/ns/schema/2.1",
+                    "href": f"{self.wire.base}/nodeinfo/2.1",
+                }
+            ]
+        }
+
+    async def nodeinfo(self) -> dict[str, Any]:
+        """What this hub is, in the schema the fediverse already agreed on.
+
+        All seven top-level fields are required by the schema, so none is omitted even
+        where the honest answer is empty. Our own fields live in ``metadata``, which is
+        explicitly free-form — inventing a parallel document would be the thing C-001
+        forbids.
+
+        Served whether or not federation is enabled. Requiring it to be on would be a
+        bootstrap deadlock: neither of two fresh hubs could check the other first.
+        """
+        mailbox = self.house.mailbox
+        stored = await mailbox.hub_settings()
+        resolved = resolve_hub_settings(stored, default_name=mailbox.hub_name)
+        actors = await self.house.directory()
+        metadata: dict[str, Any] = {
+            "federation": resolved["federation"].value,
+            # Not the hub's `name`: that never crosses the wire, which is
+            # what makes renaming free. Presentation only.
+            **{
+                key: resolved[key].value
+                for key in ("title", "description")
+                if resolved[key].value is not None
+            },
+        }
+        return {
+            "version": "2.1",
+            "software": {"name": "agent-inbox", "version": __version__},
+            "protocols": ["activitypub"],
+            # Nothing is bridged in or out. Empty is the honest answer, not a gap.
+            "services": {"inbound": [], "outbound": []},
+            # Whether an agent may join unasked — what auth mode decides.
+            "openRegistrations": not self.authenticated,
+            "usage": {"users": {"total": len(tuple(actors))}},
+            "metadata": metadata,
+        }
+
+    async def webfinger(self, resource: str) -> dict[str, Any]:
+        """Resolve ``acct:alice@hub.example`` to this hub's actor document.
+
+        **Answers only when federation is enabled.** Actor visibility — letting an
+        individual actor opt out — is a later step, so until it exists the hub-level
+        switch is the whole control: a hub that has not chosen to federate resolves
+        nobody. A default hub is therefore silent here, which is every hub today.
+
+        Refuses with 404 rather than 403 when federation is off. A hub that does not
+        federate has no WebFinger service at all; saying "forbidden" would confirm that
+        the named actor exists, which is the disclosure the gate exists to prevent.
+        """
+        mailbox = self.house.mailbox
+        stored = await mailbox.hub_settings()
+        if not federates(stored):
+            raise NoSuchWebfingerResource(
+                "this hub does not federate, so it resolves no accounts"
+            )
+
+        wanted = resource.strip()
+        if not wanted.startswith("acct:") or "@" not in wanted:
+            raise NoSuchWebfingerResource(
+                f"{resource!r} is not an account — expected acct:name@host"
+            )
+        name, _, host = wanted[len("acct:") :].partition("@")
+        if host.lower() not in self._webfinger_hosts():
+            raise NoSuchWebfingerResource(f"{host!r} is not this hub")
+
+        record = await mailbox.whois(name)
+        if record is None:
+            raise NoSuchWebfingerResource(f"no account {name!r} here")
+
+        return {
+            "subject": f"acct:{name}@{host}",
+            "links": [
+                {
+                    "rel": "self",
+                    "type": "application/activity+json",
+                    "href": f"{self.wire.base}/actors/{name}",
+                }
+            ],
+        }
+
+    def _webfinger_hosts(self) -> set[str]:
+        """What this hub answers to in an address.
+
+        The host from the public URL, with and without its port. A hub reached as
+        `hub.example:8081` should resolve `alice@hub.example` too — the port is part of
+        the address and not of the identity, which is this project's whole argument
+        about hub names one level down.
+        """
+        netloc = urlsplit(self.wire.base).netloc.lower()
+        return {netloc, netloc.partition(":")[0]}
 
     async def health(self) -> dict[str, str]:
         """Liveness only — deliberately does not touch the store.
@@ -1111,6 +1219,20 @@ def build_api(
         descriptor["setupRequired"] = setup_required
         return descriptor
 
+    @get("/.well-known/nodeinfo")
+    async def nodeinfo_index_route() -> dict[str, Any]:
+        """Unauthenticated, as every fediverse server serves it."""
+        return await api.nodeinfo_index()
+
+    @get("/nodeinfo/2.1")
+    async def nodeinfo_route() -> dict[str, Any]:
+        return await api.nodeinfo()
+
+    @get("/.well-known/webfinger")
+    async def webfinger_route(resource: str) -> dict[str, Any]:
+        """Unauthenticated, as WebFinger is everywhere. Silent unless federating."""
+        return await api.webfinger(resource)
+
     @get("/health")
     async def health() -> dict[str, str]:
         return await api.health()
@@ -1528,6 +1650,9 @@ def build_api(
     handlers = [
         hub,
         health,
+        nodeinfo_index_route,
+        nodeinfo_route,
+        webfinger_route,
         hub_settings_route,
         set_hub_route,
         purge_preview,

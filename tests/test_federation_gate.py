@@ -94,3 +94,109 @@ class TestTheSwitch:
             c.put("/hub", json={"federation": ENABLED})
             assert c.put("/hub", json={"federation": DISABLED}).status_code == 200
             assert c.get("/").json()["federates"] is False
+
+
+class TestNodeInfo:
+    """The discovery document the fediverse already agreed on.
+
+    Served whether or not federation is enabled: requiring it to be on first would be a
+    bootstrap deadlock, since neither of two fresh hubs could check the other.
+    """
+
+    def test_the_index_points_at_the_document(self) -> None:
+        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+            body = c.get("/.well-known/nodeinfo").json()
+        assert body["links"][0]["rel"].endswith("/2.1")
+        assert body["links"][0]["href"] == f"{HUB}/nodeinfo/2.1"
+
+    def test_it_carries_every_field_the_schema_requires(self) -> None:
+        """All seven are required by the published schema, so none may be omitted even
+        where the honest answer is empty."""
+        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+            body = c.get("/nodeinfo/2.1").json()
+        for field in (
+            "version",
+            "software",
+            "protocols",
+            "services",
+            "openRegistrations",
+            "usage",
+            "metadata",
+        ):
+            assert field in body, f"nodeinfo is missing the required field {field!r}"
+        assert body["version"] == "2.1"
+        assert body["software"]["name"] == "agent-inbox"
+        assert body["protocols"] == ["activitypub"]
+
+    def test_it_is_served_when_federation_is_off(self) -> None:
+        with TestClient(app=build_api(a_hub(), HUB)) as c:
+            assert c.get("/nodeinfo/2.1").status_code == 200
+
+    def test_our_own_fields_live_in_metadata(self) -> None:
+        """Where the schema explicitly puts software-specific values, rather than in a
+        parallel document of our own invention."""
+        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+            c.put("/hub", json={"title": "The Salt Club", "federation": ENABLED})
+            meta = c.get("/nodeinfo/2.1").json()["metadata"]
+        assert meta["title"] == "The Salt Club"
+        assert meta["federation"] == ENABLED
+
+    def test_it_never_carries_the_hub_name(self) -> None:
+        """The name does not cross the wire — that is what makes renaming free."""
+        with TestClient(app=build_api(a_hub("saltclub"), HUB)) as c:
+            assert "saltclub" not in c.get("/nodeinfo/2.1").text
+
+
+class TestWebFinger:
+    """Resolution, and the silence that is the point of it."""
+
+    def _hub_with_alice(self, base: str = "http://hub.example:8081"):
+        house = a_hub("saltclub")
+        return build_api(house, base)
+
+    def test_a_hub_that_does_not_federate_resolves_nobody(self) -> None:
+        with TestClient(app=self._hub_with_alice()) as c:
+            c.post("/actors", json={"preferredUsername": "alice"})
+            r = c.get("/.well-known/webfinger?resource=acct:alice@hub.example")
+        assert r.status_code == 404, "a default hub must be silent here"
+
+    def test_it_resolves_once_federation_is_on(self) -> None:
+        with TestClient(app=self._hub_with_alice()) as c:
+            c.post("/actors", json={"preferredUsername": "alice"})
+            c.put("/hub", json={"federation": ENABLED})
+            body = c.get(
+                "/.well-known/webfinger?resource=acct:alice@hub.example"
+            ).json()
+        assert body["subject"] == "acct:alice@hub.example"
+        link = body["links"][0]
+        assert link["rel"] == "self"
+        assert link["type"] == "application/activity+json"
+        assert link["href"].endswith("/actors/alice")
+
+    def test_the_port_is_part_of_the_address_not_the_identity(self) -> None:
+        """A hub reached as `hub.example:8081` answers for `alice@hub.example` too."""
+        with TestClient(app=self._hub_with_alice()) as c:
+            c.post("/actors", json={"preferredUsername": "alice"})
+            c.put("/hub", json={"federation": ENABLED})
+            with_port = c.get(
+                "/.well-known/webfinger?resource=acct:alice@hub.example:8081"
+            )
+            without = c.get("/.well-known/webfinger?resource=acct:alice@hub.example")
+        assert with_port.status_code == without.status_code == 200
+
+    def test_every_refusal_looks_the_same(self) -> None:
+        """Absent, not this hub, malformed — one answer. Distinguishing them would tell
+        a stranger which is true, and the first two are what should stay unsaid."""
+        with TestClient(app=self._hub_with_alice()) as c:
+            c.post("/actors", json={"preferredUsername": "alice"})
+            c.put("/hub", json={"federation": ENABLED})
+            codes = {
+                c.get(f"/.well-known/webfinger?resource={r}").status_code
+                for r in (
+                    "acct:nobody@hub.example",
+                    "acct:alice@elsewhere.invalid",
+                    "alice",
+                    "acct:alice",
+                )
+            }
+        assert codes == {404}
