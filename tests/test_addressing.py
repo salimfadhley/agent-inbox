@@ -349,6 +349,32 @@ class TestSplittingRecipients:
         assert local == ()
         assert remote == ("alice@saltclub",)
 
+    def test_an_address_may_carry_a_port(self) -> None:
+        """`atlas@beta.example:5001` — which is what makes local multi-hub testing work.
+
+        Several hubs on one machine differ only by port, so an address that could not
+        carry one would make them mutually unaddressable and the whole two-hub harness
+        impossible. Pinned because it is load-bearing for testing rather than obviously
+        part of the addressing model.
+        """
+        address = parse("atlas@beta.example:5001")
+        assert address.name == "atlas"
+        assert address.hub == "beta.example:5001"
+        assert str(address) == "atlas@beta.example:5001"
+
+        local, remote = split_recipients(("atlas@beta.example:5001",), "saltclub")
+        assert remote == ("atlas@beta.example:5001",)
+        assert local == ()
+
+    def test_two_hubs_differing_only_by_port_are_different_hubs(self) -> None:
+        """The property that lets a laptop host a fleet."""
+        _, remote = split_recipients(
+            ("a@example:5001", "b@example:5002"), "example:5001"
+        )
+        assert remote == ("b@example:5002",), (
+            "hubs on the same host but different ports must not be conflated"
+        )
+
     def test_nothing_is_lost_or_duplicated(self) -> None:
         given = ("a", "b@local", "c@saltclub", "d@beta.example", "e@gamma.example")
         local, remote = split_recipients(given, "saltclub")
