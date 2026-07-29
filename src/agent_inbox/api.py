@@ -1381,12 +1381,23 @@ def build_api(
         visibility, which is a later step: until it exists, a hub that has not chosen to
         federate discloses nobody, and one that has, discloses only barebones.
         """
+        federating = federates(await api.house.mailbox.hub_settings())
+        verified = enforcing and await resolve_verified_caller(request) is not None
+
+        if verified:
+            return await api.actor(name)
+        if federating:
+            # **A hub that cannot tell its own agents from strangers must assume
+            # stranger.** With `AUTH_MODE=off` nobody is verified — the header is taken
+            # at face value and a remote peer can send it too — so once federation is
+            # on, this route serves the barebones document to everyone. Local callers
+            # that need the full record have routes that identify them.
+            #
+            # Found by the two-hub harness: before this, a non-enforcing hub with
+            # federation enabled published every agent's profile to the world.
+            return await api.thin_actor(name)
         if not enforcing:
             return await api.actor(name)
-        if await resolve_verified_caller(request) is not None:
-            return await api.actor(name)
-        if federates(await api.house.mailbox.hub_settings()):
-            return await api.thin_actor(name)
         raise NotAuthenticated(
             "this hub requires authentication for this route — present a device "
             "token, or ask its operator to enable federation"

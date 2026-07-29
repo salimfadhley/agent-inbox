@@ -280,3 +280,29 @@ class TestTheThinActorDocument:
             assert leaked not in body, f"the public document leaks {leaked!r}"
         assert "billing" not in str(body)
         assert "secret work" not in str(body)
+
+    def test_a_non_enforcing_hub_that_federates_still_serves_barebones(self) -> None:
+        """A hub that cannot tell its own agents from strangers must assume stranger.
+
+        With AUTH_MODE=off nobody is verified — the identity header is taken at face
+        value, and a remote peer can send it too. So once federation is on, the public
+        actor route is barebones for everyone.
+
+        Found by the two-hub harness: before this, a non-enforcing hub with federation
+        enabled published every agent's profile to the world.
+        """
+        house = a_hub("saltclub")
+        with TestClient(app=build_api(house, HUB)) as c:
+            _federating(house, "alice", profile={"project": "billing"})
+            body = c.get("/actors/alice").json()
+        assert body["preferredUsername"] == "alice"
+        assert "profile" not in body
+        assert "billing" not in str(body)
+
+    def test_a_non_enforcing_hub_that_does_not_federate_is_unchanged(self) -> None:
+        """The common case today, and it must keep working exactly as it did."""
+        house = a_hub("saltclub")
+        with TestClient(app=build_api(house, HUB)) as c:
+            c.post("/actors", json={"preferredUsername": "alice"})
+            body = c.get("/actors/alice").json()
+        assert "profile" in body, "a LAN hub's own console still needs the full record"
