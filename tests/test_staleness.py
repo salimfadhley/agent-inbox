@@ -12,7 +12,23 @@ from __future__ import annotations
 import pytest
 
 from agent_inbox import __version__, staleness
-from agent_inbox.mcp_client import _with_notice
+
+# `staleness` itself is core — no optional dependency — so most of this file runs
+# everywhere. Only the tests that reach into the MCP server need the extra, and they
+# skip without it. Missing this is what broke CI on 3.13: the module-level import made
+# the whole file unimportable where `mcp` is not installed.
+
+
+@pytest.fixture
+def _needs_mcp():
+    """The MCP server lives in the [clients] extra and is absent from the hub image."""
+    pytest.importorskip("mcp", reason="the MCP server lives in the [clients] extra")
+
+
+def _with_notice(result):
+    from agent_inbox.mcp_client import _with_notice as impl
+
+    return impl(result)
 
 
 @pytest.fixture(autouse=True)
@@ -99,6 +115,7 @@ class TestTheNoticeItself:
         assert "restart" in (staleness.notice() or "")
 
 
+@pytest.mark.usefixtures("_needs_mcp")
 class TestAttachingItToResults:
     def test_a_current_client_sees_nothing(self) -> None:
         assert _with_notice({"ok": True}) == {"ok": True}
@@ -116,6 +133,7 @@ class TestAttachingItToResults:
         assert _with_notice("a string") == "a string"
 
 
+@pytest.mark.usefixtures("_needs_mcp")
 class TestItIsActuallyWiredIn:
     """The tests above exercise `_with_notice` directly, which proves the helper works
     and nothing about whether tool calls go through it.
