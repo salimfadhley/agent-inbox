@@ -83,6 +83,16 @@ _SCHEMA = (
     # mail; this one is about the mailbox. One row per key rather than one row with
     # three columns, so "never set" is the absence of a row rather than a NULL — and
     # absence is the state of every hub that existed before this table did.
+    # Hubs this one has been told to trust. Separate from `hub_settings` because this
+    # is not configuration — it is a trust list, and the difference matters: a setting
+    # answers "how is this hub set up", and a row here answers "whose signature counts".
+    """
+    CREATE TABLE IF NOT EXISTS federation_peers (
+        origin  TEXT PRIMARY KEY,
+        added   TEXT NOT NULL DEFAULT '',
+        note    TEXT NOT NULL DEFAULT ''
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS hub_settings (
         key   TEXT PRIMARY KEY,
@@ -218,6 +228,23 @@ class SqliteStore:
         return int(row[0]) if row else 0
 
     # -- hub settings ------------------------------------------------------
+
+    async def peers(self) -> dict[str, str]:
+        """Origins this hub trusts, mapped to when each was added."""
+        cursor = await self._execute("SELECT origin, added FROM federation_peers")
+        return {str(r["origin"]): str(r["added"]) for r in await cursor.fetchall()}
+
+    async def add_peer(self, origin: str, added: str, note: str = "") -> None:
+        await self._execute(
+            "INSERT INTO federation_peers (origin, added, note) VALUES (?, ?, ?) "
+            "ON CONFLICT(origin) DO UPDATE SET note=excluded.note",
+            (origin, added, note),
+        )
+        await self._db.commit()
+
+    async def remove_peer(self, origin: str) -> None:
+        await self._execute("DELETE FROM federation_peers WHERE origin=?", (origin,))
+        await self._db.commit()
 
     async def hub_settings(self) -> dict[str, str]:
         """What the operator configured about this hub. Often empty, legitimately."""

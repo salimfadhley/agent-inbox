@@ -93,6 +93,18 @@ class MessageStore(Protocol):
         """What the operator configured about this hub. May legitimately be empty."""
         ...
 
+    async def peers(self) -> dict[str, str]:
+        """Origins this hub trusts, mapped to when each was added."""
+        ...
+
+    async def add_peer(self, origin: str, added: str, note: str = "") -> None:
+        """Trust a hub. Idempotent."""
+        ...
+
+    async def remove_peer(self, origin: str) -> None:
+        """Stop trusting a hub."""
+        ...
+
     async def set_hub_setting(self, key: str, value: str | None) -> None:
         """Store one setting, or clear it when ``value`` is None."""
         ...
@@ -109,6 +121,7 @@ class InMemoryStore:
         self._objects: dict[str, ObjectRecord] = {}
         self._reads: dict[str, dict[str, ReadRecord]] = {}
         self._hub_settings: dict[str, str] = {}
+        self._peers: dict[str, str] = {}
 
     async def claim_name(self, actor: ActorRecord) -> bool:
         if actor.name in self._actors:
@@ -165,6 +178,15 @@ class InMemoryStore:
             self._hub_settings.pop(key, None)
         else:
             self._hub_settings[key] = value
+
+    async def peers(self) -> dict[str, str]:
+        return dict(self._peers)
+
+    async def add_peer(self, origin: str, added: str, note: str = "") -> None:
+        self._peers[origin] = added
+
+    async def remove_peer(self, origin: str) -> None:
+        self._peers.pop(origin, None)
 
 
 _conforms: MessageStore = InMemoryStore()

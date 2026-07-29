@@ -247,6 +247,15 @@ def identify(url: str, signing: tuple[SigningKey, str] | None = None) -> PeerIde
     )
 
 
+def peer_origin(url: str) -> str:
+    """The origin a URL belongs to, normalised the way peers are stored.
+
+    Shared by the trust check and the fetch guards so there is one notion of "same
+    hub" — two that nearly agree is how a trust list acquires a bypass.
+    """
+    return _permitted(url)
+
+
 def fetch_actor_document(key_id: str) -> dict[str, object]:
     """Read the `publicKey` block a `keyId` points at.
 

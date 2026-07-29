@@ -68,7 +68,7 @@ from agent_inbox.house import House
 from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.naming import validate_hub_name
-from agent_inbox.peers import fetch_actor_document
+from agent_inbox.peers import fetch_actor_document, peer_origin
 from agent_inbox.signatures import parse_signature, verify_request
 from agent_inbox.wire import (
     BLIND_FIELDS,
@@ -580,13 +580,31 @@ class Api:
         """The peer that signed this request, or None.
 
         None means *not verified*, and every caller must treat it as "stranger" rather
-        than as an error to route around. There is one way to return a peer here, and it
-        requires a signature that checks out against a key fetched from the actor
-        document the signature itself names.
+        than as an error to route around.
+
+        **Two conditions, and the second was missing.** A valid signature proves only
+        that the sender holds the key at the ``keyId`` they chose — and anyone can
+        publish an actor document with their own key, sign correctly, and be
+        "verified". That is possession, not identity. So the signer's origin must also
+        be a hub this one has been *told* to trust.
+
+        Found by outside review, 2026-07-29: without the second condition any stranger
+        could obtain the rich actor document by signing as themselves.
+
+        A hub with no peers therefore verifies nobody, which is every hub until an
+        operator adds one — and is the right default.
         """
         claim = parse_signature(request.headers.get("signature", ""))
         if claim is None:
             return None
+
+        try:
+            signer = peer_origin(claim.key_id)
+        except MailboxError:
+            return None
+        if signer not in await self.house.mailbox.peers():
+            return None
+
         try:
             # The key lives on the actor document the keyId points at. Fetching it is
             # bounded and origin-checked by the same guards a peer check uses, so a
@@ -603,6 +621,13 @@ class Api:
             path = f"{path}?{request.url.query}"
         headers = {k.lower(): v for k, v in request.headers.items()}
         if not verify_request(claim, public, request.method, path, headers):
+            return None
+        # The document's own `owner` must live at the origin we trusted, or a trusted
+        # peer's document could name someone else as the signer.
+        try:
+            if peer_origin(owner) != signer:
+                return None
+        except MailboxError:
             return None
         return owner
 

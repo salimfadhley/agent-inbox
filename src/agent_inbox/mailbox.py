@@ -78,6 +78,16 @@ class Mailbox:
         """Store one setting, or clear it when ``value`` is None."""
         await self._store.set_hub_setting(key, value)
 
+    async def peers(self) -> dict[str, str]:
+        """Origins this hub trusts. Empty until an operator adds one."""
+        return await self._store.peers()
+
+    async def add_peer(self, origin: str, added: str, note: str = "") -> None:
+        await self._store.add_peer(origin, added, note)
+
+    async def remove_peer(self, origin: str) -> None:
+        await self._store.remove_peer(origin)
+
     @property
     def hub_name(self) -> str:
         """What this mailbox calls itself. It also always answers to ``local``."""

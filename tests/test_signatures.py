@@ -161,3 +161,110 @@ class TestWhatCountsAsUnsigned:
         headers = sign_request(key, KEY_ID, "GET", URL)
         claim = parse_signature(headers["Signature"])
         assert not _verify(claim, key, {"host": headers["host"], "date": "yesterday"})
+
+
+class TestAValidSignatureIsNotEnough:
+    """Possession of a key is not identity as a peer.
+
+    Found by outside review, 2026-07-29. A valid signature proves only that the sender
+    holds the key at the `keyId` they chose — and anyone can publish an actor document
+    with their own key and sign correctly. Without a trust list, that made every
+    stranger a "verified peer" and handed them the rich actor document.
+    """
+
+    @staticmethod
+    def _hub(federating: bool = True):
+        import asyncio
+
+        from agent_inbox.api import build_api
+        from agent_inbox.house import House
+        from agent_inbox.mailbox import Mailbox
+        from agent_inbox.store import InMemoryStore
+
+        house = House(Mailbox(InMemoryStore(), hub_name="victim"))
+        if federating:
+            asyncio.run(house.mailbox.set_hub_setting("federation", "enabled"))
+        asyncio.run(house.join("alice"))
+        return house, build_api(house, "http://victim.invalid")
+
+    def test_a_stranger_signing_as_itself_still_gets_barebones(
+        self, key: SigningKey
+    ) -> None:
+        """The exact attack: sign correctly, with a keyId you control.
+
+        The attacker's actor document is served by a **real local server**, so its key
+        is genuinely fetchable. An earlier version of this test pointed at
+        `evil.example`, which does not resolve — so the attack failed because the host
+        was unreachable rather than because the trust check refused it, and the test
+        passed with the check removed. That is the third vacuous security test in this
+        work; the fix each time is to make the attack actually possible.
+        """
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        from litestar.testing import TestClient
+
+        published = {"publicKeyPem": key.public_pem, "owner": ""}
+
+        class EvilActor(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                raw = json.dumps({"publicKey": published}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *_: object) -> None:
+                return
+
+        evil = HTTPServer(("127.0.0.1", 0), EvilActor)
+        threading.Thread(target=evil.serve_forever, daemon=True).start()
+        evil_actor = f"http://127.0.0.1:{evil.server_port}/actor"
+        published["owner"] = evil_actor
+
+        house, app = self._hub()
+        headers = sign_request(
+            key, f"{evil_actor}#main-key", "GET", "http://victim.invalid/actors/alice"
+        )
+        try:
+            with TestClient(app=app) as c:
+                body = c.get("/actors/alice", headers=headers).json()
+        finally:
+            evil.shutdown()
+
+        assert "profile" not in body, (
+            "a stranger with a valid, fetchable key is still a stranger"
+        )
+        assert "lastSeen" not in body
+
+    def test_a_hub_with_no_peers_verifies_nobody(self, key: SigningKey) -> None:
+        """Which is every hub until an operator adds one, and is the right default."""
+        import asyncio
+
+        from agent_inbox.api import Api
+
+        house, _ = self._hub()
+        assert asyncio.run(house.mailbox.peers()) == {}
+
+        api = Api(house, "http://victim.invalid")
+        assert asyncio.run(api.house.mailbox.peers()) == {}
+
+    def test_trusting_a_peer_is_what_makes_a_signature_count(self) -> None:
+        """The other half: once trusted, an origin's signature is honoured.
+
+        Asserted at the trust check rather than end to end, because verification then
+        fetches the peer's key over the network — the two-hub demo covers that.
+        """
+        import asyncio
+
+        from agent_inbox.peers import peer_origin
+
+        house, _ = self._hub()
+        origin = peer_origin("https://friend.example/actor#main-key")
+        asyncio.run(house.mailbox.add_peer(origin, "2026-07-29"))
+        assert origin in asyncio.run(house.mailbox.peers())
+        assert peer_origin("https://evil.example/actor#main-key") not in asyncio.run(
+            house.mailbox.peers()
+        )
