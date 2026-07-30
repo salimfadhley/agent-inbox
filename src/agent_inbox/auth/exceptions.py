@@ -54,3 +54,27 @@ class TooManyAttempts(AuthError):
     def __init__(self, message: str, *, retry_after: int = 0) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class OperatorExists(AuthError):
+    """That username is already an operator here."""
+
+    code = "operator_exists"
+
+
+class UnknownOperator(AuthError):
+    """No such operator."""
+
+    code = "unknown_operator"
+
+
+class LastOperator(AuthError):
+    """Refusing to remove the only way into this hub.
+
+    Arithmetic, not status. Every operator is an admin and none outranks another; what
+    cannot happen is the list becoming empty. Whoever owns the hosting can always
+    recover through `AGENT_INBOX_ADMIN_PASSWORD`, but a co-operator with console access
+    and no hosting access could not — so the guard is for them.
+    """
+
+    code = "last_operator"

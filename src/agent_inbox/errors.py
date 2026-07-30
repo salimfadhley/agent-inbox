@@ -67,6 +67,10 @@ STATUS_BY_CODE: dict[str, int] = {
     "token_revoked": 401,
     # too many failed logins from one source
     "too_many_attempts": 429,
+    # operators: every human is an admin, so these are shape errors not rank ones
+    "operator_exists": 409,
+    "unknown_operator": 404,
+    "last_operator": 409,
     "auth_error": 401,
 }
 

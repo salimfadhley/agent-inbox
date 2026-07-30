@@ -22,7 +22,13 @@ from typing import Any, Protocol, Self, runtime_checkable
 
 import aiosqlite
 
-from agent_inbox.auth.records import DeviceToken, EnrolmentState, Session, User
+from agent_inbox.auth.records import (
+    ADMIN_GROUP,
+    DeviceToken,
+    EnrolmentState,
+    Session,
+    User,
+)
 
 #: Bumped when the auth schema changes. Independent of the mailbox schema.
 SCHEMA_VERSION = 1
@@ -45,6 +51,17 @@ class AuthStore(Protocol):
     async def add_user(self, user: User) -> None: ...
     async def get_user(self, username: str) -> User | None: ...
     async def put_user(self, user: User) -> None: ...
+    async def users(self) -> tuple[User, ...]:
+        """Every operator. There is no role column — each one is an admin."""
+        ...
+
+    async def remove_user(self, username: str) -> bool:
+        """Delete one operator. True iff this call removed them.
+
+        Their sessions and recovery codes go with them, because an account that
+        no longer exists must not leave a way in behind it.
+        """
+        ...
 
     async def add_recovery_codes(
         self, username: str, code_hashes: list[str]
@@ -83,6 +100,21 @@ class InMemoryAuthStore:
         self._users.clear()
         self._recovery.clear()
         self._sessions.clear()
+
+    async def users(self) -> tuple[User, ...]:
+        return tuple(self._users[name] for name in sorted(self._users))
+
+    async def remove_user(self, username: str) -> bool:
+        if username not in self._users:
+            return False
+        del self._users[username]
+        self._recovery = [row for row in self._recovery if row[0] != username]
+        self._sessions = {
+            sid: session
+            for sid, session in self._sessions.items()
+            if session.username != username
+        }
+        return True
 
     async def add_user(self, user: User) -> None:
         self._users[user.username] = user
@@ -170,7 +202,9 @@ _SCHEMA = (
         enrolment_state TEXT NOT NULL DEFAULT 'must_change_and_enrol',
         totp_secret_enc BLOB,
         created         TEXT NOT NULL DEFAULT '',
-        last_login      TEXT
+        last_login      TEXT,
+        email           TEXT NOT NULL DEFAULT '',
+        user_group      TEXT NOT NULL DEFAULT 'admin'
     )
     """,
     """
@@ -215,6 +249,8 @@ def _to_user(row: aiosqlite.Row) -> User:
         totp_secret_enc=row["totp_secret_enc"],
         created=row["created"],
         last_login=row["last_login"],
+        email=row["email"] if "email" in row.keys() else "",
+        group=row["user_group"] if "user_group" in row.keys() else ADMIN_GROUP,
     )
 
 
@@ -270,9 +306,24 @@ class SqliteAuthStore:
             self._conn = None
 
     async def create_schema(self) -> None:
-        """Create the ``auth_*`` tables idempotently, even on a shared connection."""
+        """Create the ``auth_*`` tables idempotently, even on a shared connection.
+
+        `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so a
+        column added later needs its own step — a hub deployed before `email` existed
+        has the old shape and would fail on the first read. Checked rather than
+        attempted-and-caught, because swallowing an error here would also swallow a
+        real one.
+        """
         for statement in _SCHEMA:
             await self._execute(statement)
+        cursor = await self._execute("PRAGMA table_info(auth_users)")
+        columns = {row["name"] for row in await cursor.fetchall()}
+        for column, ddl in (
+            ("email", "email TEXT NOT NULL DEFAULT ''"),
+            ("user_group", "user_group TEXT NOT NULL DEFAULT 'admin'"),
+        ):
+            if column not in columns:
+                await self._execute(f"ALTER TABLE auth_users ADD COLUMN {ddl}")
         await self._db.commit()
 
     @property
@@ -320,11 +371,28 @@ class SqliteAuthStore:
             await self._execute(f"DELETE FROM {table}")  # noqa: S608
         await self._db.commit()
 
+    async def users(self) -> tuple[User, ...]:
+        cursor = await self._execute("SELECT * FROM auth_users ORDER BY username")
+        return tuple(_to_user(row) for row in await cursor.fetchall())
+
+    async def remove_user(self, username: str) -> bool:
+        cursor = await self._execute(
+            "DELETE FROM auth_users WHERE username = ?", (username,)
+        )
+        removed = bool(cursor.rowcount)
+        for table in ("auth_recovery_codes", "auth_sessions"):
+            await self._execute(
+                f"DELETE FROM {table} WHERE username = ?",  # noqa: S608
+                (username,),
+            )
+        await self._db.commit()
+        return removed
+
     async def add_user(self, user: User) -> None:
         await self._execute(
             "INSERT INTO auth_users "
             "(username, password_hash, enrolment_state, totp_secret_enc, created, "
-            "last_login) VALUES (?, ?, ?, ?, ?, ?)",
+            "last_login, email, user_group) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 user.username,
                 user.password_hash,
@@ -332,6 +400,8 @@ class SqliteAuthStore:
                 user.totp_secret_enc,
                 user.created,
                 user.last_login,
+                user.email,
+                user.group,
             ),
         )
         await self._db.commit()

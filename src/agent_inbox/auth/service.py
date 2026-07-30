@@ -22,9 +22,19 @@ from agent_inbox.auth import secrets, totp
 from agent_inbox.auth.exceptions import (
     BadCredentials,
     EnrolmentRequired,
+    LastOperator,
+    OperatorExists,
     TokenRevoked,
+    UnknownOperator,
 )
-from agent_inbox.auth.records import DeviceToken, EnrolmentState, Session, User
+from agent_inbox.auth.records import (
+    ADMIN_GROUP,
+    GROUPS,
+    DeviceToken,
+    EnrolmentState,
+    Session,
+    User,
+)
 from agent_inbox.auth.store import AuthStore
 
 logger = logging.getLogger("agent_inbox.auth")
@@ -229,6 +239,73 @@ class AuthService:
             "reset %r to first-run state; 2FA must be enrolled again", username
         )
         return password
+
+    # -- operators ---------------------------------------------------------
+    #
+    # **Every operator is an admin.** There is no role column and no hierarchy: the
+    # owner's rule is that all humans here are equal, and a second class of human would
+    # be a role by another name.
+    #
+    # The one asymmetry is arithmetic rather than status — the last account cannot be
+    # removed, so nobody can empty the list and leave a hub with no way in. That is a
+    # convenience guard, not the safety net: whoever owns the hosting can always set
+    # `AGENT_INBOX_ADMIN_PASSWORD` and get back in. It exists because a co-operator may
+    # have console access without hosting access, and for them the mistake would be
+    # unrecoverable.
+
+    async def operators(self) -> tuple[User, ...]:
+        """Every human who can sign in. All equal; none is the owner of the others."""
+        return await self._store.users()
+
+    async def add_operator(
+        self, username: str, email: str = "", group: str = ADMIN_GROUP
+    ) -> str:
+        """Invite a human. Returns their one-time password, to be shown once.
+
+        `group` is recorded and **enforced nowhere** — an account marked `user` can do
+        everything an `admin` can. It exists so the shape is in place before the checks
+        are, and every surface that shows it has to say so.
+
+        The new account starts where the seeded one does — MUST_CHANGE_AND_ENROL — so an
+        invitation confers nothing until its holder sets a real password and enrols a
+        second factor. The password is returned rather than mailed because this hub
+        cannot send mail; whoever invites them has to pass it on out of band.
+        """
+        name = username.strip().lower()
+        if not name:
+            raise ValueError("an operator needs a username")
+        if await self._store.get_user(name) is not None:
+            raise OperatorExists(f"{name!r} is already an operator here")
+        password = secrets.generate_token()
+        await self._store.add_user(
+            User(
+                username=name,
+                password_hash=secrets.hash_password(password),
+                enrolment_state=EnrolmentState.MUST_CHANGE_AND_ENROL,
+                created=self._now(),
+                email=email.strip(),
+                group=group if group in GROUPS else ADMIN_GROUP,
+            )
+        )
+        logger.warning("added operator %r — every operator is an admin here", name)
+        return password
+
+    async def remove_operator(self, username: str) -> None:
+        """Remove a human, unless they are the last one.
+
+        Their sessions go with them, so removal takes effect immediately rather than
+        whenever they next happen to sign in.
+        """
+        name = username.strip().lower()
+        remaining = [u for u in await self._store.users() if u.username != name]
+        if not remaining:
+            raise LastOperator(
+                f"{name!r} is the only operator — removing them would leave this hub "
+                "with no way in. Add another operator first."
+            )
+        if not await self._store.remove_user(name):
+            raise UnknownOperator(f"{name!r} is not an operator here")
+        logger.warning("removed operator %r", name)
 
     # -- login -------------------------------------------------------------
 

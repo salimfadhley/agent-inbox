@@ -21,9 +21,19 @@ class EnrolmentState(StrEnum):
     ACTIVE = "active"
 
 
+#: The groups a human can be in. **Nothing enforces these yet** — see `User.group`.
+ADMIN_GROUP = "admin"
+USER_GROUP = "user"
+GROUPS = (ADMIN_GROUP, USER_GROUP)
+
+
 @dataclass(frozen=True, slots=True)
 class User:
-    """A human operator. Every user is an admin (single-owner; no role column)."""
+    """A human operator.
+
+    **Today every user is an admin, whatever their group says.** `group` is recorded and
+    displayed and governs nothing at all.
+    """
 
     username: str
     password_hash: str
@@ -32,6 +42,22 @@ class User:
     totp_secret_enc: bytes | None = None
     created: str = ""
     last_login: str | None = None
+    #: Which group this human is in — and **a stub that enforces nothing**.
+    #:
+    #: Recorded now so the shape exists before the checks do: `admin` is intended to
+    #: mean "can add and remove operators" and `user` to mean "read-only, plus minting
+    #: device tokens". Neither is checked anywhere, so **an account marked `user` has
+    #: exactly the same powers as one marked `admin`**.
+    #:
+    #: That gap is the danger. A field that reads like a permission and is not one
+    #: invites somebody to demote a colleague and believe it took effect, so every
+    #: surface that shows this must say it is not enforced, and the day the checks land
+    #: is the day it stops needing to.
+    group: str = ADMIN_GROUP
+    #: For password recovery, which does not exist yet. Collected now because
+    #: asking an operator for it *after* they are locked out is too late — the
+    #: address has to be on file before the day it is needed.
+    email: str = ""
 
 
 #: An ``actor`` of ``*`` means the token names nobody: it admits the *machine*, and

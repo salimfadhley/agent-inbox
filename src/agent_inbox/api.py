@@ -1738,6 +1738,71 @@ def build_api(
         return await api.set_hub_settings(data)
 
     @get(
+        "/operators",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def list_operators_route(operator: str) -> dict[str, Any]:
+        """Every human who can sign in. All of them are admins."""
+        assert auth is not None
+        people = await auth.operators()
+        return {
+            "operators": [
+                {
+                    "username": u.username,
+                    "email": u.email,
+                    "group": u.group,
+                    "state": str(u.enrolment_state),
+                    "created": u.created,
+                    "last_login": u.last_login,
+                }
+                for u in people
+            ],
+            # Said by the API, not only by the console, because a client that reads
+            # `group` and assumes it is a permission would be wrong today.
+            "groups_enforced": False,
+        }
+
+    @post(
+        "/operators",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def add_operator_route(data: dict[str, Any], operator: str) -> dict[str, Any]:
+        """Invite a human. The one-time password comes back **once**.
+
+        This hub sends no mail, so whoever invites has to pass it on themselves. The
+        address is stored for a password-recovery flow that does not exist yet — asking
+        for it after someone is locked out is too late.
+        """
+        assert auth is not None
+        password = await auth.add_operator(
+            str(data.get("username", "")),
+            str(data.get("email", "")),
+            str(data.get("group", "") or "admin"),
+        )
+        return {
+            "username": str(data.get("username", "")).strip().lower(),
+            "password": password,
+            "note": (
+                "Shown once. They must set their own password and enrol a second "
+                "factor before this account can do anything."
+            ),
+        }
+
+    @delete(
+        "/operators/{username:str}",
+        status_code=200,
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def remove_operator_route(username: str, operator: str) -> dict[str, Any]:
+        """Remove a human. Refused for the last one — see `LastOperator`."""
+        assert auth is not None
+        await auth.remove_operator(username)
+        return {"username": username, "removed": True}
+
+    @get(
         "/observe/peers",
         guards=[guard_enforce],
         dependencies={"operator": Provide(provide_operator)},
@@ -1992,6 +2057,9 @@ def build_api(
         webfinger_route,
         hub_settings_route,
         set_hub_route,
+        list_operators_route,
+        add_operator_route,
+        remove_operator_route,
         list_peers_route,
         add_peer_route,
         remove_peer_route,

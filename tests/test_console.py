@@ -52,6 +52,15 @@ class StubHub(HubClient):
         self.tokens: list[dict[str, Any]] = []
         #: The trust list, which gates federation in both directions.
         self.peers: dict[str, str] = {}
+        #: Humans who can sign in. All admins; `group` governs nothing.
+        self.operators: list[dict[str, Any]] = [
+            {
+                "username": "admin",
+                "email": "",
+                "group": "admin",
+                "state": "active",
+            }
+        ]
         #: Who the hub says a session belongs to, when a test wants one.
         self.operator: str | None = None
         self.acting: str | None = None
@@ -293,6 +302,37 @@ class StubHub(HubClient):
         # The trust list. Operator-gated on the real hub; the stub refuses without
         # a session for the same reason the token routes do — the console must relay
         # that refusal rather than decide for itself.
+        if path.startswith("/operators"):
+            if method == "GET":
+                return (
+                    200,
+                    {"operators": self.operators, "groups_enforced": False},
+                    None,
+                )
+            if method == "POST":
+                name = str((body or {}).get("username", "")).strip().lower()
+                if not name:
+                    return 422, {"detail": "an operator needs a username"}, None
+                if any(o["username"] == name for o in self.operators):
+                    return 409, {"detail": f"{name!r} is already an operator"}, None
+                self.operators.append(
+                    {
+                        "username": name,
+                        "email": str((body or {}).get("email", "")),
+                        "group": str((body or {}).get("group", "admin")),
+                        "state": "must_change_and_enrol",
+                    }
+                )
+                return 200, {"username": name, "password": "one-time-secret"}, None
+            if method == "DELETE":
+                name = path.rsplit("/", 1)[-1]
+                if len(self.operators) <= 1:
+                    return 409, {"detail": "that is the only operator"}, None
+                before = len(self.operators)
+                self.operators = [o for o in self.operators if o["username"] != name]
+                if len(self.operators) == before:
+                    return 404, {"detail": "no such operator"}, None
+                return 200, {"username": name, "removed": True}, None
         if path.startswith("/observe/peers"):
             if method == "GET":
                 return (
@@ -1457,3 +1497,65 @@ class TestThePromptDoesNotOverpromise:
 
         text = onboarding("http://hub.invalid", version="9.9.9")
         assert "does not guarantee every command" in text
+
+
+class TestUsersTab:
+    """Adding and removing humans, and the group stub being visibly a stub."""
+
+    def test_the_settings_page_lists_users(self, console: TestClient) -> None:
+        page = console.get("/settings").text
+        assert "<h3>Users</h3>" in page
+        assert "admin" in page
+
+    def test_it_says_every_user_is_an_admin(self, console: TestClient) -> None:
+        """The owner's rule, stated where somebody adding a user will read it."""
+        assert "Every user is an admin today" in console.get("/settings").text
+
+    def test_it_says_groups_do_nothing(self, console: TestClient) -> None:
+        """**The important one.** A permission-shaped field that is not a permission
+        must say so, or an operator will demote a colleague and believe it took."""
+        page = console.get("/settings").text
+        assert "Groups do nothing yet" in page
+        assert "do not rely on this to restrain anybody" in page
+
+    def test_a_user_can_be_added(self, console: TestClient) -> None:
+        page = console.post(
+            "/settings/users/add",
+            data={"username": "ludmila", "email": "l@example.com", "group": "user"},
+        ).text
+        assert "Added ludmila" in page
+        assert "ludmila" in console.get("/settings").text
+
+    def test_the_one_time_password_is_shown_once_and_labelled(
+        self, console: TestClient
+    ) -> None:
+        """The hub sends no mail, so the inviter has to pass it on — and needs telling
+        that nobody can look it up later."""
+        page = console.post("/settings/users/add", data={"username": "ludmila"}).text
+        assert "one-time-secret" in page
+        assert "shown once" in page
+
+    def test_a_duplicate_username_is_refused_in_words(
+        self, console: TestClient
+    ) -> None:
+        console.post("/settings/users/add", data={"username": "ludmila"})
+        page = console.post("/settings/users/add", data={"username": "ludmila"}).text
+        assert "Not added" in page
+
+    def test_a_user_can_be_removed(self, console: TestClient) -> None:
+        console.post("/settings/users/add", data={"username": "ludmila"})
+        page = console.post("/settings/users/remove", data={"username": "ludmila"}).text
+        assert "Removed" in page
+        # Checked on a *fresh* page: the confirmation names whoever was removed, so the
+        # response body mentions them whether or not the removal actually took.
+        assert "ludmila" not in console.get("/settings").text
+
+    def test_the_last_user_cannot_be_removed(self, console: TestClient) -> None:
+        """Arithmetic, not rank: the hub must keep a way in."""
+        page = console.post("/settings/users/remove", data={"username": "admin"}).text
+        assert "Not removed" in page
+
+    def test_the_email_is_explained_as_future_recovery(
+        self, console: TestClient
+    ) -> None:
+        assert "future recovery" in console.get("/settings").text

@@ -1511,6 +1511,40 @@ def build_console(client: HubClient) -> Litestar:
             )
         return Redirect("/", cookies=_relay_cookie(set_cookie))
 
+    def _operator_list(people: list[dict[str, Any]], note: str = "") -> str:
+        """The humans who can sign in, and their (inert) group."""
+        if not people:
+            return (
+                "<p class='muted'><em>The hub would not say who can sign in.</em></p>"
+            )
+        rows = "".join(
+            "<tr><td><code>{}</code></td><td>{}</td><td>{}</td>"
+            "<td class='muted'>{}</td>"
+            "<td><form method='post' action='/settings/users/remove' "
+            "style='display:inline'><input type='hidden' name='username' value='{}'>"
+            "<button type='submit'>Remove</button></form></td></tr>".format(
+                html.escape(str(who.get("username", ""))),
+                html.escape(str(who.get("email", "")) or "—"),
+                html.escape(str(who.get("group", "admin"))),
+                "set up" if str(who.get("state", "")) == "active" else "not set up yet",
+                html.escape(str(who.get("username", ""))),
+            )
+            for who in people
+        )
+        return (
+            f"{note}"
+            "<table><thead><tr><th>User</th><th>Email</th><th>Group</th>"
+            "<th>State</th><th></th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+
+    def _operators_for(sid: str | None) -> list[dict[str, Any]]:
+        status, body, _ = client.auth_call("GET", "/operators", session=sid)
+        if status != 200 or not isinstance(body, dict):
+            return []
+        found = body.get("operators")
+        return found if isinstance(found, list) else []
+
     def _peers_for(sid: str | None) -> list[dict[str, Any]]:
         """The trust list, or an empty one if the hub will not say.
 
@@ -1557,6 +1591,8 @@ def build_console(client: HubClient) -> Litestar:
         note: str = "",
         peer_result: str = "",
         peers: list[dict[str, Any]] | None = None,
+        people: list[dict[str, Any]] | None = None,
+        user_note: str = "",
     ) -> str:
         """Everything an operator configures, in sections.
 
@@ -1624,6 +1660,28 @@ def build_console(client: HubClient) -> Litestar:
             "<form method='post' action='/settings/peer'>"
             "<p><input name='url' placeholder='https://hub.example' size='40'>"
             " <button type='submit'>Check</button></p></form>"
+            "<h3>Users</h3>"
+            "<p class='muted'>Everyone who can sign in to this console. <strong>Every "
+            "user is an admin today</strong> — each one can add and remove the others, "
+            "including whoever set the hub up.</p>"
+            f"{_operator_list(people or [], user_note)}"
+            "<p class='muted'>The last remaining user cannot be removed, so the hub "
+            "always has a way in. Whoever owns the hosting can also recover "
+            "through the admin-password environment variable.</p>"
+            "<form method='post' action='/settings/users/add'>"
+            "<p><input name='username' placeholder='username' size='18'>"
+            " <input name='email' placeholder='email (for future recovery)' size='28'>"
+            " <select name='group'>"
+            "<option value='admin'>admin</option>"
+            "<option value='user'>user</option>"
+            "</select>"
+            " <button type='submit'>Add user</button></p></form>"
+            "<p class='muted'><strong>Groups do nothing yet.</strong> They are "
+            "recorded and shown, and no check anywhere reads them — an account marked "
+            "<code>user</code> can do everything an <code>admin</code> can. The "
+            "intention is that <code>admin</code> may add and remove users while "
+            "<code>user</code> is read-only and may mint device tokens. Until that is "
+            "built, do not rely on this to restrain anybody.</p>"
             "<h3>This hub</h3>"
             "<form method='post' action='/settings/save'>"
             f'<input type="hidden" name="version" value="{version}">'
@@ -1644,7 +1702,12 @@ def build_console(client: HubClient) -> Litestar:
                 media_type=MediaType.HTML,
             )
         return Response(
-            _settings_page(body or {}, hub, peers=_peers_for(sid)),
+            _settings_page(
+                body or {},
+                hub,
+                peers=_peers_for(sid),
+                people=_operators_for(sid),
+            ),
             media_type=MediaType.HTML,
         )
 
@@ -1675,7 +1738,13 @@ def build_console(client: HubClient) -> Litestar:
                 "GET", "/hub/settings", session=sid
             )
             return Response(
-                _settings_page(fresh or {}, hub, note, peers=_peers_for(sid)),
+                _settings_page(
+                    fresh or {},
+                    hub,
+                    note,
+                    peers=_peers_for(sid),
+                    people=_operators_for(sid),
+                ),
                 media_type=MediaType.HTML,
             )
         # Re-render from what the hub returned, not from what was submitted: the two
@@ -1687,6 +1756,82 @@ def build_console(client: HubClient) -> Litestar:
                 hub,
                 "<p class='muted'>Saved.</p>",
                 peers=_peers_for(sid),
+                people=_operators_for(sid),
+            ),
+            media_type=MediaType.HTML,
+        )
+
+    @post("/settings/users/add", status_code=200, sync_to_thread=True)
+    def settings_user_add(request: Request, data: Form) -> Response:
+        """Invite a human, and show their one-time password **once**.
+
+        The hub sends no mail, so the password is displayed for the operator to pass on
+        themselves. It is shown exactly once and never stored in a form anyone can read
+        back.
+        """
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call(
+            "POST",
+            "/operators",
+            {
+                "username": str(data.get("username", "")).strip(),
+                "email": str(data.get("email", "")).strip(),
+                "group": str(data.get("group", "admin")),
+            },
+            session=sid,
+        )
+        if status not in (200, 201):
+            detail = (body or {}).get("detail") or "the hub refused that user"
+            note = (
+                "<p class='muted'><strong>Not added.</strong> "
+                f"{html.escape(str(detail))}</p>"
+            )
+        else:
+            who = html.escape(str((body or {}).get("username", "")))
+            password = html.escape(str((body or {}).get("password", "")))
+            note = (
+                f"<p><strong>Added {who}.</strong> Their one-time password is "
+                f"<code>{password}</code> — <strong>shown once</strong>. Pass it on "
+                "yourself; this hub sends no mail. They must set their own password "
+                "and enrol a second factor before the account can do anything.</p>"
+            )
+        fresh_status, fresh, _ = client.auth_call("GET", "/hub/settings", session=sid)
+        return Response(
+            _settings_page(
+                fresh or {},
+                hub,
+                peers=_peers_for(sid),
+                people=_operators_for(sid),
+                user_note=note,
+            ),
+            media_type=MediaType.HTML,
+        )
+
+    @post("/settings/users/remove", status_code=200, sync_to_thread=True)
+    def settings_user_remove(request: Request, data: Form) -> Response:
+        """Remove a human. The hub refuses the last one."""
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        username = str(data.get("username", "")).strip()
+        status, body, _ = client.auth_call(
+            "DELETE", f"/operators/{username}", session=sid
+        )
+        note = (
+            f"<p class='muted'>Removed <code>{html.escape(username)}</code>. Any "
+            "session they held stopped working immediately.</p>"
+            if status == 200
+            else "<p class='muted'><strong>Not removed.</strong> "
+            f"{html.escape(str((body or {}).get('detail', 'the hub refused')))}</p>"
+        )
+        fresh_status, fresh, _ = client.auth_call("GET", "/hub/settings", session=sid)
+        return Response(
+            _settings_page(
+                fresh or {},
+                hub,
+                peers=_peers_for(sid),
+                people=_operators_for(sid),
+                user_note=note,
             ),
             media_type=MediaType.HTML,
         )
@@ -1719,7 +1864,13 @@ def build_console(client: HubClient) -> Litestar:
             )
         fresh_status, fresh, _ = client.auth_call("GET", "/hub/settings", session=sid)
         return Response(
-            _settings_page(fresh or {}, hub, note, peers=_peers_for(sid)),
+            _settings_page(
+                fresh or {},
+                hub,
+                note,
+                peers=_peers_for(sid),
+                people=_operators_for(sid),
+            ),
             media_type=MediaType.HTML,
         )
 
@@ -1745,7 +1896,13 @@ def build_console(client: HubClient) -> Litestar:
         )
         fresh_status, fresh, _ = client.auth_call("GET", "/hub/settings", session=sid)
         return Response(
-            _settings_page(fresh or {}, hub, note, peers=_peers_for(sid)),
+            _settings_page(
+                fresh or {},
+                hub,
+                note,
+                peers=_peers_for(sid),
+                people=_operators_for(sid),
+            ),
             media_type=MediaType.HTML,
         )
 
@@ -1843,6 +2000,8 @@ def build_console(client: HubClient) -> Litestar:
             settings_view,
             settings_save,
             settings_peer,
+            settings_user_add,
+            settings_user_remove,
             settings_peer_add,
             settings_peer_remove,
             token_index,
