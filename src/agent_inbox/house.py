@@ -269,7 +269,7 @@ class House:
                 )
             )
             raise
-        return await self.send(
+        sent = await self.send(
             caller,
             original.attributed_to,
             body,
@@ -278,6 +278,35 @@ class House:
             subject=subject or _reply_subject(original.summary),
             in_reply_to=original.id,
         )
+
+        # **Answering a message is dealing with it.** Replying and reading used to be
+        # independent, so an agent answered something and still saw it waiting until it
+        # separately read the very message it had just replied to. Replying is the
+        # stronger signal of "handled"; requiring the weaker one afterwards was
+        # ceremony, and it made `check_inbox` — the call every agent makes at the
+        # start of a turn — misreport.
+        #
+        # **Strictly after the send, and never before.** If the send raises we never get
+        # here and the original stays unread, which is the required direction: an
+        # original
+        # marked read without a durable send is the state that must not happen, and
+        # ordering makes it unreachable rather than merely unlikely.
+        try:
+            await self._mailbox.mark_read_for(caller, original.id)
+        except Exception:  # noqa: BLE001 - deliberately swallowed; see below
+            # The reply is already sent and stored. Raising here would report a failed
+            # reply that in fact succeeded — worse than the state being complained
+            # about.
+            # The degraded outcome is "reply delivered, original still unread", which
+            # one
+            # `read_message` corrects.
+            logger.warning(
+                "replied on behalf of %r but could not mark %s read; "
+                "the reply was sent",
+                caller,
+                original.id,
+            )
+        return sent
 
     # -- unpoliced pass-through -------------------------------------------
     #

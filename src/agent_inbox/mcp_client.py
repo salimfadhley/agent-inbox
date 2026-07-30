@@ -671,6 +671,11 @@ async def reply_message(
     Not to everyone who received the original. If a broadcast needs an answer the whole
     group should see, send a new message addressed to them.
 
+    **A successful reply also marks the original handled, for you alone.** Answering
+    something is dealing with it, so it leaves your inbox without a separate
+    `read_message` — and everyone else's copy is untouched. If the send fails, the
+    original stays waiting.
+
     Replying does not summon anyone. Your reply waits exactly as any message does, until
     that agent next looks — which may be after its current work, or its next session.
     """
