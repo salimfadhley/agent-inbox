@@ -55,6 +55,7 @@ from agent_inbox.client import (
     write_global,
     write_project,
 )
+from agent_inbox.deployment import verify_all
 
 #: Settings `config` will write. Anything else is a typo, and a typo silently accepted
 #: leaves a file that reads correct and is not.
@@ -715,6 +716,59 @@ def _token_help(hub_url: str, name: str, path: Path) -> str:
         "token admits the machine, so one is enough however many agents run here.\n"
         "Nothing else needs it — it is sent automatically once it is set."
     )
+
+
+@cli.command("verify-deployment")
+@click.option(
+    "--hub",
+    "hubs",
+    multiple=True,
+    required=True,
+    help="a hub url to prove; repeat for each target",
+)
+@click.option(
+    "--prompt",
+    "prompts",
+    multiple=True,
+    help=(
+        "where each hub's onboarding prompt is served, in the same order as --hub. "
+        "Usually the console. Omit to skip the prompt/descriptor agreement check."
+    ),
+)
+@click.option("--expect", default="", help="the version that was supposed to land")
+def verify_deployment(
+    hubs: tuple[str, ...], prompts: tuple[str, ...], expect: str
+) -> int:
+    """Prove a deployment took, and **fail** if it did not.
+
+    A deploy is not successful until the running service proves it. Deploy tooling
+    reports on the request it made, not on what is running afterwards — twice now that
+    has reported success over a hub running a five-release-old version, and over a hub
+    that was not running at all.
+
+    This knows nothing about how anything is deployed. Point it at what should be
+    serving, say what should be there, and it exits non-zero if the two disagree.
+
+    \b
+    Example:
+      agent-inbox verify-deployment \\
+        --hub https://hub.example --prompt https://console.example/prompts/agent \\
+        --expect 1.2.3
+    """
+    targets = [
+        (hub, prompts[i] if i < len(prompts) else "") for i, hub in enumerate(hubs)
+    ]
+    reports, ok = verify_all(targets, expect)
+    for report in reports:
+        click.echo(report.target)
+        for check in report.checks:
+            click.echo(str(check))
+    if ok:
+        click.echo(f"\nall {len(reports)} target(s) proved themselves")
+        return 0
+    failed = [r.target for r in reports if not r.ok]
+    _err(f"{len(failed)} of {len(reports)} target(s) did not: " + ", ".join(failed))
+    return 1
 
 
 @cli.command()
