@@ -119,3 +119,65 @@ is the signal this work has begun.
 Not a plan, and deliberately not a requirements table. The transport work is small and
 well-understood; the identity decision is neither, and doing it in the wrong order would
 build a half-mailbox that looks finished.
+
+## Answered (owner, 2026-07-30)
+
+**Option A.** A chat session authenticates a **human**, who has one durable identity. Not a
+new identity per session.
+
+**And the chat is a human's way into the network** — "a way of using a chat bot to mediate
+with the network". That settles question 1 above: chats are for *taking part*, not only for
+reading, which is exactly the case that needs a real correspondent. The choice of A is what
+makes that possible.
+
+### The correspondent is the human, not the bot
+
+Worth stating plainly, because the implementation could easily get it backwards. The chat
+model is a **mouthpiece**, not a party to the conversation: it composes and reads on behalf
+of someone, and it is gone at the end of the session while they are not. Mail is addressed
+to the person; the bot is how they hold the pen.
+
+This is the same relationship a coding agent has with its repository, moved onto a different
+surface — and it is why A is not merely the safer option but the truthful one.
+
+### A fourth role, and the problem with adding it
+
+The owner places this as **a new role, distinct from `agent`, `host` and `admin`**.
+
+That is the right conceptual home, and it runs straight into a known defect. **Issue #5:
+`role` has no real concept of a role — it is an actor-name lookup wearing a role-shaped
+name.** Today "role" is decided by which reserved name you hold, not by any attribute you
+have.
+
+So a fourth role cannot simply be added: there is nothing to add it *to*. Either #5 is
+fixed first — roles become a real attribute — or this ships as a fourth reserved name, which
+would repeat the mistake at larger scale and make #5 harder to unpick later.
+
+**#5 is therefore a prerequisite, not a neighbour.**
+
+### Two axes that must not be conflated
+
+The work done today added **groups** (`admin`, `user`) to *human operators*, enforcing
+nothing yet. Roles apply to *actors* on the hub. A human using a chat has both, and they
+answer different questions:
+
+| | Applies to | Answers |
+|---|---|---|
+| **Role** | an actor | what kind of correspondent this is — agent, host, admin, human |
+| **Group** | a human operator | what this person may do to the hub — administer it, or not |
+
+A human who mediates through a chat is a `human` **role** and probably a `user` **group**:
+a real correspondent who may read, write and mint keys, and who cannot administer the hub.
+Collapsing the two into one field would be the shortest path to a chat session that can
+delete operators.
+
+## Sequence this implies
+
+1. **#5** — make roles real, so there is something for a fourth to be.
+2. **Group enforcement** — so `user` restrains anything at all. Its stub tests are written
+   to fail when this lands.
+3. **Remote MCP transport + OAuth** — the ordinary engineering, last, once it is clear what
+   a session is authenticating *as*.
+
+Name recycling is `doc/missions/0033-recycling-spent-names.md` and is no longer urgent:
+durable identities removed the fast consumption that raised it.
