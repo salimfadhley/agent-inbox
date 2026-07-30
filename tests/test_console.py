@@ -50,6 +50,8 @@ class StubHub(HubClient):
         super().__init__(Config(hub=hub, name=name))
         self.calls: list[str] = []
         self.tokens: list[dict[str, Any]] = []
+        #: The trust list, which gates federation in both directions.
+        self.peers: dict[str, str] = {}
         #: Who the hub says a session belongs to, when a test wants one.
         self.operator: str | None = None
         self.acting: str | None = None
@@ -288,6 +290,31 @@ class StubHub(HubClient):
             for t in self.tokens:
                 t["revoked"] = True
             return 204, None, None
+        # The trust list. Operator-gated on the real hub; the stub refuses without
+        # a session for the same reason the token routes do — the console must relay
+        # that refusal rather than decide for itself.
+        if path.startswith("/observe/peers"):
+            if method == "GET":
+                return (
+                    200,
+                    {
+                        "peers": [
+                            {"origin": origin, "added": added}
+                            for origin, added in sorted(self.peers.items())
+                        ]
+                    },
+                    None,
+                )
+            if method == "POST":
+                origin = str((body or {}).get("origin", "")).strip()
+                if not origin.startswith(("http://", "https://")) or " " in origin:
+                    return 422, {"detail": f"{origin!r} is not a hub address"}, None
+                self.peers[origin.rstrip("/")] = "2026-07-30"
+                return 200, {"origin": origin.rstrip("/"), "trusted": True}, None
+            if method == "DELETE":
+                origin = path.partition("origin=")[2]
+                self.peers.pop(origin.rstrip("/"), None)
+                return 200, {"origin": origin, "trusted": False}, None
         return 404, {"detail": "no"}, None
 
 
@@ -1278,9 +1305,59 @@ class TestSettingsTab:
         for field in ("name", "title", "description"):
             assert f'name="{field}"' in page
 
-    def test_it_says_federation_is_not_built_yet(self, console: TestClient) -> None:
-        """A page that implies federation works is a page that lies until it does."""
-        assert "not built yet" in console.get("/settings").text
+    def test_it_no_longer_claims_federation_is_unbuilt(
+        self, console: TestClient
+    ) -> None:
+        """It was true until step 6, and a page that keeps saying it now lies the other
+        way — an operator would not look for the controls that are right there."""
+        assert "not built yet" not in console.get("/settings").text
+
+    def test_it_offers_the_trust_list(self, console: TestClient) -> None:
+        """Peering is what actually switches federation on, so it must be reachable
+        without a shell. Until this existed, `add_peer` had no caller outside the
+        store."""
+        page = console.get("/settings").text
+        assert "Trusted hubs" in page
+        assert "action='/settings/peers/add'" in page
+
+    def test_an_empty_trust_list_says_why_nothing_works(
+        self, console: TestClient
+    ) -> None:
+        """The normal starting state, and the reason federation appears broken. A bare
+        "none" would leave the operator to guess."""
+        page = console.get("/settings").text
+        assert "neither send nor receive" in page or "no mail can cross" in page
+
+    def test_it_says_trust_is_not_mutual(self, console: TestClient) -> None:
+        """The mistake the two-hub tests made first: peering one side only, and the
+        send failing correctly for a reason that reads like a bug."""
+        assert "each hub must list the other" in console.get("/settings").text
+
+    def test_a_peer_can_be_added_and_removed(self, console: TestClient) -> None:
+        added = console.post(
+            "/settings/peers/add", data={"origin": "https://beta.example"}
+        )
+        assert added.status_code == 200, added.text
+        assert "beta.example" in console.get("/settings").text
+
+        gone = console.post(
+            "/settings/peers/remove", data={"origin": "https://beta.example"}
+        )
+        assert gone.status_code == 200, gone.text
+        assert "beta.example" not in console.get("/settings").text
+
+    def test_adding_a_peer_says_the_other_hub_must_reciprocate(
+        self, console: TestClient
+    ) -> None:
+        """Told at the moment it matters, not only in the section blurb."""
+        page = console.post(
+            "/settings/peers/add", data={"origin": "https://gamma.example"}
+        ).text
+        assert "must trust this one too" in page
+
+    def test_a_junk_origin_is_refused_in_words(self, console: TestClient) -> None:
+        page = console.post("/settings/peers/add", data={"origin": "not a url"}).text
+        assert "Not added" in page
 
     def test_saving_a_title_persists_it(self, console: TestClient) -> None:
         version = console.get("/settings").text.split('name="version" value="')[1][:16]

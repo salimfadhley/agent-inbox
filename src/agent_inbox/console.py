@@ -1511,11 +1511,52 @@ def build_console(client: HubClient) -> Litestar:
             )
         return Redirect("/", cookies=_relay_cookie(set_cookie))
 
+    def _peers_for(sid: str | None) -> list[dict[str, Any]]:
+        """The trust list, or an empty one if the hub will not say.
+
+        A console that cannot read the list still renders the rest of Settings — the
+        alternative is a page that fails entirely because one section could not load.
+        """
+        status, body, _ = client.auth_call("GET", "/observe/peers", session=sid)
+        if status != 200 or not isinstance(body, dict):
+            return []
+        found = body.get("peers")
+        return found if isinstance(found, list) else []
+
+    def _peer_list(peers: list[dict[str, Any]]) -> str:
+        """The trust list, or an honest empty state.
+
+        An empty list is the *normal* starting state and the reason federation appears
+        not to work, so it says that rather than showing a bare "none".
+        """
+        if not peers:
+            return (
+                "<p class='muted'><em>No hubs are trusted yet, so no mail can cross "
+                "in either direction.</em></p>"
+            )
+        rows = "".join(
+            "<tr><td><code>{}</code></td><td class='muted'>{}</td><td>"
+            "<form method='post' action='/settings/peers/remove' "
+            "style='display:inline'>"
+            "<input type='hidden' name='origin' value='{}'>"
+            "<button type='submit'>Stop trusting</button></form></td></tr>".format(
+                html.escape(str(peer.get("origin", ""))),
+                html.escape(str(peer.get("added", ""))),
+                html.escape(str(peer.get("origin", ""))),
+            )
+            for peer in peers
+        )
+        return (
+            "<table><thead><tr><th>Hub</th><th>Trusted since</th><th></th></tr>"
+            f"</thead><tbody>{rows}</tbody></table>"
+        )
+
     def _settings_page(
         settings: dict[str, Any],
         hub: dict[str, Any] | None,
         note: str = "",
         peer_result: str = "",
+        peers: list[dict[str, Any]] | None = None,
     ) -> str:
         """Everything an operator configures, in sections.
 
@@ -1561,9 +1602,20 @@ def build_console(client: HubClient) -> Litestar:
             "<h2>Settings</h2>"
             f"{note}"
             "<h3>Federation</h3>"
-            "<p class='muted'>How this hub identifies itself. Federation itself is not "
-            "built yet — these are the fields it will use, and they are worth setting "
-            "now because the hub's name appears in every address on it.</p>"
+            "<p class='muted'>How this hub identifies itself. The hub's name "
+            "appears in every address on it, so it is worth setting before anyone "
+            "writes one down.</p>"
+            "<h3>Trusted hubs</h3>"
+            "<p class='muted'>Peering gates federation in <strong>both</strong> "
+            "directions: this hub will not send to a hub that is not listed here, and "
+            "will not accept mail from one. A hub with no peers can neither send nor "
+            "receive, so this list is what switches federation on in practice.</p>"
+            "<p class='muted'>Trust is not mutual by default. For mail to flow both "
+            "ways, each hub must list the other.</p>"
+            f"{_peer_list(peers or [])}"
+            "<form method='post' action='/settings/peers/add'>"
+            "<p><input name='origin' placeholder='https://hub.example' size='40'>"
+            " <button type='submit'>Trust this hub</button></p></form>"
             "<h3>Check another hub</h3>"
             "<p class='muted'>Ask a hub who it is. Nothing is stored and no peering "
             "happens — this reads its public NodeInfo document, which is what a peer "
@@ -1591,7 +1643,10 @@ def build_console(client: HubClient) -> Litestar:
                 _refused(body, "the hub would not say how it is configured", hub),
                 media_type=MediaType.HTML,
             )
-        return Response(_settings_page(body or {}, hub), media_type=MediaType.HTML)
+        return Response(
+            _settings_page(body or {}, hub, peers=_peers_for(sid)),
+            media_type=MediaType.HTML,
+        )
 
     @post("/settings/save", status_code=200, sync_to_thread=True)
     def settings_save(request: Request, data: Form) -> Response:
@@ -1620,13 +1675,77 @@ def build_console(client: HubClient) -> Litestar:
                 "GET", "/hub/settings", session=sid
             )
             return Response(
-                _settings_page(fresh or {}, hub, note), media_type=MediaType.HTML
+                _settings_page(fresh or {}, hub, note, peers=_peers_for(sid)),
+                media_type=MediaType.HTML,
             )
         # Re-render from what the hub returned, not from what was submitted: the two
         # differ whenever the environment governs, and showing the submission would say
         # a change took effect when it did not.
         return Response(
-            _settings_page(body or {}, hub, "<p class='muted'>Saved.</p>"),
+            _settings_page(
+                body or {},
+                hub,
+                "<p class='muted'>Saved.</p>",
+                peers=_peers_for(sid),
+            ),
+            media_type=MediaType.HTML,
+        )
+
+    @post("/settings/peers/add", status_code=200, sync_to_thread=True)
+    def settings_peer_add(request: Request, data: Form) -> Response:
+        """Trust a hub.
+
+        Nothing is contacted: peering is a local statement about who *we* trust, and a
+        peer that is asleep must still be addable — otherwise two hubs could never be
+        introduced to each other except while both happened to be up.
+        """
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        origin = str(data.get("origin", "")).strip()
+        status, body, _ = client.auth_call(
+            "POST", "/observe/peers", {"origin": origin}, session=sid
+        )
+        if status not in (200, 201):
+            detail = (body or {}).get("detail") or "the hub refused that peer"
+            note = (
+                "<p class='muted'><strong>Not added.</strong> "
+                f"{html.escape(str(detail))}</p>"
+            )
+        else:
+            note = (
+                "<p class='muted'>Trusted "
+                f"<code>{html.escape(str((body or {}).get('origin', origin)))}</code>. "
+                "For mail to flow both ways, that hub must trust this one too.</p>"
+            )
+        fresh_status, fresh, _ = client.auth_call("GET", "/hub/settings", session=sid)
+        return Response(
+            _settings_page(fresh or {}, hub, note, peers=_peers_for(sid)),
+            media_type=MediaType.HTML,
+        )
+
+    @post("/settings/peers/remove", status_code=200, sync_to_thread=True)
+    def settings_peer_remove(request: Request, data: Form) -> Response:
+        """Stop trusting a hub.
+
+        Mail already received stays. It is **ours** — our retention, our schedule — and
+        a peer losing our trust does not reach back into our store, in either direction.
+        """
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        origin = str(data.get("origin", "")).strip()
+        status, body, _ = client.auth_call(
+            "DELETE", f"/observe/peers?origin={origin}", session=sid
+        )
+        note = (
+            "<p class='muted'>No longer trusting "
+            f"<code>{html.escape(origin)}</code>. Mail already received stays.</p>"
+            if status == 200
+            else "<p class='muted'><strong>Not removed.</strong> "
+            f"{html.escape(str((body or {}).get('detail', 'the hub refused')))}</p>"
+        )
+        fresh_status, fresh, _ = client.auth_call("GET", "/hub/settings", session=sid)
+        return Response(
+            _settings_page(fresh or {}, hub, note, peers=_peers_for(sid)),
             media_type=MediaType.HTML,
         )
 
@@ -1724,6 +1843,8 @@ def build_console(client: HubClient) -> Litestar:
             settings_view,
             settings_save,
             settings_peer,
+            settings_peer_add,
+            settings_peer_remove,
             token_index,
             tokens,
             mint,

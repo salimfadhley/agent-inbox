@@ -578,6 +578,60 @@ class Api:
         # key and two lazily-minting copies could race each other into two keys.
         return await hub_signing_key(self.house.mailbox)
 
+    # -- the trust list ----------------------------------------------------
+    #
+    # Peering gates federation in **both** directions: `outbound.deliver` refuses an
+    # origin that is not listed, and an inbound signature from an unlisted origin is a
+    # stranger's. A hub with no peers can neither send nor receive, which is why these
+    # exist — until they did, federation worked in the tests and could not be switched
+    # on by anyone who could not open the database by hand.
+    #
+    # Operator-only, per ADR 0008: deciding who this hub trusts is administration, and
+    # administration is not reachable by sending a message. An agent that could add a
+    # peer could be talked into adding one.
+
+    async def list_peers(self) -> dict[str, Any]:
+        """Who this hub trusts, and when each was added."""
+        peers = await self.house.mailbox.peers()
+        return {
+            "peers": [
+                {"origin": origin, "added": added}
+                for origin, added in sorted(peers.items())
+            ]
+        }
+
+    async def add_peer(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Trust a hub, by origin.
+
+        The origin is normalised through the **same** `peer_origin` the trust check and
+        the fetch guards use. Two nearly-agreeing notions of "same hub" is how a trust
+        list acquires a bypass, so there is deliberately only one.
+
+        Adding a peer does not contact it. Peering is a local statement about who *we*
+        trust, and a hub that is asleep should still be addable.
+        """
+        raw = str(data.get("origin", "")).strip()
+        if not raw:
+            raise HTTPException(status_code=422, detail="give an origin to trust")
+        try:
+            origin = peer_origin(raw)
+        except MailboxError as refused:
+            raise HTTPException(status_code=422, detail=str(refused)) from refused
+        note = str(data.get("note", "")).strip()
+        added = datetime.now(UTC).date().isoformat()
+        await self.house.mailbox.add_peer(origin, added, note)
+        return {"origin": origin, "trusted": True}
+
+    async def remove_peer(self, origin: str) -> dict[str, Any]:
+        """Stop trusting a hub.
+
+        Takes effect immediately and in both directions, because authorization is
+        re-derived at send time rather than carried from anywhere (FR-050). Mail already
+        received is **ours** and is not withdrawn — our retention, our rules.
+        """
+        await self.house.mailbox.remove_peer(peer_origin(origin))
+        return {"origin": origin, "trusted": False}
+
     async def verified_peer(
         self, request: Request, *, body: bytes | None = None
     ) -> str | None:
@@ -1684,6 +1738,36 @@ def build_api(
         return await api.set_hub_settings(data)
 
     @get(
+        "/observe/peers",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def list_peers_route(operator: str) -> dict[str, Any]:
+        """Who this hub trusts. Operator-gated: the trust list is deployment state."""
+        return await api.list_peers()
+
+    @post(
+        "/observe/peers",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def add_peer_route(data: dict[str, Any], operator: str) -> dict[str, Any]:
+        """Trust a hub. Operator-only, per ADR 0008 — an agent that could add a peer
+        could be talked into adding one."""
+        return await api.add_peer(data)
+
+    @delete(
+        "/observe/peers",
+        status_code=200,
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def remove_peer_route(origin: str, operator: str) -> dict[str, Any]:
+        """Stop trusting a hub. Takes effect on the next send, because authorization is
+        never carried from anywhere (FR-050)."""
+        return await api.remove_peer(origin)
+
+    @get(
         "/observe/purge",
         guards=[guard_enforce],
         dependencies={"operator": Provide(provide_operator)},
@@ -1908,6 +1992,9 @@ def build_api(
         webfinger_route,
         hub_settings_route,
         set_hub_route,
+        list_peers_route,
+        add_peer_route,
+        remove_peer_route,
         purge_preview,
         purge_status_route,
         purge_now,
