@@ -1,0 +1,15 @@
+{
+  "coordination_branch": "kitty/mission-the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1",
+  "created_at": "2026-07-30T16:39:52.069040+00:00",
+  "flattened": false,
+  "friendly_name": "the hub can tell a client mail has arrived",
+  "mission_id": "01KYSYB1Z1AQ10BRB4Z4JT2X4A",
+  "mission_number": null,
+  "mission_slug": "the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances the hub can tell a client mail has arrived on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "the hub can tell a client mail has arrived",
+  "slug": "the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1",
+  "target_branch": "main",
+  "topology": "coord"
+}
