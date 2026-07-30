@@ -44,6 +44,7 @@ from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAtte
 from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
 from agent_inbox.auth.throttle import LoginThrottle
+from agent_inbox.delivery import hub_signing_key
 from agent_inbox.errors import (
     auth_error_handler,
     mailbox_error_handler,
@@ -68,7 +69,7 @@ from agent_inbox.federation import (
 from agent_inbox.house import House
 from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
 from agent_inbox.inbound import InboundRefused, parse_activity, read_create
-from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
+from agent_inbox.keys import SigningKey
 from agent_inbox.naming import validate_hub_name
 from agent_inbox.peers import fetch_actor_document, insecure_federation, peer_origin
 from agent_inbox.signatures import parse_signature, verify_request
@@ -573,14 +574,9 @@ class Api:
         one, and generating a 2048-bit key on every boot of every test would be a cost
         with no purpose.
         """
-        mailbox = self.house.mailbox
-        stored = await mailbox.hub_settings()
-        pem = stored.get(PRIVATE_KEY_SETTING)
-        if pem:
-            return SigningKey(pem)
-        minted = generate()
-        await mailbox.set_hub_setting(PRIVATE_KEY_SETTING, minted.private_pem)
-        return minted
+        # One implementation, in `delivery`, because the sending path needs the same
+        # key and two lazily-minting copies could race each other into two keys.
+        return await hub_signing_key(self.house.mailbox)
 
     async def verified_peer(
         self, request: Request, *, body: bytes | None = None
@@ -727,7 +723,7 @@ class Api:
             replied = await self.house.reply(
                 caller, parent, note.content, subject=note.summary
             )
-            return self.wire.note(replied)
+            return self.wire.note(replied.record)
 
         sent = await self.house.send(
             caller,
@@ -739,7 +735,32 @@ class Api:
             # Whatever this document carried that we do not model, kept verbatim.
             document=unknown_properties(raw) or None,
         )
-        return self.wire.note(sent)
+        if sent.reached_nobody:
+            # Never 201. `api.py` already refuses to report a reply addressed to nobody
+            # as a success; a send whose only recipients were remote and unreachable is
+            # the same failure arriving by a different route.
+            raise HTTPException(
+                status_code=502,
+                detail="; ".join(
+                    f"{r.recipient}: {r.detail or 'failed'}" for r in sent.receipts
+                ),
+            )
+        rendered = self.wire.note(sent.record)
+        if sent.receipts:
+            # Per recipient, and a *word* rather than a boolean — Step 7's queue adds
+            # `queued` here, and a client that reads three states keeps working.
+            rendered.extra = {
+                **(rendered.extra or {}),
+                "delivery": [
+                    {
+                        "recipient": r.recipient,
+                        "state": r.state,
+                        **({"detail": r.detail} if r.detail else {}),
+                    }
+                    for r in sent.receipts
+                ],
+            }
+        return rendered
 
     async def inbox(
         self,

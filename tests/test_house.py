@@ -349,7 +349,7 @@ class TestNoActorHasAuthority:
         """Even mail *from* admin is ordinary mail — the name is not an office."""
         await house.join(ROSEMARY)
         sent = await house.send(ADMIN, ROSEMARY, "just a message")
-        assert sent.attributed_to == ADMIN
+        assert sent.record.attributed_to == ADMIN
 
         # admin has no more reach than anyone else: still cannot read others' mail
         await house.join(TREVOR)

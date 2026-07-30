@@ -32,6 +32,7 @@ import pytest
 import uvicorn
 
 from agent_inbox.api import build_api
+from agent_inbox.delivery import FederatedDelivery
 from agent_inbox.house import House
 from agent_inbox.mailbox import Mailbox
 from agent_inbox.peers import identify, peer_origin
@@ -51,7 +52,13 @@ class Hub:
         self.name = name
         self.port = _free_port()
         self.base = f"http://{name}.localhost:{self.port}"
-        self.house = House(Mailbox(InMemoryStore(), hub_name=name))
+        mailbox = Mailbox(InMemoryStore(), hub_name=name)
+        # Injected exactly as `serve.py` does it, so this harness exercises the same
+        # wiring production has rather than a hand-built approximation.
+        self.house = House(
+            mailbox,
+            deliver=FederatedDelivery(mailbox=mailbox, public_url=self.base),
+        )
         self._server = uvicorn.Server(
             uvicorn.Config(
                 build_api(self.house, self.base),
@@ -295,3 +302,60 @@ class TestSendingToAPeer:
         with pytest.raises(DeliveryRefused) as refused:
             resolve(f"nobody_here@beta.localhost:{beta.port}")
         assert "nobody_here" in str(refused.value), "the refusal must name who"
+
+    def test_an_agent_addresses_a_remote_actor_and_it_arrives(self, hubs) -> None:
+        """**The whole of step 6, end to end.** Not `outbound.deliver` called by hand —
+        an agent calling `send` with a remote address, through the house, exactly as an
+        agent on a real hub would.
+
+        Everything above this test proves a piece. This proves the piece is wired in.
+        """
+        from agent_inbox.peers import peer_origin
+
+        alpha, beta = hubs
+        # Peering is mutual and the two directions mean different things: beta lists
+        # alpha so alpha's signature counts on the way in, alpha lists beta because a
+        # hub should not send mail to one its operator never configured.
+        asyncio.run(beta.house.mailbox.add_peer(peer_origin(alpha.base), "2026-07-30"))
+        asyncio.run(alpha.house.mailbox.add_peer(peer_origin(beta.base), "2026-07-30"))
+        asyncio.run(alpha.house.join("wired"))
+
+        sent = asyncio.run(
+            alpha.house.send(
+                "wired",
+                f"alice@beta.localhost:{beta.port}",
+                "an agent sent this through send()",
+                subject="step six, wired",
+            )
+        )
+
+        assert [r.state for r in sent.receipts] == ["delivered"]
+        assert sent.record.to == (f"{beta.base}/actors/alice",), (
+            "a remote recipient is stored by its actor URI, not a local name"
+        )
+
+        landed = asyncio.run(beta.house.observe_mailbox("alice"))
+        assert "an agent sent this through send()" in [m.content for m in landed]
+
+    def test_a_send_to_a_hub_we_do_not_trust_reports_rather_than_arrives(
+        self, hubs
+    ) -> None:
+        """The refusal reaches the *sender*, and the local copy survives it."""
+        alpha, beta = hubs
+        asyncio.run(alpha.house.mailbox.remove_peer(peer_origin(beta.base)))
+        asyncio.run(alpha.house.join("hopeful"))
+
+        sent = asyncio.run(
+            alpha.house.send(
+                "hopeful",
+                f"alice@beta.localhost:{beta.port}",
+                "should not arrive",
+                subject="untrusted",
+            )
+        )
+
+        assert [r.state for r in sent.receipts] == ["failed"]
+        assert sent.reached_nobody, "nobody got it, so it must not read as success"
+        assert sent.record.id, "and the sender still has their own copy"
+        # Put it back: the fixture is module-scoped and later tests expect the peering.
+        asyncio.run(alpha.house.mailbox.add_peer(peer_origin(beta.base), "2026-07-30"))

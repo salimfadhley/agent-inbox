@@ -148,6 +148,20 @@ class Renderer:
     # -- ids ---------------------------------------------------------------
 
     def actor_uri(self, name: str) -> str:
+        """The URI of an actor, local or remote.
+
+        **A remote actor is already stored by its URI** (ADR 0003), so it is returned
+        untouched. Only a local name — the shorthand that holds while everyone is local
+        — needs this hub's base put in front of it.
+
+        This prefixed unconditionally until Step 6, which meant an inbound remote
+        message rendered its sender as
+        `http://ourhub.example/actors/https://beta.example/actors/alice`. The stored
+        record was right and the rendering was mangled; the two-hub test asserted on the
+        record, which is why it passed.
+        """
+        if "://" in name:
+            return name
         return f"{self.base}/actors/{name}"
 
     def object_uri(self, object_id: str) -> str:

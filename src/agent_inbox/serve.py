@@ -23,6 +23,7 @@ from agent_inbox.auth import secrets as auth_secrets
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
 from agent_inbox.auth.store import SqliteAuthStore
 from agent_inbox.auth.throttle import LoginThrottle
+from agent_inbox.delivery import FederatedDelivery
 from agent_inbox.house import House
 from agent_inbox.hub_settings import (
     env_with_source,
@@ -133,7 +134,13 @@ def build_app(
     mailbox = Mailbox(
         store, hub_name=config.hub_name, retention_days=config.retention_days
     )
-    house = House(mailbox)
+    # The delivery collaborator is what lets an agent address another hub. Injected
+    # here, so a `House` built anywhere else refuses remote recipients rather than
+    # dropping them.
+    house = House(
+        mailbox,
+        deliver=FederatedDelivery(mailbox=mailbox, public_url=config.public_url),
+    )
 
     # The auth service exists whenever a mode other than `off` is asked for. It
     # opens its own connection to the same SQLite file — WAL lets the two coexist,

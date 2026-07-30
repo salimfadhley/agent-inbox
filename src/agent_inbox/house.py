@@ -20,7 +20,9 @@ from collections.abc import Sequence
 from types import TracebackType
 from typing import Any, Self
 
-from agent_inbox import rules
+from agent_inbox import addressing, rules
+from agent_inbox.delivery import Receipt, RemoteDelivery, Sent
+from agent_inbox.exceptions import RemoteMailbox
 from agent_inbox.mailbox import Mailbox, _reply_subject
 from agent_inbox.policy import Attempt, Outcome, Policy, default_policies
 from agent_inbox.records import ActorRecord, ObjectRecord
@@ -39,10 +41,17 @@ class House:
     """
 
     def __init__(
-        self, mailbox: Mailbox, policies: Sequence[Policy] | None = None
+        self,
+        mailbox: Mailbox,
+        policies: Sequence[Policy] | None = None,
+        *,
+        deliver: RemoteDelivery | None = None,
     ) -> None:
         self._mailbox = mailbox
         self._policies = tuple(policies if policies is not None else default_policies())
+        # Injected, exactly as policies are. A house without one **refuses** remote
+        # recipients rather than dropping them — see `send`.
+        self._deliver = deliver
 
     @property
     def mailbox(self) -> Mailbox:
@@ -105,7 +114,21 @@ class House:
         in_reply_to: str | None = None,
         document: dict[str, object] | None = None,
         remote_sender: str | None = None,
-    ) -> ObjectRecord:
+    ) -> Sent:
+        """Send a message, to this hub and to others.
+
+        **Both halves, one entry point.** The alternative — letting the API split and
+        call this for the local half only — would make `send` mean *send locally*, so
+        any caller not going through the API would silently drop remote recipients.
+        That is the failure shape this project keeps finding, so it is closed by
+        construction: a house with no delivery collaborator refuses a remote recipient.
+
+        Order is resolve, store, deliver. Resolution comes first because a remote
+        recipient is stored by its **actor URI** (ADR 0003) and that URI is what
+        resolution produces. Storing comes before delivery because losing the sender's
+        own message when somebody else's server is down is the worst available trade
+        (FR-7).
+        """
         recipients = (to,) if isinstance(to, str) else tuple(to)
         attempt = Attempt(
             action="send",
@@ -115,21 +138,93 @@ class House:
             body=body,
         )
         await self._check(attempt)
+
+        hub = self._mailbox.hub_name
+        local_to, remote_to = addressing.split_recipients(recipients, hub)
+        local_cc, remote_cc = addressing.split_recipients(tuple(cc), hub)
+        remote = remote_to + remote_cc
+
+        if remote and self._deliver is None:
+            # Refused, not dropped. This house cannot reach another hub, and delivering
+            # the local half while discarding the rest would look like success.
+            # `RemoteMailbox`, not a new code. Its docstring has anticipated this
+            # exact moment since before federation existed: "this deployment does not
+            # federate, so there is nowhere to send it *yet*". A second code for the
+            # same condition would be vocabulary churn for downstream callers.
+            refusal = RemoteMailbox(
+                "this hub cannot send to other hubs, so it will not pretend to: "
+                + ", ".join(remote)
+            )
+            await self._record(Outcome(attempt, ok=False, error=refusal))
+            raise refusal
+
+        # Resolve first. A recipient we cannot resolve is not stored as having received
+        # anything — it gets a failed receipt instead, and `audience` still records what
+        # the sender actually typed.
+        resolved: list[tuple[str, object]] = []
+        receipts: list[Receipt] = []
+        for address in remote:
+            assert self._deliver is not None
+            try:
+                resolved.append((address, await self._deliver.resolve(address)))
+            except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+                receipts.append(Receipt(address, delivered=False, detail=str(exc)))
+
         try:
-            sent = await self._mailbox.send(
+            record = await self._mailbox.send(
                 caller,
-                to,
+                local_to if remote else to,
                 body,
                 subject=subject,
-                cc=cc,
+                cc=local_cc if remote else cc,
                 in_reply_to=in_reply_to,
                 document=document,
                 remote_sender=remote_sender,
+                remote_to=tuple(
+                    self._deliver.actor_uri(who)
+                    for _, who in resolved
+                    if self._deliver is not None
+                ),
+                audience=recipients + tuple(cc) if remote else (),
             )
         except Exception as exc:
             await self._record(Outcome(attempt, ok=False, error=exc))
             raise
-        await self._record(Outcome(attempt, ok=True, detail={"id": sent.id}))
+
+        # Stored. From here nothing can lose the sender's own copy.
+        for address, who in resolved:
+            assert self._deliver is not None
+            try:
+                await self._deliver.deliver(who, record)
+            except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+                receipts.append(Receipt(address, delivered=False, detail=str(exc)))
+            else:
+                receipts.append(Receipt(address, delivered=True))
+
+        # What the *local* half reached, computed here rather than read back off
+        # `record.to`, which since step 6 also holds remote actor URIs.
+        remote_uris = {uri for uri in record.to if "://" in uri}
+        sent = Sent(
+            record=record,
+            receipts=tuple(receipts),
+            local_recipients=tuple(
+                who for who in record.to + record.cc if who not in remote_uris
+            ),
+        )
+        await self._record(
+            Outcome(
+                attempt,
+                ok=not sent.reached_nobody,
+                detail={
+                    "id": record.id,
+                    **(
+                        {"remote": [(r.recipient, r.state) for r in sent.receipts]}
+                        if sent.receipts
+                        else {}
+                    ),
+                },
+            )
+        )
         return sent
 
     async def read(self, caller: str, object_id: str) -> ObjectRecord:
@@ -159,7 +254,7 @@ class House:
 
     async def reply(
         self, caller: str, object_id: str, body: str, *, subject: str | None = None
-    ) -> ObjectRecord:
+    ) -> Sent:
         try:
             original = await self._mailbox.view(caller, object_id)
         except Exception as exc:

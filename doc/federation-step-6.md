@@ -1,7 +1,8 @@
 # Step 6 — one message, one peer, outbound
 
 - **Prerequisite:** steps 0–5, all shipped.
-- **Status:** **the sending path is built and proved between two real hubs.** Not yet wired to `house.send`, so an agent cannot address a remote actor yet — that is the last piece. **No open questions** (see *Answered*).
+- **Status:** **done.** An agent calls `send` with a remote address and it arrives on the
+  other hub, proved end to end against two real servers. **No open questions.**
 
 ## What this is
 
@@ -150,6 +151,56 @@ Mastodon's `Application` actor is for. That is a later step, not this one.
 **The limit, recorded:** naming the sender implies `alice` holds that key, when the hub does.
 One hub key signs for the whole roster — the same limit Step 5 records for remote actors,
 seen from our side. It stops being a fiction the day per-actor keys exist.
+
+## What the wiring cost, and what found the one defect
+
+**18 tests, one new module, and one bug that only a real socket could have found.**
+
+`delivery.py` holds the collaborator and the answer shape; `House` gained an injected
+`deliver`; `Mailbox.send` gained `remote_to`, which is the exact mirror of the
+`remote_sender` widening Step 5 needed — recipients **already resolved** at the federation
+boundary and identified by URI, not passed through `local_name` and not looked up on the
+roster.
+
+### `RemoteMailbox`, not a new error code
+
+The refusal a house gives when it has no delivery collaborator is the error that already
+existed. Its docstring, written before federation did:
+
+> This deployment does not federate, so there is nowhere to send it *yet*. … when
+> federation arrives, this case becomes a delivery while that one still fails.
+
+That is this condition exactly. A second code would have been vocabulary churn for
+downstream callers to no purpose.
+
+### The defect: `to` now holds two kinds of thing
+
+Decision 3 stores a remote recipient by its actor URI in `record.to`. `Sent.reached_nobody`
+asked "did anyone get this?" by checking whether `to` was non-empty — which had been a
+faithful question for as long as every entry was a local name that received a row.
+
+It is no longer. A remote recipient that **resolved and then failed delivery** is in `to`
+and received nothing. So a send to an untrusted peer — resolution fine, delivery refused —
+reported success while reaching nobody. The precise failure shape the whole per-recipient
+report exists to prevent, reintroduced by the storage decision made to support it.
+
+`Sent` now carries `local_recipients`, told to it by `House` rather than derived from
+`to`.
+
+**Found by the two-hub test, not by the fakes.** The fake collaborator refuses at
+*resolution*, so the remote recipient never reaches `to` and `reached_nobody` is right by
+accident. Only a peer that resolves and then refuses — which needs two real servers —
+produces the state that breaks it. The unit tests were not wrong; they could not reach it.
+
+### Every guard proved by removal
+
+Not by passing. Each was deleted and watched failing first:
+
+| Guard removed | What failed |
+|---|---|
+| `if remote and self._deliver is None` | both refusal tests |
+| the already-a-URI passthrough in `actor_uri` | all three renderer tests |
+| `@local` staying local in `split_recipients` | both non-egress tests |
 
 ## Out of scope
 

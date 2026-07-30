@@ -212,6 +212,8 @@ class Mailbox:
         in_reply_to: str | None = None,
         document: dict[str, object] | None = None,
         remote_sender: str | None = None,
+        remote_to: Sequence[str] = (),
+        audience: Sequence[str] = (),
     ) -> ObjectRecord:
         """Send a message. Every actor addressed receives their own copy.
 
@@ -272,7 +274,15 @@ class Mailbox:
         )
         if rules.named_self(copies, sender) and sender not in reached:
             also |= {sender}
-        resolved_to = tuple(sorted(reached))
+        # `remote_to` is the mirror of `remote_sender`: recipients **already resolved**
+        # at the federation boundary and identified by actor URI (ADR 0003). They do not
+        # go through `_local`, because they have no local name and must not be given
+        # one, and they are not resolved against the roster, because they are not on it.
+        #
+        # They are appended rather than sorted in, so the local half of `to` keeps the
+        # exact ordering it has always had and nothing downstream that assumed sorted
+        # local names is disturbed.
+        resolved_to = tuple(sorted(reached)) + tuple(remote_to)
         resolved_cc = tuple(sorted(also))
         self._reject_undeliverable(
             recipients + copies, resolved_to + resolved_cc, memberships
@@ -291,7 +301,14 @@ class Mailbox:
             # exactly this: `to` is who it went to, `audience` is who it was aimed at.
             # `audience` is what was typed; anything else is a property we do not
             # model and are required to preserve (ADR 0006).
-            document={"audience": list(recipients + copies), **(document or {})},
+            # `audience` is what was *typed*, and when a send has remote recipients the
+            # caller passes the original addresses — otherwise the record would show
+            # only the local half and the sender's own copy would misreport who they
+            # addressed it to.
+            document={
+                "audience": list(audience or recipients + copies),
+                **(document or {}),
+            },
         )
         await self._store.add_object(obj)
         return obj
