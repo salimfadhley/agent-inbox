@@ -1152,6 +1152,12 @@ def build_console(client: HubClient) -> Litestar:
             f"<p>{html.escape(para)}</p>"
             for para in role_note().replace("**", "").split("\n\n")
         )
+        # The caution in the prompt comes from the hub's own descriptor — the same
+        # field `hub_info` reports — so an authenticated hub cannot publish the
+        # unauthenticated warning.
+        rendered_prompt = onboarding(
+            address, prompt_url, _version(hub), bool(hub.get("authenticated"))
+        )
         body = (
             f"{note}"
             "<p>Paste this to an agent. It is short on purpose: it tells the agent "
@@ -1166,7 +1172,7 @@ def build_console(client: HubClient) -> Litestar:
             "plain text. Written for <code>"
             f"{html.escape(address)}</code>.</p>"
             "<h2>The full prompt</h2>"
-            f"<pre>{html.escape(onboarding(address, prompt_url, _version(hub)))}</pre>"
+            f"<pre>{html.escape(rendered_prompt)}</pre>"
             # The copy behaviour lives in /static/console.js (same-origin), so the CSP
             # can forbid inline scripts. It selects the textarea first, so a browser
             # that withholds the clipboard still leaves the text selected to copy.
@@ -1188,8 +1194,13 @@ def build_console(client: HubClient) -> Litestar:
         """
         hub = hub_or_none() or {}
         address = _advertised(hub, client.config.base)
+        # The caution comes from the hub's own descriptor — the same field `hub_info`
+        # reports — so an authenticated hub cannot publish the unauthenticated warning.
         return onboarding(
-            address, f"{_console_base(request)}/prompts/agent", _version(hub)
+            address,
+            f"{_console_base(request)}/prompts/agent",
+            _version(hub),
+            bool(hub.get("authenticated")),
         )
 
     @get("/prompts/{role:str}", media_type=MediaType.TEXT, sync_to_thread=True)
