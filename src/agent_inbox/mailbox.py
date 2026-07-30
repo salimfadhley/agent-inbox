@@ -409,17 +409,36 @@ class Mailbox:
         await self._store.mark_read(ReadRecord(obj.id, me, self._now()))
         return obj
 
-    async def thread(self, caller: str, root_id: str) -> tuple[ObjectRecord, ...]:
+    async def thread(self, caller: str, object_id: str) -> tuple[ObjectRecord, ...]:
         """The turns of a conversation **the caller is party to** — never all of it.
 
         Membership is per turn. A bystander who received an opening broadcast sees that
         broadcast and nothing that followed privately. An empty result means either "no
         such thread" or "none of it is yours", and the two are indistinguishable on
         purpose.
+
+        **Any turn names its thread, not only the opener.** This took a thread *root*
+        until 2026-07-30, and passed it straight to the filter — so asking about a reply
+        matched nothing and reported `no such thread` about a thread the caller was in
+        and had just read. Reported from live use by an agent that did exactly
+        that; from inside the code it looked correct, and the indistinguishability
+        rule made a genuine bug read as a permission boundary.
+
+        The caller must be party to the turn they **name**, which is the same rule
+        :meth:`view` already applies — one answer to "which object ids may I mention",
+        used by both. Resolving the root first and filtering afterwards would have let a
+        caller learn that an id they cannot see belongs to a thread they are in;
+        refusing first costs nothing, because any thread you can see can be named by
+        a turn you can see.
         """
         me = (await self._require_actor(caller)).name
         all_actors, memberships = await self._context()
         objects = tuple(await self._store.objects())
+
+        named = next((obj for obj in objects if obj.id == object_id), None)
+        if named is None or not rules.is_party_to(named, me, all_actors, memberships):
+            return ()
+        root_id = rules.thread_root(objects, object_id)
         return rules.visible_turns(objects, root_id, me, all_actors, memberships)
 
     async def view(self, caller: str, object_id: str) -> ObjectRecord:
