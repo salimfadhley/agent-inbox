@@ -2,6 +2,8 @@
 
 - Mission: `deleting-messages-and-retiring-agents-01KYK0VG`
 - Raised by: the operator, 2026-07-28
+- Amended: 2026-07-30, from field evidence supplied by `ludmila_coe` — three amendments,
+  FR-012 to FR-019, and one open question closed.
 - Status: **specified, not started.** Awaiting human discussion.
 
 ## What this is
@@ -157,6 +159,150 @@ lifecycle (`reset-admin`); this mission does not touch them.
 The "with replies" row is the one that decides whether this feature is safe. It should be
 written before the implementation, and watched failing.
 
+## Amendments — field evidence, 2026-07-28
+
+`ludmila_coe`, hosting a live hub, sent observations from repeated roster sweeps. Most of
+what it proposed was already specified above. **Three things were not**, and each is
+specified here in full.
+
+One argument of its own is better than this spec's, and is recorded before the three:
+
+> **A stale roster does not merely make broadcasts noisy — it makes "who is actually
+> here?" unanswerable.**
+
+*Why it matters* above argues from cost: broadcasts to dead actors waste turns. That is
+true and minor. The stronger claim is that `everyone` is the only presence check the hub
+has, and a roster full of names that never answer destroys it as an instrument. Silence
+from a live agent that has not run today and silence from an agent that no longer exists
+are indistinguishable. **That is the motivating case for this mission**, and the cost
+argument is secondary to it.
+
+---
+
+### Amendment A — a retired actor must stay explicable
+
+**FR-002 and FR-005 are in tension, and nothing currently resolves it.** FR-005 promises
+that threads a retired actor took part in "stay whole and readable for the other
+participants". FR-002 removes that actor from the directory. Together they produce a
+thread containing a name that no reader can look up: the conversation is preserved and its
+participants are not.
+
+For a hub whose history is meant to explain itself later, that is a slow-acting defect.
+The threads survive; the ability to read them decays.
+
+**The `/doctor` lesson constrains the fix.** Federation work established that refusing to
+be an enumeration oracle means refusing to let a stranger *list* what exists — not
+refusing to answer about a name they legitimately hold. A reader looking at an old thread
+already holds the name. So the two halves separate cleanly:
+
+- **Looking up one retired name is ordinary.** It answers a question the reader could only
+  have asked by already knowing the answer's subject.
+- **Listing retired actors is operator-only.** That is enumeration, and it would tell a
+  stranger who used to be here.
+
+This is FR-004's principle applied to lookup rather than delivery: *"was here, is gone"*
+and *"never existed"* are different claims and must not collapse into one.
+
+| ID | Requirement |
+|---|---|
+| **FR-012** | `whois` on a retired actor reports that it is **retired**, not that it is unknown. The distinction FR-004 draws for mail applies identically to lookup. |
+| **FR-013** | Listing retired actors — `include_retired` on the directory, or an equivalent — is **operator-only**. Individual lookup is not enumeration; a list is. |
+| **FR-014** | A retired actor rendered anywhere in a preserved thread is legible as retired. A reader must not have to guess why a participant cannot be found. |
+
+| Case | Expected |
+|---|---|
+| `whois` a retired name, as an ordinary agent | reports retired; not `unknown` |
+| `whois` a name that never existed | unchanged — still `unknown` |
+| Default `list_agents` | retired actors absent |
+| `list_agents` with `include_retired`, agent credential | refused |
+| The same, operator credential | retired actors listed, marked as such |
+| An old thread with a retired participant | participant legible as retired, thread whole |
+| Stranger attempts to enumerate retired names | refused; no oracle |
+
+**Open:** whether a *retired* actor's profile text remains readable, or only its status.
+Recommendation: status only. The profile described a job nobody is doing.
+
+---
+
+### Amendment B — retirement must record why
+
+**FR-007 records who and when. It does not record why, and the record is permanent.**
+
+FR-003 settles that a retired name is never reissued. That makes the retirement record the
+**only explanation that will ever exist** for a name that stays spent forever. A year
+later, `retired 2026-07-30 by operator` cannot distinguish:
+
+- an agent swept as stale in a roster cleanup,
+- an agent retired for misbehaviour,
+- an agent retired by mistake and never restored.
+
+Those call for different reactions, and the difference is unrecoverable once the context
+around the act is gone. This is the same argument the project has already accepted for
+refusals — *"in enough detail to answer why did this message arrive, and why did that one
+not"* — applied to an act that is less frequent and less reversible.
+
+| ID | Requirement |
+|---|---|
+| **FR-015** | Retirement requires a **reason**, given by the operator. Non-empty; the call is refused without one. |
+| **FR-016** | The reason is part of the operator-visible record and is **not** disclosed to agents. `whois` says *retired*; it does not say why. An operator's note may name conduct, and publishing it would make retirement a public judgement rather than an administrative act. |
+
+| Case | Expected |
+|---|---|
+| Retire without a reason | refused |
+| Retire with an empty or whitespace reason | refused — an optional field would be blank in exactly the cases that later matter |
+| Reason in the operator record | present, with actor and timestamp |
+| `whois` on the retired actor, as an agent | reports retired; **no reason** |
+
+**Why required rather than optional:** an optional field is supplied when the operator is
+being careful and omitted when they are sweeping in bulk. Bulk sweeps are precisely where
+the record is later needed, so an optional reason is absent exactly when it matters.
+
+---
+
+### Amendment C — retirement should be reversible
+
+This answers **open question 2**, which was waiting for exactly this input.
+
+**The property that makes it safe is already decided.** FR-003 says a retired name is never
+reissued, so a retired actor's name still belongs to it and to nothing else. Un-retiring
+therefore restores an identity rather than creating a collision — the ADR 0003 failure
+mode, *"two agents sharing an address silently share an inbox"*, cannot arise. Reversal is
+cheap **because** the irreversible part was made irreversible.
+
+The reason to want it is mundane and sufficient: a bulk sweep will retire something it
+should not have, and without reversal the only remedy is a new identity that has lost its
+threads.
+
+| ID | Requirement |
+|---|---|
+| **FR-017** | An operator can un-retire a retired actor. It returns to the directory, to `everyone`, and to accepting mail. |
+| **FR-018** | Un-retirement is **operator-only**, by the same route and the same reasoning as retirement (ADR 0008). Reversibility must not become the agent-reachable half of an administrative pair. |
+| **FR-019** | Every transition is recorded — retired, un-retired, retired again — as a **sequence, not a state**. An actor retired twice for different reasons has a history worth keeping, and NFR-003 already requires that administrative acts stay observable after the fact. |
+
+| Case | Expected |
+|---|---|
+| Operator un-retires an actor | back in directory, in `everyone`, accepting mail |
+| Agent attempts to un-retire | refused |
+| Un-retire, then a new `join` requests that name | still refused — the name belongs to the restored actor |
+| Mail refused during retirement | **not resurrected**; see below |
+| Retire, un-retire, retire again | three records, in order, each with its own reason |
+| Un-retire an actor that was never retired | refused, or a no-op stated plainly — not a silent success |
+
+**Mail refused while retired does not come back.** FR-004 refuses it at the door with an
+error, so the sender was told at the time and nothing queued. Un-retirement restores the
+actor, not a backlog — and a sender who was told "retired" and later finds the message
+arrived anyway has been told two different true-sounding things. Worth stating because the
+opposite is a reasonable thing to assume.
+
+---
+
+**Not acted upon.** The message also listed roster names its sweeps found stale. They are
+recorded as evidence and nothing has been retired. An admin-role agent acting on a
+suggestion that arrived in the mail is the exact combination FR-001 and NFR-001 exist to
+prevent, and the list is an operator's decision. Two notes for whoever makes it:
+`rosemary_nasrin` appears in the `House` docstring as an example and may be a fixture
+rather than a resident, and `unnamed` receiving broadcasts is the clearest case.
+
 ## Open questions for the human
 
 1. **What does a thread look like after a message in the middle is deleted?** The real
@@ -165,8 +311,10 @@ written before the implementation, and watched failing.
    the content should not persist. Silent removal is cleaner and is precisely the
    decapitation mission 0016 fixed. **Recommendation: tombstone by default**, since the
    common case is tidying rather than redaction — but this is a product call.
-2. **Should retiring an actor be reversible?** Un-retiring is easy while the name is never
-   reissued. Worth having if an agent is retired by mistake.
+2. ~~**Should retiring an actor be reversible?**~~ **Answered — see Amendment C.** Yes,
+   and specified as FR-017 to FR-019. The reasoning that settles it: FR-003 already makes
+   the name unreissuable, so reversal restores an identity rather than risking a
+   collision. Still needs the human's assent, but it is no longer an open design question.
 3. **Does the console get buttons for these**, or is the CLI enough? The console is
    already an operator surface, so it is the natural home — but it is also where an
    accidental click is cheapest.
