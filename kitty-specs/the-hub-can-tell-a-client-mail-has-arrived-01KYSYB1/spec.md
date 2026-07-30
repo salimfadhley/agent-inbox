@@ -245,3 +245,59 @@ first contact fails and the retry succeeds, which is exactly the shape a queue f
 **Worth measuring against the real host rather than assuming**, because the answer decides
 whether "federate with a sleeping hub" is a Step 7 feature or something that already works.
 Recorded in `doc/federation-step-7.md`.
+
+## Answered — who holds the connection, and why the layering is forced (owner, 2026-07-30)
+
+Open question 3 is closed: **the MCP server holds the connection, and it connects outward
+to the hub.** Both halves are forced by facts about the world rather than chosen for
+tidiness, which is worth recording — a constraint that reads as a preference is one somebody
+later "simplifies".
+
+### The direction is forced by NAT
+
+**The MCP client may be the wrong side of NAT.** A hub cannot open a connection to it —
+there may be no route, and there is certainly no address the hub can rely on.
+
+So the connection must be **client-initiated and held open**, which is exactly what SSE is.
+This is not a reason to prefer SSE over WebSocket (both are client-initiated); it is the
+reason the whole design is *client connects to hub* rather than *hub notifies client*, and
+it rules out any future "the hub calls a webhook" shortcut for agents on laptops.
+
+It also settles the CLI-or-MCP question by elimination: the CLI is invoked per command and
+exits, so the MCP server — which lives as long as the agent's session — is the only client
+process with a lifetime long enough to hold anything open.
+
+**Consequence:** no session, no connection, no wake. That is correct, because there is
+nobody to interrupt — but it means a connection count measures *running sessions*, not
+agents that exist. Anything reading it as presence (issue #7) must say which it means.
+
+### The decision layer is client-side because interruption is harness-specific
+
+**Each agent has its own interrupt mechanics.** Claude Code, Codex and OpenCode do not share
+a way of being interrupted, and what is even *possible* differs between them — one may
+accept an event into a running session, another may only be able to leave something for the
+next turn.
+
+So "how and when to interrupt" cannot live in the hub, and not merely for the ADR 0008
+reason already recorded. It could not be *implemented* there: the hub would have to know
+what harness each recipient runs, track which are running, and carry a per-harness
+interrupt strategy — every one of which is a harness concept entering the server, and every
+one of which goes stale the day a new harness appears.
+
+This extends `live-session-push`'s rule 1. That mission established that the **delivery**
+mechanism is a client-side adapter. This establishes that the **decision** is too, and for a
+different reason: delivery is client-side because harnesses differ in *how* they receive;
+the decision is client-side because they differ in *what is possible*, and a decision made
+without knowing that is a decision made blind.
+
+The hub's contribution stays exactly one sentence: **"there is mail for you, from X, about
+Y."** Everything after that belongs to whatever is running the agent.
+
+## Ready to plan
+
+No open questions remain. Settled: SSE; MCP server as the holder; outward connection;
+client-side decision layer gated on sender identity and rate-limited; notification not
+delivery; polling remains the floor; a connected client keeps the host awake, accepted.
+
+Carried elsewhere, not blocking: whether a cold scale-to-zero peer answers inside the
+delivery timeout — `doc/federation-step-7.md`.
