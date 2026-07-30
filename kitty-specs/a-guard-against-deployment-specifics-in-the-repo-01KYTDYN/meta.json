@@ -1,0 +1,15 @@
+{
+  "coordination_branch": "kitty/mission-a-guard-against-deployment-specifics-in-the-repo-01KYTDYN",
+  "created_at": "2026-07-30T21:12:43.099458+00:00",
+  "flattened": false,
+  "friendly_name": "a guard against deployment specifics in the repo",
+  "mission_id": "01KYTDYNAT1E04SB45TMQ5B36P",
+  "mission_number": null,
+  "mission_slug": "a-guard-against-deployment-specifics-in-the-repo-01KYTDYN",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances a guard against deployment specifics in the repo on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "a guard against deployment specifics in the repo",
+  "slug": "a-guard-against-deployment-specifics-in-the-repo-01KYTDYN",
+  "target_branch": "main",
+  "topology": "coord"
+}
