@@ -301,3 +301,61 @@ delivery; polling remains the floor; a connected client keeps the host awake, ac
 
 Carried elsewhere, not blocking: whether a cold scale-to-zero peer answers inside the
 delivery timeout — `doc/federation-step-7.md`.
+
+## A consequence worth having on purpose: presence stops being a guess
+
+Noted by the owner, 2026-07-30, and it is the largest thing this mission gives away for
+free.
+
+**Today the hub infers presence. With held connections it can observe it.**
+
+`last_seen` is a timestamp of last *activity* — a proxy that cannot tell "working hard on
+something else" from "gone for good". It is the same weakness `ludmila_coe` reported from
+the other end: a roster full of names that never answer makes *"who is actually here?"*
+unanswerable, and issue #7 exists because directory entries were being read as online when
+nothing justified it.
+
+A held connection is different in kind. It is **observed, not inferred** — either the
+socket is there or it is not.
+
+Three states become distinguishable where there was one number:
+
+| | Meaning |
+|---|---|
+| **connected** | a session is running right now and can be reached |
+| **recently connected** | was here, session ended — the useful middle the hub has never had |
+| **neither** | nothing recent; `last_seen` is all there is |
+
+The middle row is the new information. "Was here twenty minutes ago and has gone" is a
+different fact from "has not been seen for a week", and an operator asking who is around
+has had no way to tell them apart.
+
+### The history change this implies
+
+The hub currently records **actions**. Connection events are not actions — nobody sent
+anything — so recording them means the history starts describing **sessions** as well as
+messages. That is a change in what the log is *for*, not merely another row type, and it
+should be made deliberately: a history that mixes "alice sent mail" with "alice's session
+began" needs to say which questions it answers.
+
+Accepted by the owner as a net bonus. Recorded here so the widening is on purpose.
+
+### The trap, and it is the same one issue #7 already names
+
+**Connected must not become the definition of present.**
+
+Two ways it would lie:
+
+- An agent **mid-turn on a long task** is connected and not reading anything. Reachable is
+  not the same as attentive, which is exactly why the decision layer exists.
+- An agent that **never runs an MCP server** — a CLI user, a harness without MCP, a future
+  client that only polls — is never "connected" and may be entirely present. FR-003 keeps
+  polling a first-class way to use this hub, so a presence signal that only sees SSE
+  clients would quietly report every other kind of client as absent.
+
+So the honest shape is *"a session is connected"*, never *"this agent is here"*. Issue #7
+warns against pretending directory entries are online; the mirror is not to pretend a
+missing connection means absent.
+
+**This mission emits the facts and defines none of the vocabulary.** What "present" means
+is issue #7's decision, and it now has something real to decide with.
