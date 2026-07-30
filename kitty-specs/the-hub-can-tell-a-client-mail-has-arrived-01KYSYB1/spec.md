@@ -212,3 +212,36 @@ would be a hub with authority over them.
 
 **FR-011 must be proved by removal**: stand up a sender that claims urgency, confirm no
 wake, then remove the guard and watch a subject line move the recipient's attention.
+
+## Answered — suspension (owner, 2026-07-30)
+
+**A connected client prevents the host suspending, and that is accepted.** Open question 2
+is closed.
+
+The consequence, recorded rather than discovered later: **a hub with any client connected is
+a hub that is always on.** Scale-to-zero stops being a property of the deployment and
+becomes a property of whether anyone is listening. For the public demo that changes the cost
+model — an idle hub is free, a watched hub is not — and the switch is thrown by any client,
+not by the operator. FR-007's connection count is what makes that visible rather than
+surprising.
+
+**A suspended federated peer is Step 7's problem, not this mission's.** Delivery to a hub
+that is asleep will succeed once there is a queue.
+
+### One thing to check before relying on that
+
+The two cases are not the same, and the difference decides whether Step 7 is even needed for
+this:
+
+- A peer that is **down** needs the queue. Nothing else will do.
+- A peer that is merely **suspended** on a wake-on-request host is a different matter: the
+  delivery *is* the request that wakes it. It is not unreachable, only slow to first answer.
+
+Which means the failure mode is a **timeout**, not a refusal — and today
+`outbound.deliver` allows 15 seconds, with a 20-second deadline on resolution. If a cold
+peer answers inside that, scale-to-zero federation works *without* a queue. If it does not,
+first contact fails and the retry succeeds, which is exactly the shape a queue fixes.
+
+**Worth measuring against the real host rather than assuming**, because the answer decides
+whether "federate with a sleeping hub" is a Step 7 feature or something that already works.
+Recorded in `doc/federation-step-7.md`.

@@ -58,6 +58,23 @@ federation was switched off, or after that peer lost our trust.
   delivery is attempted, so a queue changes when a message arrives elsewhere, never
   whether the sender keeps their own.
 
+## A case that may already work — measure before building for it
+
+Raised while specifying `the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1`, and it
+narrows what this step is for.
+
+A peer that is **down** needs the queue; nothing else will do. But a peer merely
+**suspended** on a wake-on-request host is different: the delivery *is* the request that
+wakes it, so it is not unreachable, only slow to answer the first time.
+
+The failure mode there is a **timeout**, not a refusal. `outbound.deliver` allows 15
+seconds and resolution has a 20-second deadline. If a cold peer answers inside that,
+federating with a sleeping hub already works and needs nothing from this step. If it does
+not, first contact fails and a retry succeeds — which is precisely what the queue is for.
+
+**Measure it against a real scale-to-zero host before assuming either way.** The answer
+changes how much of this step is load-bearing.
+
 ## Open questions
 
 1. **Where does the queue live?** A table in the existing store is the obvious answer and
