@@ -409,6 +409,22 @@ class Mailbox:
         await self._store.mark_read(ReadRecord(obj.id, me, self._now()))
         return obj
 
+    async def mark_read_for(self, caller: str, object_id: str) -> None:
+        """Record that *caller* has dealt with a message, without consuming it.
+
+        The marking half of :meth:`read`, separated because replying to a message is
+        also dealing with it — and a reply must not re-fetch or re-consume the thing it
+        is answering.
+
+        The visibility rule is applied here too, not only by whoever calls this. A
+        second caller arriving later must not find a route that marks a message the
+        caller cannot see; a guard that lives only in the current caller is a guard that
+        the next caller forgets.
+        """
+        me = (await self._require_actor(caller)).name
+        obj = await self._visible_object(caller, object_id)
+        await self._store.mark_read(ReadRecord(obj.id, me, self._now()))
+
     async def thread(self, caller: str, object_id: str) -> tuple[ObjectRecord, ...]:
         """The turns of a conversation **the caller is party to** — never all of it.
 

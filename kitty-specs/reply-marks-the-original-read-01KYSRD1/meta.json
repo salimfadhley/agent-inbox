@@ -1,0 +1,15 @@
+{
+  "coordination_branch": "kitty/mission-reply-marks-the-original-read-01KYSRD1",
+  "created_at": "2026-07-30T14:56:05.236562+00:00",
+  "flattened": false,
+  "friendly_name": "reply marks the original read",
+  "mission_id": "01KYSRD13D9EJ1KWKENWCQVX69",
+  "mission_number": null,
+  "mission_slug": "reply-marks-the-original-read-01KYSRD1",
+  "mission_type": "software-dev",
+  "purpose_context": "This mission advances reply marks the original read on main so stakeholders can track the work from mission creation onward.",
+  "purpose_tldr": "reply marks the original read",
+  "slug": "reply-marks-the-original-read-01KYSRD1",
+  "target_branch": "main",
+  "topology": "coord"
+}
