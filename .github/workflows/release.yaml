@@ -99,3 +99,23 @@ jobs:
           uv run python -m agent_inbox.release_gate
           --check release-artifact
           --version "${{ steps.version.outputs.pep440 }}"
+
+      # Tell the private deployment repository the version is available. It is a
+      # separate repo because everything it knows — hostnames, app names, a stack id —
+      # is exactly what this one is forbidden to contain (#23).
+      #
+      # `continue-on-error`: a released version is released. If the deployment repo
+      # cannot be reached, the artefacts on PyPI and Docker Hub are still good and the
+      # deploy can be run by hand. Failing this step would report a bad release.
+      - name: Tell the deployment repo
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "no DEPLOY_DISPATCH_TOKEN set — skipping; deploy by hand"
+            exit 0
+          fi
+          gh api repos/salimfadhley/agent-inbox-private/dispatches \
+            -f event_type=agent-inbox-released \
+            -F client_payload[version]="${{ steps.version.outputs.pep440 }}"
