@@ -102,3 +102,63 @@ to be caught has not been tested against the thing that actually happens.
 Issue #23, raised by the operator 2026-07-29. History decision and this scope decided
 2026-07-30. The fixture commit exists because the agent writing this specification violated
 the rule while writing about it.
+
+## A companion decision: where deployment specifics should *live*
+
+Raised by the operator, 2026-07-30:
+
+> we have some configuration that deploys to my servers; I'm wondering if we should put that
+> in another repo that triggers when this one releases
+
+**Yes — and it makes this mission simpler rather than larger.**
+
+### The gap it closes
+
+This spec says what may not be in the repository. It does not say where those things go, and
+today the honest answer is *nowhere*: the deploy script and the container-starter written
+this session live in a session scratchpad and **will not survive it**. A rule that forbids
+something without providing a home is a rule people route around, which is roughly how 77
+violations accumulate.
+
+A private deployment repository gives the forbidden things somewhere legitimate to be. The
+guard stops being "delete this" and becomes "this belongs next door", which is a rule people
+follow.
+
+### The split that already exists
+
+Today's work drew the line by accident, and it held:
+
+| Half | Lives | Knows |
+|---|---|---|
+| `agent-inbox verify-deployment` | **this repo** | nothing about any deployment — takes URLs and a version |
+| `ship.sh`, `start_stragglers.py` | scratchpad, homeless | a Portainer stack id, two Fly app names, a LAN host |
+
+The generic half is a product feature and is already shipped. The specific half is exactly
+what a private repo is for.
+
+### What the private repo would hold
+
+The stack file and its image tag; the Fly app configuration; the orchestration; the
+credentials that today are passed by hand from the operator's notes — a Portainer API key
+and a Fly token — which belong in that repository's secrets rather than in a shell history.
+
+### The trigger, and the property that matters
+
+Released here, deployed there — a release publishing an event the deployment repository
+acts on.
+
+**The deploy must still prove itself.** `agent-inbox verify-deployment` is the gate: the
+deployment job fails unless every target reports the released version and its prompt agrees
+with its descriptor. That is not new work; it exists and is tested. Moving the orchestration
+must not lose it, because the thing that has gone wrong three times is a deploy that
+reported success over a hub that was down or five releases behind.
+
+### Why this is recorded here rather than specced here
+
+It is a **separate mission** — a new repository, a trigger, and secret handling are not this
+guard. Recorded here because the two decisions are related and would otherwise be made
+inconsistently: a guard designed without knowing where the forbidden things go will be
+written as a prohibition, and one designed knowing will be written as a redirection.
+
+**This mission is unchanged by it.** FR-004 gains one line: where the failure names a
+deployment specific, it should say where such things belong.
