@@ -4,7 +4,7 @@ artifact_type: spec-kitty.analysis-report
 command: /spec-kitty.analyze
 mission_slug: retry-delivery-to-a-sleeping-peer-01KYWFWB
 mission_id: 01KYWFWBGS0KDHXVG10TMZYG8W
-generated_at: '2026-07-31T16:35:53.643823+00:00'
+generated_at: '2026-07-31T17:52:04.460641+00:00'
 analyzer_agent: unknown
 input_artifacts:
   spec.md:
@@ -15,19 +15,44 @@ input_artifacts:
     sha256: de86c7658a516c75971a2d31684becc1ac7b6feaab679861e502c8436f0ca73b
   tasks.md:
     path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/tasks.md
-    sha256: 7332b7339918036ab1846dd17975bf4e06913fd5abe730fa27ff80874313c037
+    sha256: 80b5bce5be1909dda5daeaf08dc4df4ad7c231d29b56346b8bc81d20b660299a
   charter:
     path: /Users/salimfadhley/workspace/agent-inbox/.kittify/charter/charter.md
     sha256: dc24f43bde1a5b81568f486f9084753c30daab2d302f1227dae097434e9e6882
 verdict: ready
 issue_counts:
-  critical: 0
-  low: 0
-  medium: 0
   high: 0
+  critical: 0
+  medium: 0
+  low: 0
   info: 0
 findings: []
 ---
+
+## Round 3 — the charter pass that rounds 1 and 2 skipped
+
+**Rounds 1 and 2 asserted "Charter alignment: no violations" without reading the charter.**
+That claim rested on recollection of the ADRs, not on `.kittify/charter/charter.md`. Reading
+it produced two findings the earlier passes could not have found, both now fixed.
+
+| ID | Severity | Finding | Resolution |
+|----|----------|---------|------------|
+| C1 | **critical** | **Directive 4** — "have an outside model review every mission before it closes", a standing instruction — appeared nowhere in this mission. Charter conflicts are CRITICAL by definition. | **T017** added to WP03, with the charter's prescribed narrow question ("can a message queued for retry be delivered to a peer that is no longer trusted?"), its hard-lid invocation, and its "treat findings as leads" rule |
+| C2 | high | All three WP prompts named **`black`** as a quality gate. The charter names four: `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`, `uv run pyright`. Black is not installed, so a WP following the prompt would have "passed" a gate that never ran. | All three corrected, with a note that piping a gate to `tail` yields the pipe's exit status rather than the tool's — the mistake that produced a meaningless `black=0` during WP01 |
+
+C1 is the more serious. Directive 4 exists because "our own tests pass because they were
+written by the mind that wrote the code", and this mission is unusually exposed to that:
+**T009 can pass for the wrong reason**, and whoever wrote it is the least likely to notice.
+
+C2 is the plan writing down a gate that does not exist, which then produced a green signal
+over a check that never ran — the same shape of failure as the deploy work earlier the same
+day.
+
+The carrier lists no findings because none remain open. Rounds 1 and 2 follow.
+
+---
+
+# Round 2 — findings A1–A6 (historical record)
 
 ## Round 2 — all six findings resolved
 
