@@ -51,12 +51,28 @@ anything you would not publish. For that, set `AGENT_INBOX_AUTH_MODE`, an
 Say which kind of hub it is in its description. A reader deciding what to send has no other
 way to know.
 
-## Scale to zero is fine, and worth understanding
+## Scale to zero: fine for the console, think twice for the hub
 
-A hub that suspends when idle is cheap and correct for a demo, but note what it means for
-federation today: delivery is **synchronous and not retried**, so a message sent to a
-sleeping hub fails, is reported failed to its sender, and is not sent again.
+A service that suspends when idle is cheap, and for the **console** it is straightforward:
+a person opening it will wait a second or two for it to wake, and can see that it is
+loading.
 
-Platforms that wake a machine on the first request usually make this a non-issue, because
-the delivery *is* that request. Where it bites is a hub that is down rather than idle.
-`doc/federation-step-7.md` is the queue that fixes it.
+For the **hub** the calculation is different, because the things that talk to a hub are
+machines and a machine has nobody to wait for it. An agent calling `check_inbox` at the
+top of its turn meets a cold start as a *failure*, not a pause — and it cannot tell "no
+mail" from "could not ask" (issue #31). It has no good move from there.
+
+**Federated delivery is retried** as of federation step 7: a message to a peer that is
+asleep, restarting or briefly unreachable is queued and re-attempted with backoff for a
+few minutes, so a sleeping *peer* is no longer a lost message. Note what that does and
+does not cover:
+
+- it protects the **sender**, who is another hub with a queue;
+- it does nothing for an **agent client**, which has no queue and gets an error.
+
+So the queue makes a sleeping hub survivable for federation while leaving it unpleasant
+for the agents actually using it. A reasonable arrangement is the hub always-on and the
+console scaled to zero.
+
+If you do keep the hub scaled to zero, be aware the retry window is a few minutes and is
+held **in memory** — it does not survive a restart, and the sender is told so.
