@@ -78,17 +78,17 @@ so **that promise must be visibly withdrawn**, not silently abandoned — see FR
 | **FR-005** | A peer that loses trust, or a hub that stops federating, **drains rather than delivers**: queued messages for it are failed at their next attempt, by FR-004 above, because the authorization check happens inside the attempt. | Specified |
 | **FR-006** | Retries stop. A message that cannot be delivered within the bound is given up on and reported `failed`, with a reason distinguishing "unreachable for the whole window" from "refused". | Specified |
 | **FR-007** | **`@local` never enters the queue.** The non-egress guarantee holds by construction in `split_recipients` today; the queue must not become a second route around it. | Specified |
-| **FR-008** | Because the queue does not survive a restart, that is **disclosed, not discovered**: a `queued` receipt says so, and a hub shutting down fails what it is still holding rather than letting the last thing the sender heard remain a promise nobody is keeping. | Specified |
+| **FR-008** | Because the queue does not survive a restart, that is **disclosed, not discovered**. Two halves, both required: **(a)** a `queued` receipt carries the disclosure in its detail, so a reader learns it from the receipt itself; **(b)** a hub shutting down fails what it is still holding rather than letting the last thing the sender heard remain a promise nobody is keeping. | Specified |
 | **FR-009** | A local recipient's copy is unaffected by any of this. It is stored before delivery is attempted, so queueing changes when a message arrives elsewhere — never whether the sender keeps their own. | Specified |
 
 ### Non-functional
 
 | ID | Requirement | Threshold | Status |
 |---|---|---|---|
-| **NFR-001** | The retry window is bounded and short enough to be honest about an in-memory queue. | Give up after **≈5 minutes**, across ~6 attempts with exponential backoff. | Specified |
-| **NFR-002** | A send whose recipients are all remote must not block the caller for the retry window. The first attempt happens inline; retries do not. | Caller returns in the time of **one** attempt, not the window. | Specified |
+| **NFR-001** | The retry window is bounded and short enough to be honest about an in-memory queue. | Give up **within 5 minutes**, across ~6 attempts with increasing backoff. A ceiling the schedule must fit under, not a figure to round to. | Specified |
+| **NFR-002** | A send whose recipients are all remote must not block the caller for the retry window. The first attempt happens inline; retries do not. | Caller returns in **one attempt — currently up to 15s**, the outbound timeout. Stated rather than left to be discovered: 15s inside a single agent tool call is a real cost. See issue #34. | Specified |
 | **NFR-003** | One unreachable peer must not delay delivery to a reachable one. | Queued deliveries to distinct peers make progress independently. | Specified |
-| **NFR-004** | Retrying must not amplify load against a peer that is already struggling. | Backoff is strictly increasing; a queued message is in flight to a given peer at most once at a time. | Specified |
+| **NFR-004** | A single message must not be attempted repeatedly in parallel. | Backoff is strictly increasing, and **each queued message** is in flight at most once at a time. **Deliberately per-message, not per-peer**: several messages to one sleeping peer do retry concurrently. Chosen 2026-07-31 for simplicity, accepting that a struggling peer may see one attempt per waiting message. | Specified |
 
 ### Constraints
 

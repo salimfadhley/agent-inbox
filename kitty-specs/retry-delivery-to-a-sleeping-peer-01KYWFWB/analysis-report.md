@@ -1,0 +1,122 @@
+---
+schema_version: 1
+artifact_type: spec-kitty.analysis-report
+command: /spec-kitty.analyze
+mission_slug: retry-delivery-to-a-sleeping-peer-01KYWFWB
+mission_id: 01KYWFWBGS0KDHXVG10TMZYG8W
+generated_at: '2026-07-31T16:33:23.100679+00:00'
+analyzer_agent: unknown
+input_artifacts:
+  spec.md:
+    path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/spec.md
+    sha256: 4bf6785cf5c561e63e6a668901a1dede05f9c7330170597d00210757f1c6c551
+  plan.md:
+    path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/plan.md
+    sha256: 03d47c623f46a69db3578fa4da154eb56cc8ba00b44a252820d2caa073809609
+  tasks.md:
+    path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/tasks.md
+    sha256: 7892aeca193a8c044d8cf49b87d465ecd4fc923e03fde0d41c14452f3a6d72fe
+  charter:
+    path: /Users/salimfadhley/workspace/agent-inbox/.kittify/charter/charter.md
+    sha256: dc24f43bde1a5b81568f486f9084753c30daab2d302f1227dae097434e9e6882
+verdict: blocked
+issue_counts:
+  low: 1
+  high: 2
+  critical: 0
+  medium: 3
+  info: 0
+findings:
+- id: A1
+  severity: high
+  category: inconsistency
+  summary: NFR-001 sets a measurable bound of about 5 minutes; the plan's backoff schedule reaches about 7m40s and rounds it away in prose.
+- id: A2
+  severity: high
+  category: coverage
+  summary: 'FR-008 has two halves and only one has a subtask: no task makes a queued receipt disclose that the queue is not durable.'
+- id: A3
+  severity: medium
+  category: ambiguity
+  summary: NFR-004's 'in flight to a given peer at most once at a time' reads per-peer, but the plan's one-task-per-message design only guarantees it per-message.
+- id: A4
+  severity: medium
+  category: underspecification
+  summary: NFR-002 bounds the caller to one attempt, but an attempt against an unreachable peer takes the full 15-second outbound timeout, which is not stated anywhere.
+- id: A5
+  severity: medium
+  category: underspecification
+  summary: T014 writes outcomes to 'the existing audit log' without naming how a detached retry task reaches a facility currently invoked as a policy on the send path.
+- id: A6
+  severity: low
+  category: process
+  summary: T015 may answer the mission's open question by raising a defect rather than resolving it, so the mission can complete with the question still open.
+---
+
+## Specification Analysis Report
+
+Mission: `retry-delivery-to-a-sleeping-peer-01KYWFWB` — Federation Step 7.
+
+| ID | Category | Severity | Location(s) | Summary | Recommendation |
+|----|----------|----------|-------------|---------|----------------|
+| A1 | Inconsistency | HIGH | spec.md NFR-001; plan.md "RetryingDelivery" | NFR-001 says give up after **≈5 minutes** across ~6 attempts. The plan's schedule is `2s, 8s, 30s, 2m, 5m` after an inline attempt — **≈7m40s**, roughly 50% over — and reconciles this in prose as "which NFR-001 rounds to about five minutes". An NFR exists to be measurable; a threshold the design openly exceeds is not one. | Pick one and make them agree. Either restate NFR-001 as ≈8 minutes, or shorten the tail (`2s, 8s, 30s, 60s, 90s` ≈ 3m10s). Prefer shortening: the bound was chosen to stay honest about an in-memory queue, and a longer window makes the C-001 promise weaker, not stronger. |
+| A2 | Coverage | HIGH | spec.md FR-008; tasks.md WP03 | FR-008 requires two distinct things: (a) a `queued` receipt **says** the queue is not durable, and (b) a hub shutting down fails what it holds. Only (b) has a subtask (T012). Nothing in T011–T015 makes a queued receipt disclose volatility, and WP01 — which owns `Receipt` — does not mention it either. | Add a subtask, most naturally in WP01 alongside T001, populating the queued receipt's `detail` with the disclosure. FR-008 is the entire justification for accepting C-001; half-implementing it removes the basis for the in-memory choice. |
+| A3 | Ambiguity | MEDIUM | spec.md NFR-004; plan.md "RetryingDelivery" | NFR-004 reads "a queued message is in flight **to a given peer** at most once at a time". "To a given peer" suggests a per-peer constraint, but one asyncio task per queued *delivery* only bounds concurrency per message — ten messages to one sleeping peer would produce ten simultaneous attempts. Given the NFR's stated purpose ("must not amplify load against a peer that is already struggling"), the per-message reading defeats it. | Decide which is meant. If per-peer, the design needs a per-peer lock or a single worker per peer, which is more machinery than the plan currently allows for — and would also change the NFR-003 argument. If per-message, reword the NFR to say so plainly. |
+| A4 | Underspecification | MEDIUM | spec.md NFR-002; `outbound.py:167` | NFR-002 bounds the caller to "the time of one attempt". That attempt uses `urlopen(..., timeout=15)`, so a send to a sleeping peer blocks the caller for up to 15 seconds. For an agent, 15 seconds inside one tool call is a significant cost, and the spec never states it. | State the actual figure in NFR-002 rather than leaving "one attempt" to be discovered. Consider a shorter connect timeout on the inline attempt specifically, since its whole purpose is to fail fast into the queue. Overlaps issue #34. |
+| A5 | Underspecification | MEDIUM | tasks.md T014; `policy.py:222`, `house.py:92` | T014 says to write outcomes to "the existing audit log". The facility exists, but as a **policy** evaluated on the send path — not obviously something a detached retry task can call minutes later, possibly after the request context is gone. The plan does not name the interface. | Confirm the call shape before implementation. `house.py:92` already notes the hazard of "a broken audit logger failing a message that was already sent" — the same reasoning applies here and suggests a logging failure must not fail the retry. |
+| A6 | Process | LOW | spec.md open question; tasks.md T015 | T015 is instructed to raise an issue rather than fix a defect if our inbox does not de-duplicate. Correct scoping, but it means the mission can be marked complete with its own open question unresolved. | Acceptable. Make it explicit in the WP03 Definition of Done that "answered, either way" includes "answered by a filed issue". |
+
+## Coverage summary
+
+| Requirement | Has task? | Task IDs | Notes |
+|---|---|---|---|
+| FR-001 | Yes | T006, T007 | |
+| FR-002 | Yes | T009 | Removal proof required |
+| FR-003 | Yes | T001, T003 | |
+| FR-004 | Yes | T005, T008 | Removal proof required |
+| FR-005 | Yes | T009 | Shares the FR-002 proof |
+| FR-006 | Yes | T007 | |
+| FR-007 | Yes | T013 | Removal proof required |
+| FR-008 | **Partial** | T012 | **A2** — disclosure half uncovered |
+| FR-009 | Yes | T011 | |
+| NFR-001 | Yes | T007, T010 | **A1** — threshold disagrees with design |
+| NFR-002 | Yes | T006 | **A4** — real cost understated |
+| NFR-003 | Yes | T007 | |
+| NFR-004 | Yes | T007, T010 | **A3** — ambiguous |
+
+**Unmapped tasks**: none. Every subtask traces to a requirement or to an explicitly
+recorded open question.
+
+## Charter alignment
+
+No violations. ADR 0005 is actively served: the queue sits below `House`, so console, CLI
+and MCP inherit it from one place, and WP03 explicitly refuses to build a second
+notification path. ADR 0008 is untouched — nothing in a message influences whether it is
+retried.
+
+Worth noting positively: **C-003 turns the parent spec's outbound-authorization finding
+into a structural property** rather than a remembered rule, which is the strongest thing in
+this plan.
+
+## Metrics
+
+- Requirements: 13 (9 functional, 4 non-functional) + 4 constraints
+- Tasks: 15 across 3 work packages
+- Coverage: 12 of 13 fully, 1 partial → **96%**
+- Ambiguity findings: 1
+- Duplication findings: 0
+- Critical issues: 0
+
+## Next actions
+
+No CRITICAL issues, so nothing blocks work absolutely — but **A1 and A2 should be settled
+before implementation**, and both are small:
+
+- **A1** is a one-line decision about the backoff tail.
+- **A2** is one subtask added to WP01.
+
+A3 is the only finding that could change the design rather than the documents, and it is
+worth a decision now rather than discovering it in review.
+
+Suggested: amend `spec.md` (NFR-001, NFR-002, NFR-004 wording), add one subtask to
+`tasks.md`/WP01, then proceed to `/spec-kitty.implement`.

@@ -111,12 +111,22 @@ A `RemoteDelivery` that wraps another and adds a queue. It satisfies the same Pr
   unreachable failure, enqueue and raise a distinct `Queued` signal so `House` can mint a
   `queued` receipt rather than a failed one.
 
-Backoff: `2s, 8s, 30s, 2m, 5m` after the inline attempt — six attempts, ~7½ minutes worst
-case, which NFR-001 rounds to "about five minutes". Strictly increasing (NFR-004).
+Backoff: `2s, 8s, 30s, 60s, 90s` after the inline attempt — six attempts, **3m10s worst
+case**, comfortably under NFR-001's five-minute ceiling. Strictly increasing (NFR-004).
+
+The first draft ran to 7m40s and reconciled that with NFR-001 in prose. Analysis finding
+A1 rejected it: a threshold the design openly exceeds is not a threshold. The tail was
+shortened rather than the ceiling raised, because the bound exists to stay honest about a
+queue that does not survive a restart — a longer window weakens that promise.
 
 **One asyncio task per queued delivery.** Per-peer independence (NFR-003) then costs
 nothing to arrange, and at the volumes this hub sees a worker pool would be machinery
 protecting against a problem we do not have.
+
+Decided 2026-07-31, and it has a cost worth naming: ten messages waiting for one sleeping
+peer produce ten concurrent attempts. NFR-004 was originally worded per-*peer*, which would
+have forbidden this; it now reads per-*message* to match. If a peer is ever observed being
+overwhelmed by our retries, this is the decision to revisit.
 
 ### Lifecycle
 
