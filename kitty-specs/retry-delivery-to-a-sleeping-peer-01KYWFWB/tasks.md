@@ -72,12 +72,12 @@ reached nobody — is worse than the bug being fixed.
 **Independent test**: a delivery that fails twice then succeeds arrives, without the caller
 waiting for it.
 
-- [ ] T005 `Queued` signal and the failure taxonomy (WP02)
-- [ ] T006 `RetryingDelivery` wrapper: attempt once, classify (WP02)
-- [ ] T007 The retry loop with bounded backoff (WP02)
-- [ ] T008 Terminal on refusal — the removal proof for FR-004 (WP02)
-- [ ] T009 Re-derived authorization — the removal proof for FR-002/005 (WP02)
-- [ ] T010 Backoff and bound tests without real waiting (WP02)
+- [x] T005 `Queued` signal and the failure taxonomy (WP02)
+- [x] T006 `RetryingDelivery` wrapper: attempt once, classify (WP02)
+- [x] T007 The retry loop with bounded backoff (WP02)
+- [x] T008 Terminal on refusal — the removal proof for FR-004 (WP02)
+- [x] T009 Re-derived authorization — the removal proof for FR-002/005 (WP02)
+- [x] T010 Backoff and bound tests without real waiting (WP02)
 
 **Why a new module**: `RetryingDelivery` lives in `src/agent_inbox/retry.py`, not in
 `delivery.py`. It keeps WP01's ownership clean, and it keeps the *policy* of retrying
@@ -98,9 +98,9 @@ a trace an operator can read.
 **Independent test**: close a `House` with a message queued; the message is failed, not
 silently dropped.
 
-- [ ] T011 Build the queue into `House` (WP03)
-- [ ] T012 Fail outstanding deliveries on close (FR-008) (WP03)
-- [ ] T013 `@local` never enters the queue — removal proof for FR-007 (WP03)
+- [x] T011 Build the queue into `House` (WP03)
+- [x] T012 Fail outstanding deliveries on close (FR-008) (WP03)
+- [x] T013 `@local` never enters the queue — removal proof for FR-007 (WP03)
 - [ ] T014 Audit-log the outcome (WP03)
 - [ ] T015 Does our own inbox de-duplicate a retried activity? (WP03)
 - [ ] T017 Outside model review before the mission closes (Directive 4) (WP03)
