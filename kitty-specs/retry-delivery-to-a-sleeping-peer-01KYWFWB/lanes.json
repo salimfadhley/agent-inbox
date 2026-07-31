@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "mission_slug": "retry-delivery-to-a-sleeping-peer-01KYWFWB",
+  "mission_id": "01KYWFWBGS0KDHXVG10TMZYG8W",
+  "mission_branch": "kitty/mission-retry-delivery-to-a-sleeping-peer-01KYWFWB",
+  "target_branch": "kitty/mission-retry-delivery-to-a-sleeping-peer",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01"
+      ],
+      "write_scope": [
+        "src/agent_inbox/delivery.py",
+        "tests/test_receipt_states.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "artifact-rendering",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_inbox/retry.py",
+        "tests/test_delivery_retry.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup",
+        "tests",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "lane_id": "lane-c",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        "src/agent_inbox/house.py",
+        "tests/test_retry_lifecycle.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [
+        "lane-b"
+      ],
+      "parallel_group": 2
+    }
+  ],
+  "computed_at": "2026-07-31T16:31:44.410474+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": []
+}
