@@ -7,6 +7,7 @@
   "mission_number": null,
   "mission_slug": "retry-delivery-to-a-sleeping-peer-01KYWFWB",
   "mission_type": "software-dev",
+  "pr_bound": true,
   "purpose_context": "Federation currently delivers once and never retries, so a peer that is asleep, restarting or briefly offline turns an ordinary message into a failure. That is the common case for the hubs this project actually runs: the public demo suspends when idle and laptops sleep. This mission adds a short retry window so those sends succeed on their own, while keeping the guarantee that authorization is re-decided at the moment of each attempt and never inherited from when the message was queued.",
   "purpose_tldr": "A federated message to a peer that is briefly unreachable is retried rather than lost, and the sender can see which.",
   "slug": "retry-delivery-to-a-sleeping-peer-01KYWFWB",

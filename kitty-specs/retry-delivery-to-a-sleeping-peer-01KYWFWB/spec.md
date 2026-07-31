@@ -58,7 +58,7 @@ says the peer was unreachable for the whole window — not merely that one attem
 
 A message is queued for a peer. Before the next attempt, the operator removes that peer or
 switches federation off. **The next attempt refuses rather than delivers**, and the message
-is failed. This is the FR-050 case and the reason the queue may never carry a decision.
+is failed. This is the outbound-authorization case, and the reason the queue may never carry a decision.
 
 ### Exception — the hub restarts
 
@@ -72,7 +72,7 @@ so **that promise must be visibly withdrawn**, not silently abandoned — see FR
 | ID | Requirement | Status |
 |---|---|---|
 | **FR-001** | A delivery that fails because the peer was **unreachable** is retried with backoff, rather than failing the send. | Specified |
-| **FR-002** | **Authorization is re-derived on every attempt**, from configuration read at that moment. Never carried from when the message was queued. This is FR-050 of the parent spec — the finding from the first outside review. | Specified |
+| **FR-002** | **Authorization is re-derived on every attempt**, from configuration read at that moment. Never carried from when the message was queued. This is the outbound-authorization finding from the parent federation spec's first outside review. | Specified |
 | **FR-003** | `Receipt.state` reports **`queued`** while a message is waiting, joining `delivered` and `failed`. The property is already a word rather than a boolean for exactly this reason, so no client breaks. | Specified |
 | **FR-004** | **A refusal is terminal and is never retried.** Federation being off, or a peer not being trusted, is a decision — retrying it cannot change the answer, wastes attempts, and would read as the hub arguing with its own configuration. | Specified |
 | **FR-005** | A peer that loses trust, or a hub that stops federating, **drains rather than delivers**: queued messages for it are failed at their next attempt, by FR-004 above, because the authorization check happens inside the attempt. | Specified |
@@ -94,7 +94,7 @@ so **that promise must be visibly withdrawn**, not silently abandoned — see FR
 
 | ID | Constraint | Status |
 |---|---|---|
-| **C-001** | **The queue is in memory** and does not survive a restart. Chosen deliberately as the smallest first slice; permitted by the sketch's FR-6 ("survives a restart, *or is honest that it does not*"), which makes FR-008 load-bearing rather than cosmetic. | Accepted |
+| **C-001** | **The queue is in memory** and does not survive a restart. Chosen deliberately as the smallest first slice; permitted by the sketch's durability clause ("survives a restart, *or is honest that it does not*"), which makes FR-008 load-bearing rather than cosmetic. | Accepted |
 | **C-002** | **A retry reuses the inbox resolved at queue time** and does not re-run WebFinger. Within a ≈5-minute window an actor will not have moved, and re-resolving would multiply traffic against a peer that is already failing. **Not to be confused with FR-002** — resolution is cached; authorization is not. Revisit if the bound ever grows to hours. | Accepted |
 | **C-003** | Retries must go through the existing `RemoteDelivery.deliver` collaborator, never to `outbound.deliver` directly. That is what makes FR-002 structural rather than remembered. | Accepted |
 | **C-004** | No new runtime dependency and no new deployed service. The hub stays one process. | Accepted |
@@ -114,7 +114,7 @@ so **that promise must be visibly withdrawn**, not silently abandoned — see FR
 | **SC-002** | A sender is never told a message was delivered when it was not, and never told it failed while it is still being tried. |
 | **SC-003** | Switching federation off, or removing a peer, stops queued mail to it from being sent — verifiable by making the change while a message is queued. |
 | **SC-004** | Sending to one unreachable peer does not delay a message to a reachable one. |
-| **SC-005** | An operator can tell, from the sender's own record, which of *arrived*, *still trying*, and *gave up* happened. |
+| **SC-005** | An operator can tell, from the hub's audit log, which of *arrived*, *still trying*, and *gave up* happened. Not from the sender's own record: receipts are returned at send time and not persisted, so a later transition has nowhere else to appear. Notifying the sender is a separate mission. |
 
 ## What must be proved by removal, not by passing
 
