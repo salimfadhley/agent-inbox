@@ -4,54 +4,53 @@ artifact_type: spec-kitty.analysis-report
 command: /spec-kitty.analyze
 mission_slug: retry-delivery-to-a-sleeping-peer-01KYWFWB
 mission_id: 01KYWFWBGS0KDHXVG10TMZYG8W
-generated_at: '2026-07-31T16:33:23.100679+00:00'
+generated_at: '2026-07-31T16:35:53.643823+00:00'
 analyzer_agent: unknown
 input_artifacts:
   spec.md:
     path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/spec.md
-    sha256: 4bf6785cf5c561e63e6a668901a1dede05f9c7330170597d00210757f1c6c551
+    sha256: a649a2665f288633a31bb7bc21405a68d49b86f4a7c02224379c6b71540cde0e
   plan.md:
     path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/plan.md
-    sha256: 03d47c623f46a69db3578fa4da154eb56cc8ba00b44a252820d2caa073809609
+    sha256: de86c7658a516c75971a2d31684becc1ac7b6feaab679861e502c8436f0ca73b
   tasks.md:
     path: /Users/salimfadhley/workspace/agent-inbox/kitty-specs/retry-delivery-to-a-sleeping-peer-01KYWFWB/tasks.md
-    sha256: 7892aeca193a8c044d8cf49b87d465ecd4fc923e03fde0d41c14452f3a6d72fe
+    sha256: 7332b7339918036ab1846dd17975bf4e06913fd5abe730fa27ff80874313c037
   charter:
     path: /Users/salimfadhley/workspace/agent-inbox/.kittify/charter/charter.md
     sha256: dc24f43bde1a5b81568f486f9084753c30daab2d302f1227dae097434e9e6882
-verdict: blocked
+verdict: ready
 issue_counts:
-  low: 1
-  high: 2
   critical: 0
-  medium: 3
+  low: 0
+  medium: 0
+  high: 0
   info: 0
-findings:
-- id: A1
-  severity: high
-  category: inconsistency
-  summary: NFR-001 sets a measurable bound of about 5 minutes; the plan's backoff schedule reaches about 7m40s and rounds it away in prose.
-- id: A2
-  severity: high
-  category: coverage
-  summary: 'FR-008 has two halves and only one has a subtask: no task makes a queued receipt disclose that the queue is not durable.'
-- id: A3
-  severity: medium
-  category: ambiguity
-  summary: NFR-004's 'in flight to a given peer at most once at a time' reads per-peer, but the plan's one-task-per-message design only guarantees it per-message.
-- id: A4
-  severity: medium
-  category: underspecification
-  summary: NFR-002 bounds the caller to one attempt, but an attempt against an unreachable peer takes the full 15-second outbound timeout, which is not stated anywhere.
-- id: A5
-  severity: medium
-  category: underspecification
-  summary: T014 writes outcomes to 'the existing audit log' without naming how a detached retry task reaches a facility currently invoked as a policy on the send path.
-- id: A6
-  severity: low
-  category: process
-  summary: T015 may answer the mission's open question by raising a defect rather than resolving it, so the mission can complete with the question still open.
+findings: []
 ---
+
+## Round 2 — all six findings resolved
+
+The first pass returned **blocked** on two HIGH findings. All six have since been applied
+to `spec.md`, `plan.md`, `tasks.md` and the WP prompts (commit on this branch). The carrier
+above lists no findings because none remain **open** — the record of what was found is kept
+below, because the reasoning is worth more than the verdict.
+
+| ID | Was | Resolution |
+|----|-----|------------|
+| A1 | HIGH — schedule overshot NFR-001 by 50% and rounded it away in prose | Tail shortened to `2s, 8s, 30s, 60s, 90s` (3m10s). The ceiling was kept and the design made to fit it, rather than the reverse |
+| A2 | HIGH — FR-008's disclosure half had no subtask | **T016** added to WP01: a queued receipt carries the disclosure in its detail |
+| A3 | MEDIUM — NFR-004 read per-peer, design was per-message | Decided 2026-07-31: per-message. NFR-004 reworded, and the cost (ten waiting messages → ten concurrent attempts) named in both plan and WP02 |
+| A4 | MEDIUM — "one attempt" hid a 15s cost | NFR-002 now states it, and cross-references issue #34 |
+| A5 | MEDIUM — T014 named no audit-log interface | T014 now requires confirming the call shape, and states that a logging failure must not fail the retry |
+| A6 | LOW — mission could complete with its open question open | WP03's done-criteria accept a filed issue as an answer |
+
+**A1 and A2 were both self-inflicted by the plan**, which is the point of running analysis
+against your own design rather than treating it as a formality.
+
+---
+
+# Round 1 — original findings (historical record)
 
 ## Specification Analysis Report
 
