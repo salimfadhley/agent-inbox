@@ -22,6 +22,7 @@ here would buy nothing but merge conflicts in one file.
 | T002 | Correct `Sent.reached_nobody` so queued is not "nobody" | WP01 | |
 | T003 | Tests for the three states and the corrected guard | WP01 | |
 | T004 | Retire the "Step 7 adds this" docstrings now that it has | WP01 | |
+| T016 | A queued receipt discloses that the queue is not durable | WP01 | |
 | T005 | `Queued` signal and the failure taxonomy | WP02 | |
 | T006 | `RetryingDelivery` wrapper: attempt once, classify | WP02 | |
 | T007 | The retry loop with bounded backoff | WP02 | |
@@ -33,6 +34,8 @@ here would buy nothing but merge conflicts in one file.
 | T013 | `@local` never enters the queue — removal proof for FR-007 | WP03 | |
 | T014 | Audit-log the outcome | WP03 | |
 | T015 | Does our own inbox de-duplicate a retried activity? | WP03 | |
+
+*(T016 belongs to WP01; it was added after analysis finding A2, hence the out-of-order id.)*
 
 ---
 
@@ -47,6 +50,7 @@ wrong conclusion from it.
 - [ ] T002 Correct `Sent.reached_nobody` so queued is not "nobody" (WP01)
 - [ ] T003 Tests for the three states and the corrected guard (WP01)
 - [ ] T004 Retire the "Step 7 adds this" docstrings now that it has (WP01)
+- [ ] T016 A queued receipt discloses that the queue is not durable (WP01)
 
 **Why this is its own package**: T002 is a *correction to existing correct code*, and it is
 the one change in this mission that can silently break something that works today. Isolating

@@ -134,13 +134,22 @@ Take the wrapped delivery as a constructor argument. It satisfies the same Proto
 
 ### T007 — The retry loop
 
-Backoff `2s, 8s, 30s, 2m, 5m` after the inline attempt — six attempts total, then give up
-and mark failed (FR-006). Strictly increasing (NFR-004).
+Backoff `2s, 8s, 30s, 60s, 90s` after the inline attempt — six attempts total (3m10s worst
+case), then give up and mark failed (FR-006). Strictly increasing (NFR-004).
+
+NFR-001's five minutes is a **ceiling the schedule fits under**, not a figure to round to.
+An earlier draft ran to 7m40s and explained the overshoot in prose; analysis finding A1
+rejected that.
 
 **One asyncio task per queued delivery.** Per-peer independence (NFR-003) then costs
 nothing: two peers cannot block each other because they were never sharing anything. At the
 volume this hub sees, a worker pool would be machinery guarding against a problem we do not
 have.
+
+Be clear about what this permits: ten messages waiting for one sleeping peer produce **ten
+concurrent attempts**. That was decided deliberately on 2026-07-31, and NFR-004 is worded
+per-message rather than per-peer to match. Do not add a per-peer lock without changing the
+NFR first.
 
 Reuse the recipient resolved at queue time (C-002) — do not re-run WebFinger. Within five
 minutes an actor has not moved, and re-resolving would multiply traffic against a peer that

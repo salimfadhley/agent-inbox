@@ -121,6 +121,12 @@ message later arrived.
 `the-hub-can-tell-a-client-mail-has-arrived` mission. Building a second notification path
 here is the duplication ADR 0005 exists to prevent.
 
+**Confirm the call shape before writing it.** The audit log exists as a *policy*
+(`policy.py`), evaluated on the send path — not obviously reachable from a detached task
+minutes later. `house.py` already warns about "letting a broken audit logger fail a message
+that was already sent"; the same applies here, so **a logging failure must not fail the
+retry**. Analysis finding A5.
+
 Note in the log line how many attempts it took. "Delivered on attempt 4" is the evidence
 that the retry window is set sensibly; if everything succeeds on attempt 1 or fails at 6,
 the backoff schedule is wrong and nobody will otherwise know.
@@ -148,7 +154,8 @@ widen this package to fix it.
 - [ ] Closing a `House` with mail queued marks it failed, and close does not hang
 - [ ] `@local` provably still cannot be queued, proved by removal
 - [ ] Outcomes appear in the audit log with an attempt count
-- [ ] The duplicate question is answered by a test, either way
+- [ ] The duplicate question is answered by a test, either way — **including by a filed
+      issue**, if the receiving half turns out to be at fault (analysis finding A6)
 - [ ] `pytest`, `ruff`, `pyright`, `black` green — capture each exit code separately
 
 ## Reviewer guidance

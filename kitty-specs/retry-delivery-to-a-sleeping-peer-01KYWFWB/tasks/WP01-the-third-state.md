@@ -4,6 +4,7 @@ title: 'The third state, and the regression it would otherwise cause'
 dependencies: []
 requirement_refs:
 - FR-003
+- FR-008
 tracker_refs: []
 planning_base_branch: kitty/mission-retry-delivery-to-a-sleeping-peer
 merge_target_branch: kitty/mission-retry-delivery-to-a-sleeping-peer
@@ -13,6 +14,7 @@ subtasks:
 - T002
 - T003
 - T004
+- T016
 phase: Phase 1 - Foundation
 agent: python-pedro
 history:
@@ -152,9 +154,27 @@ re-read them"). Rewrite them in the present tense, describing what the code now 
 Leave the *reasoning* intact. "This is a word rather than a boolean so a third state does
 not break clients" is still the explanation for the design; only the tense is wrong.
 
+### T016 — A queued receipt discloses that the queue is not durable
+
+FR-008 has two halves. The shutdown half is WP03's. **This is the other half**: the
+`queued` receipt must carry the disclosure in its `detail`, so a reader learns it from the
+receipt rather than from documentation they may never open.
+
+Wording should say plainly that the message is waiting and will not survive a hub restart.
+Something a person reads once and understands, not a status code.
+
+**Why this is not cosmetic.** The queue is in memory by deliberate choice (C-001), and the
+spec permits that *only* on condition the volatility is disclosed rather than discovered. A
+sender told `queued` with no disclosure has been given a promise we do not keep across a
+deploy — and we deploy on every release. Without T016 the basis for choosing an in-memory
+queue is gone.
+
+Added after analysis finding A2, which caught that no subtask covered this half.
+
 ## Definition of Done
 
 - [ ] `Receipt.state` returns `queued`, `delivered` or `failed`
+- [ ] A queued receipt's detail discloses that the wait does not survive a restart
 - [ ] `reached_nobody` correct for all four rows, with the all-failed row proved by removal
 - [ ] No existing call site needed changing
 - [ ] Forward-tense Step 7 comments rewritten in the present tense
