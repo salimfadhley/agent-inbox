@@ -85,3 +85,30 @@ def reset() -> None:
     """Forget what we know. For tests."""
     global _behind
     _behind = None
+
+
+def standing(hub_version: str | None) -> str | None:
+    """Which way round the skew is: ``"behind"``, ``"ahead"``, or ``None``.
+
+    ``None`` covers three cases a caller reporting to a human must not distinguish:
+    level, unknowable, and unreadable. **Absent is not older** — a hub that reports
+    no version is not evidence of anything, and a client that guessed would be inventing
+    a
+    fault.
+
+    Separate from :func:`note_hub_version` because that one records a *session* fact for
+    the MCP server to mention later, while this answers a question asked once.
+    """
+    if not hub_version:
+        return None
+    try:
+        theirs, ours = _comparable(hub_version), _comparable(__version__)
+    except (TypeError, ValueError):
+        return None
+    if not theirs or not ours:
+        return None
+    if theirs > ours:
+        return "behind"
+    if ours > theirs:
+        return "ahead"
+    return None

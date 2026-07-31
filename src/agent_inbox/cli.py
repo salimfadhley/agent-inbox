@@ -31,7 +31,7 @@ from typing import Any
 
 import click
 
-from agent_inbox import __version__
+from agent_inbox import __version__, staleness
 from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
@@ -800,7 +800,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     distinction is historical and carries no defined meaning: treat any non-zero as
     "something on this list is broken" and read the FAIL line to find out which.
     """
-    ok, bad, todo = "ok  ", "FAIL", "--  "
+    ok, bad, todo, warn = "ok  ", "FAIL", "--  ", "note"
     where = find_config() or (project_root() / CONFIG_NAME)
 
     # 1. Configuration. Having none is the *normal* state before `join`, not an error:
@@ -908,6 +908,28 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     click.echo(
         f"{ok} connectivity    {hub_url} — {info.get('name')} {info.get('version')}"
     )
+
+    # We are holding both versions at this point and used to discard the comparison.
+    # An agent whose client is behind sees new commands as "No such command", which is
+    # true and reads as "the feature does not exist" — reported from live use with a
+    # client six releases old. `doctor` is what somebody runs when they already suspect
+    # something is wrong, so it is the right place to say the most likely cause.
+    #
+    # A note, never a failure (FR-003): an older client mostly works, and exiting
+    # non-zero would make a working setup look broken. Nothing is printed when the two
+    # match (FR-007) — a line on every healthy run is a line nobody reads.
+    staleness.note_hub_version(info.get("version"))
+    match staleness.standing(info.get("version")):
+        case "behind":
+            click.echo(f"{warn} version         {staleness.notice()}")
+        case "ahead":
+            # The other direction, and a different problem with a different owner: the
+            # hub is old, not this client, and upgrading here would fix nothing.
+            click.echo(
+                f"{warn} version         this client is {__version__} and the hub runs "
+                f"{info.get('version')} — the hub is behind, not you. Nothing to do "
+                f"here; whoever operates it may want to know."
+            )
 
     # 3. The hub's own verdict on us, credential included. Only the hub knows whether
     #    the token we sent was accepted, refused or revoked, and whether it has ever
