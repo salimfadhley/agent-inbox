@@ -34,8 +34,11 @@ here would buy nothing but merge conflicts in one file.
 | T013 | `@local` never enters the queue — removal proof for FR-007 | WP03 | |
 | T014 | Audit-log the outcome | WP03 | |
 | T015 | Does our own inbox de-duplicate a retried activity? | WP03 | |
+| T017 | Outside model review before the mission closes (Directive 4) | WP03 | |
 
-*(T016 belongs to WP01; it was added after analysis finding A2, hence the out-of-order id.)*
+*(T016 belongs to WP01 and T017 to WP03; both were added after analysis, hence the
+out-of-order ids. T016 came from finding A2, T017 from C1 — the charter directive the
+first analysis pass missed because it never read the charter.)*
 
 ---
 
@@ -100,6 +103,7 @@ silently dropped.
 - [ ] T013 `@local` never enters the queue — removal proof for FR-007 (WP03)
 - [ ] T014 Audit-log the outcome (WP03)
 - [ ] T015 Does our own inbox de-duplicate a retried activity? (WP03)
+- [ ] T017 Outside model review before the mission closes (Directive 4) (WP03)
 
 **Risks**: T012 is what makes the in-memory queue (C-001) acceptable rather than
 irresponsible. Without it a sender is told `queued` and the promise evaporates at the next

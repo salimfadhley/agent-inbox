@@ -178,8 +178,10 @@ Added after analysis finding A2, which caught that no subtask covered this half.
 - [ ] `reached_nobody` correct for all four rows, with the all-failed row proved by removal
 - [ ] No existing call site needed changing
 - [ ] Forward-tense Step 7 comments rewritten in the present tense
-- [ ] `pytest`, `ruff`, `pyright`, `black` all green — capture each exit code, do not trust a
-      scrolled-past summary
+- [ ] The four charter gates green, each exit code captured separately:
+      `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`,
+      `uv run pyright`. **There is no `black` in this project** — piping a gate to
+      `tail` and reading `$?` gives you the pipe's status, not the tool's.
 
 ## Reviewer guidance
 

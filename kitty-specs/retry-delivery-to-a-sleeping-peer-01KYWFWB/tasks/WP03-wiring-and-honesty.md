@@ -18,6 +18,7 @@ subtasks:
 - T013
 - T014
 - T015
+- T017
 phase: Phase 3 - Honesty
 agent: python-pedro
 history:
@@ -148,15 +149,44 @@ recipient has one copy.
 half, and the fix belongs there — not a compensating hack in the sender. Report it; do not
 widen this package to fix it.
 
+### T017 — Outside review, before this mission closes
+
+**Charter Directive 4**, a standing instruction: every mission gets an outside model review
+before it closes. It has already paid for itself twice — one review found a live thread
+disclosure, another found retroactive group membership, both in minutes, by writing their
+own probes rather than reading ours.
+
+Our tests pass because they were written by the mind that wrote the code. That is exactly
+the blind spot this mission is most exposed to: **T009 can pass for the wrong reason**, and
+the person best placed not to notice is whoever wrote it.
+
+Ask **one narrow question** naming the invariant — a broad "review this" produced nothing
+usable in 40 minutes. The question for this mission:
+
+> Can a message queued for retry be delivered to a peer that is no longer trusted, or
+> after federation has been switched off?
+
+Invoke with a hard lid and closed stdin, per the charter:
+
+```
+perl -e 'alarm 300; exec @ARGV' codex exec "<question>" < /dev/null
+```
+
+Treat findings as **leads**: reproduce independently before acting on any of them.
+
 ## Definition of Done
 
 - [ ] A hub retries in normal operation, end to end
 - [ ] Closing a `House` with mail queued marks it failed, and close does not hang
 - [ ] `@local` provably still cannot be queued, proved by removal
 - [ ] Outcomes appear in the audit log with an attempt count
+- [ ] An outside model has reviewed the authorization invariant (Directive 4)
 - [ ] The duplicate question is answered by a test, either way — **including by a filed
       issue**, if the receiving half turns out to be at fault (analysis finding A6)
-- [ ] `pytest`, `ruff`, `pyright`, `black` green — capture each exit code separately
+- [ ] The four charter gates green, each exit code captured separately:
+      `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`,
+      `uv run pyright`. **There is no `black` in this project** — piping a gate to
+      `tail` and reading `$?` gives you the pipe's status, not the tool's.
 
 ## Reviewer guidance
 

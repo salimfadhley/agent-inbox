@@ -193,7 +193,10 @@ pass a count-only test and hammer a struggling peer, which is exactly what NFR-0
 - [ ] `outbound.deliver` is not called anywhere in this module — grep for it and confirm
 - [ ] No `settings` or `peers` value is stored on a queued item — grep and confirm
 - [ ] Backoff strictly increasing, asserted as a schedule
-- [ ] `pytest`, `ruff`, `pyright`, `black` green — capture each exit code separately
+- [ ] The four charter gates green, each exit code captured separately:
+      `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`,
+      `uv run pyright`. **There is no `black` in this project** — piping a gate to
+      `tail` and reading `$?` gives you the pipe's status, not the tool's.
 
 ## Risks
 
