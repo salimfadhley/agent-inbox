@@ -21,6 +21,18 @@ from agent_inbox import outbound
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.records import ObjectRecord
 
+#: What every `queued` receipt tells the sender about how long the wait is good for.
+#:
+#: The retry queue is held in memory and does not survive a restart — a deliberate
+#: choice for the first slice, permitted **only** because the volatility is disclosed
+#: rather than discovered. This hub is redeployed on every release, so "we restarted" is
+#: a scheduled event rather than an edge case, and a sender told `queued` with no
+#: disclosure would hold a promise we stop keeping without ever saying so.
+NOT_DURABLE = (
+    "waiting for the peer to become reachable. This wait is held in memory and "
+    "does not survive a restart of this hub."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Receipt:
@@ -33,15 +45,30 @@ class Receipt:
     recipient: str
     delivered: bool
     detail: str | None = None
+    #: Accepted for retry: not delivered, but not failed either. `delivered` stays a
+    #: boolean that is true to its name — a queued message genuinely has not arrived —
+    #: so every existing reader of it keeps giving the right answer.
+    queued: bool = False
+
+    @classmethod
+    def waiting(cls, recipient: str) -> Receipt:
+        """A receipt for a message accepted onto the retry queue.
+
+        **The only way to mint one**, so the durability disclosure cannot be left off by
+        a caller who did not know it was required. A rule that lives in one constructor
+        is kept; a rule that lives in a docstring is remembered until it isn't.
+        """
+        return cls(recipient, delivered=False, queued=True, detail=NOT_DURABLE)
 
     @property
     def state(self) -> str:
-        """`delivered` or `failed`.
+        """`queued`, `delivered` or `failed`.
 
-        **Step 7 adds `queued` here**, and that is why this is a word rather than a
-        boolean on the wire. A client that learns to read three states today keeps
-        working when a queue starts producing the third.
+        Three words rather than a boolean, which is why adding the third broke no
+        client: anything reading this already had to handle an unrecognised word.
         """
+        if self.queued:
+            return "queued"
         return "delivered" if self.delivered else "failed"
 
 
@@ -78,6 +105,12 @@ class Sent:
         and unreachable is the same thing arriving by a different route.
         """
         if self.reached_local_recipients:
+            return False
+        # A queued recipient has not been reached, but it has not failed either — it is
+        # still being tried. Counting it as "nobody" would turn the ordinary case this
+        # queue exists for, a peer that is merely asleep, into a hard error the sender
+        # cannot act on, moments before the message very likely arrives.
+        if any(r.queued for r in self.receipts):
             return False
         return bool(self.receipts) and not any(r.delivered for r in self.receipts)
 

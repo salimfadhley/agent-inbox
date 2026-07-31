@@ -74,11 +74,25 @@ class PeerUnreachable(MailboxError):
     """A peer could not be read, for any reason.
 
     One answer for several causes — unreachable, refused, malformed, too large. The
-    operator needs to know it did not work and why in prose; a caller does not need to
-    branch on which.
+    operator needs to know it did not work and why in prose.
+
+    **`status` exists because the retry queue is the first caller that must branch.**
+    This used to say a caller never needed to; that stopped being true at step 7. A peer
+    that answered `4xx` has considered the message and rejected it, and asking again for
+    five minutes will not change its mind — while a peer that did not answer at all may
+    simply be waking up. Same exception, opposite handling, and nothing else in the
+    message distinguishes them reliably.
+
+    `None` means no HTTP response was obtained: connection refused, DNS failure or
+    timeout. That is the retryable shape.
     """
 
     code = "peer_unreachable"
+
+    def __init__(self, *args: object, status: int | None = None) -> None:
+        super().__init__(*args)
+        #: The peer's HTTP status, or `None` if we never got a response.
+        self.status = status
 
 
 @dataclass(frozen=True, slots=True)
