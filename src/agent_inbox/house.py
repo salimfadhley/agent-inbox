@@ -26,6 +26,7 @@ from agent_inbox.exceptions import RemoteMailbox
 from agent_inbox.mailbox import Mailbox, _reply_subject
 from agent_inbox.policy import Attempt, Outcome, Policy, default_policies
 from agent_inbox.records import ActorRecord, ObjectRecord
+from agent_inbox.retry import Queued, RetryingDelivery, wrap
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,12 @@ class House:
         self._policies = tuple(policies if policies is not None else default_policies())
         # Injected, exactly as policies are. A house without one **refuses** remote
         # recipients rather than dropping them — see `send`.
-        self._deliver = deliver
+        #
+        # Wrapped so a peer that is merely asleep is tried again rather than failed.
+        # `wrap` passes `None` straight through: retrying is not a reason to soften
+        # the refusal above, since a send that succeeds and reaches nobody is still
+        # the worst failure shape available.
+        self._deliver = wrap(deliver)
 
     @property
     def mailbox(self) -> Mailbox:
@@ -77,7 +83,19 @@ class House:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        await self.aclose()
         return None
+
+    async def aclose(self) -> None:
+        """Stop cleanly, giving up on anything still waiting to be delivered.
+
+        The retry queue is held in memory, which is acceptable **only** because the
+        volatility is disclosed rather than discovered. A process that exits still
+        holding messages it called `queued` has made a promise it stopped keeping
+        without saying so — this is where that is put right.
+        """
+        if isinstance(self._deliver, RetryingDelivery):
+            await self._deliver.aclose()
 
     # -- the pipeline ------------------------------------------------------
 
@@ -196,6 +214,12 @@ class House:
             assert self._deliver is not None
             try:
                 await self._deliver.deliver(who, record)
+            except Queued:
+                # Neither delivered nor failed: a peer that is asleep, restarting
+                # or briefly unreachable is being tried again. `Receipt.waiting` is
+                # the only way to say so, and it carries the disclosure that the wait
+                # is held in memory — this hub is redeployed on every release.
+                receipts.append(Receipt.waiting(address))
             except Exception as exc:  # noqa: BLE001 - reported, never swallowed
                 receipts.append(Receipt(address, delivered=False, detail=str(exc)))
             else:

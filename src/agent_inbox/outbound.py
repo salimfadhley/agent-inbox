@@ -172,9 +172,12 @@ def deliver(
             detail = (json.loads(refused.read() or b"{}") or {}).get("detail", "")
         except ValueError:
             pass
+        # Carry the status: the retry queue must tell "they said no" from "they did not
+        # answer". A 4xx is a considered rejection and retrying it is pointless.
         raise PeerUnreachable(
             f"{recipient.handle} refused it ({refused.code})"
-            + (f": {detail}" if detail else "")
+            + (f": {detail}" if detail else ""),
+            status=refused.code,
         ) from refused
     except OSError as unreachable:
         raise PeerUnreachable(

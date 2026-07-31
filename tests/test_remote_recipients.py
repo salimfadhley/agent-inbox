@@ -56,7 +56,11 @@ class FakeDelivery:
 
     async def deliver(self, resolved: object, record: ObjectRecord) -> None:
         if self.refuse:
-            raise PeerUnreachable(f"{resolved} refused it (403)")
+            # The status matters as of step 7, and this fake stated its 403 in prose
+            # only. A peer that *answered* 403 has considered the message and rejected
+            # it — terminal. A `PeerUnreachable` with no status means nobody answered at
+            # all, which is the retryable case and a different scenario entirely.
+            raise PeerUnreachable(f"{resolved} refused it (403)", status=403)
         assert isinstance(resolved, str)
         self.delivered.append((resolved, record.id))
 
