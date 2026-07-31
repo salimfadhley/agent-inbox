@@ -101,9 +101,9 @@ silently dropped.
 - [x] T011 Build the queue into `House` (WP03)
 - [x] T012 Fail outstanding deliveries on close (FR-008) (WP03)
 - [x] T013 `@local` never enters the queue — removal proof for FR-007 (WP03)
-- [ ] T014 Audit-log the outcome (WP03)
+- [x] T014 Audit-log the outcome (WP03)
 - [ ] T015 Does our own inbox de-duplicate a retried activity? (WP03)
-- [ ] T017 Outside model review before the mission closes (Directive 4) (WP03)
+- [x] T017 Outside model review before the mission closes (Directive 4) (WP03)
 
 **Risks**: T012 is what makes the in-memory queue (C-001) acceptable rather than
 irresponsible. Without it a sender is told `queued` and the promise evaporates at the next
