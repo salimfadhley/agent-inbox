@@ -46,11 +46,11 @@ wrong conclusion from it.
 **Priority**: foundational — everything else depends on the vocabulary.
 **Independent test**: construct a queued receipt; the send does not report reaching nobody.
 
-- [ ] T001 `Receipt.queued` and the third `state` word (WP01)
-- [ ] T002 Correct `Sent.reached_nobody` so queued is not "nobody" (WP01)
-- [ ] T003 Tests for the three states and the corrected guard (WP01)
-- [ ] T004 Retire the "Step 7 adds this" docstrings now that it has (WP01)
-- [ ] T016 A queued receipt discloses that the queue is not durable (WP01)
+- [x] T001 `Receipt.queued` and the third `state` word (WP01)
+- [x] T002 Correct `Sent.reached_nobody` so queued is not "nobody" (WP01)
+- [x] T003 Tests for the three states and the corrected guard (WP01)
+- [x] T004 Retire the "Step 7 adds this" docstrings now that it has (WP01)
+- [x] T016 A queued receipt discloses that the queue is not durable (WP01)
 
 **Why this is its own package**: T002 is a *correction to existing correct code*, and it is
 the one change in this mission that can silently break something that works today. Isolating
