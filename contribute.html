@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contribute — agent-inbox</title>
+<meta name="description" content="How to get the agent-inbox code, run the tests, and contribute. The most useful reports come from using the mailbox, not reading it.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./">agent<span>-</span>inbox</a>
+    <nav class="top-nav">
+      <a href="./">Overview</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="contribute.html" aria-current="page">Contribute</a>
+      <a href="https://github.com/salimfadhley/agent-inbox">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <p class="eyebrow">Contributing</p>
+    <h1>The best bug reports come from using it</h1>
+    <p class="lede">
+      Several shipped fixes were found by an agent hitting something awkward mid-task and
+      filing it — not by anybody reading the source. If you try this and something gets in your
+      way, that is the contribution.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/salimfadhley/agent-inbox/issues/new">File an issue</a>
+      <a class="btn btn-secondary" href="https://github.com/salimfadhley/agent-inbox">Browse the code</a>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <h2>Get the code running</h2>
+    <p class="section-lede">
+      Python 3.12 or newer, managed with <a href="https://docs.astral.sh/uv/">uv</a>. No
+      external services: the test suite runs against a temporary SQLite file.
+    </p>
+
+<pre><code>git clone https://github.com/salimfadhley/agent-inbox
+cd agent-inbox
+uv sync
+
+<span class="c"># the four gates — all must pass before anything merges</span>
+uv run pytest
+uv run ruff check
+uv run ruff format --check
+uv run pyright</code></pre>
+
+    <p class="small muted">
+      That is the whole setup. If a change needs a service to test, it is probably the wrong
+      change.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What a good contribution looks like</h2>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Report friction, not just faults</h3>
+        <p>“I had to call this twice to do an obvious thing” is as valuable as a stack trace,
+        and rarer. Say what you were trying to do when it got in the way.</p>
+      </div>
+      <div class="card">
+        <h3>Prove a guard by removing it</h3>
+        <p>A test asserting “this did not happen” passes trivially when the code path is never
+        reached. Delete the guard, watch the test fail, put it back. Otherwise you have written
+        a test that cannot fail.</p>
+      </div>
+      <div class="card">
+        <h3>Prefer end-to-end over mocks</h3>
+        <p>The store is one SQLite file, so a full round-trip is cheap. Heavy mocking tends to
+        assert that the code does what it does.</p>
+      </div>
+      <div class="card">
+        <h3>Say why in the commit</h3>
+        <p>The <em>what</em> is in the diff. The reasoning, the thing you rejected, and the
+        failure that prompted it are not — and they are what the next reader needs.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Rules worth knowing before you open a PR</h2>
+
+    <dl class="facts">
+      <div>
+        <dt>No deployment specifics</dt>
+        <dd>No hostnames, IP addresses, secrets or organisation names in code, docs or tests.
+        This is upstream library code; someone else’s network is not part of it.</dd>
+      </div>
+      <div>
+        <dt>Consistency beats upgrades</dt>
+        <dd>Downstream users depend on our patterns. A change that breaks a working habit needs
+        to be worth more than the disruption it causes.</dd>
+      </div>
+      <div>
+        <dt>Docs change with behaviour</dt>
+        <dd>In the same change, not a follow-up. A document describing behaviour that shipped
+        differently is worse than no document.</dd>
+      </div>
+      <div>
+        <dt>Settle a foundation before building on it</dt>
+        <dd>If the layer underneath is still moving, settling it <em>is</em> the work. Building
+        on top only multiplies what has to be redone.</dd>
+      </div>
+    </dl>
+
+    <p style="margin-top:1.5rem" class="small muted">
+      The full versions live in
+      <a href="https://github.com/salimfadhley/agent-inbox/blob/main/doc/coding-standards.md">coding-standards.md</a>
+      and the project charter.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap narrow">
+    <h2>Good places to start</h2>
+    <ul>
+      <li><a href="https://github.com/salimfadhley/agent-inbox/labels/enhancement">Open enhancements</a> — several are small and self-contained.</li>
+      <li><a href="https://github.com/salimfadhley/agent-inbox/tree/main/doc/decisions">The ADRs</a> — the fastest way to understand why things are shaped as they are.</li>
+      <li><a href="https://github.com/salimfadhley/agent-inbox/issues">The issue list</a> — including a few open questions that want an opinion more than a patch.</li>
+    </ul>
+
+    <div class="note">
+      <p><strong>Reviews from outside are welcome and taken seriously.</strong> Two real
+      security defects in this project were found by an outside model asked one narrow question
+      and left to write its own probes. If you want to try to break something, ask about a
+      specific invariant rather than reviewing broadly — it works far better.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="small">
+      <a href="./">← Back to the overview</a> · agent-inbox is free software under the
+      GPL-3.0-or-later. Contributions are accepted under the same licence.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
