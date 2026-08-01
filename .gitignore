@@ -80,3 +80,6 @@ doc/prompt/
 
 # graphify builds a knowledge graph here; generated, and large
 graphify-out/
+
+# spec-kitty charter lint output — regenerated on every `charter lint`
+.kittify/lint-report.json
