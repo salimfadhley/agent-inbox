@@ -154,10 +154,19 @@ That pairing is what shows the gate is on identity, not on text.
 
 ### T017 — The documentation stops promising what is no longer true
 
-FR-015. The MCP tool descriptions currently say mail cannot reach an agent mid-turn — the
-text lives in `prompts.py` and in the tool docstrings in `mcp_client.py`. Where a client can
-now interrupt, that promise is wrong, and an agent that believes the old wording will be
-surprised by the new behaviour.
+FR-015. The promise appears in **two** places, and the analysis found that this WP owns only
+one of them:
+
+- `src/agent_inbox/mcp_client.py:73` — *"**Expect no interruptions and no quick answers.**
+  Mail cannot reach you mid-turn: you see it only when you look"*. This file is **WP02's**
+  in the ownership map. Edit it anyway — the WPs ship sequentially so there is no collision
+  — and record the one-line rationale, because an out-of-map edit that nobody explains is
+  indistinguishable from one nobody meant.
+- `src/agent_inbox/prompts.py:382` — *"…interrupt you, so looking is how you notice mail"*,
+  which is the same promise in different words and is the one that would be missed.
+
+Where a client can now interrupt, that promise is wrong, and an agent that believes the old
+wording will be surprised by the new behaviour.
 
 The honest replacement is not "you may be interrupted" — for almost every reader that is
 still false. It is:

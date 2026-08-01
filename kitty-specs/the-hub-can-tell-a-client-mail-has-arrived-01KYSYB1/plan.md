@@ -12,7 +12,9 @@ delivery being `live-session-push-01KYCGZ1`, which this does not touch.
 
 ## Technical Context
 
-**Language/Version**: Python 3.12+, as the rest of the codebase
+**Language/Version**: Python 3.14, as the rest of the codebase since v0.35.0. (This line said
+3.12 when the plan was written on 2026-07-30; the floor moved on 2026-08-01 and the charter
+requires every statement of it to agree.)
 **Primary Dependencies**: Litestar (already present) for SSE; no new runtime dependency expected
 **Storage**: none for the stream itself. Connection state is in-memory and per-process — a
 connection is not a fact worth surviving a restart, because a dropped client reconnects
