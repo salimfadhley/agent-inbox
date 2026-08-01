@@ -37,7 +37,7 @@ revoking an informed act rather than a gamble.
 
 ## Requirements
 
-### FR-1 — one Tokens screen, listing every token
+### FR-001 — one Tokens screen, listing every token
 
 `/tokens` shows every token on the hub, not a list of agents. Each row carries:
 
@@ -50,7 +50,7 @@ revoking an informed act rather than a gamble.
 The per-agent pages (`/tokens/{name}`) go away. The Agents directory keeps no Tokens
 column.
 
-### FR-2 — minting
+### FR-002 — minting
 
 One form, on `/tokens`: a label, and a Mint button. The secret is shown exactly once,
 with the existing copy button and the `agent-inbox config set --global token <token>`
@@ -59,7 +59,7 @@ instruction. Nothing about minting names an agent.
 A label is **required** — a list of unlabelled tokens is a list nobody can act on. If
 the operator gives none, refuse rather than invent one.
 
-### FR-3 — revoking is immediate and honest
+### FR-003 — revoking is immediate and honest
 
 Revoking refuses the token on its next call (already true: `resolve_token` raises
 `TokenRevoked`). The confirmation says which agents that token had admitted, so the
@@ -68,17 +68,17 @@ operator learns what they have just cut off.
 Revoked tokens stay in the list, marked, with their history — a revoked token that
 vanishes takes the record of what it did with it.
 
-### FR-4 — the API
+### FR-004 — the API
 
 - `POST /auth/tokens` — mint. Body: `{"label": "…"}`. Operator-only. Returns the
   secret once.
-- `GET /auth/tokens` — every token with the fields in FR-1. Operator-only.
+- `GET /auth/tokens` — every token with the fields in FR-001. Operator-only.
 - `DELETE /auth/tokens/{token_id}` — revoke. Operator-only.
 
 The three `/auth/agents/{name}/tokens…` routes are removed. Nothing else moves: the
 bearer header, `provide_caller`, and the `X-Agent-Name` identity rule are unchanged.
 
-### FR-5 — record which token admitted which agent
+### FR-005 — record which token admitted which agent
 
 On every successful token authentication, record the pair. A new table:
 
@@ -96,14 +96,14 @@ not, and the claimed name arrives separately in the `X-Agent-Name` header. Chang
 that signature — so the caller passes the claimed name in — is part of this mission.
 Do not infer the actor from the token.
 
-### FR-6 — existing tokens
+### FR-006 — existing tokens
 
 Any token already bound to a real actor keeps working: nobody is locked out by an
 upgrade. It appears in the list marked **bound to `<name>`** and can be revoked like
 any other. No new bound tokens can be created. Do not migrate them silently — an
 operator should see what they have and retire it deliberately.
 
-### FR-7 — the words follow the code
+### FR-007 — the words follow the code
 
 Once per-agent tokens are gone, they must stop being described:
 
@@ -138,7 +138,7 @@ Once per-agent tokens are gone, they must stop being described:
 ## Notes for the implementer
 
 - The shared sentinel is `SHARED_ACTOR = "*"` in `auth/records.py`. Whether the column
-  keeps that value or the schema stops using `actor` for new rows is your call; FR-6
+  keeps that value or the schema stops using `actor` for new rows is your call; FR-006
   needs the old rows to keep working either way.
 - `auth_device_tokens` already has `label`, `created`, `last_used`, `revoked`. The
   missing piece is the usage table, not the token table.
