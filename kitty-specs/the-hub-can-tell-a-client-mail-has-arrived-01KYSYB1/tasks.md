@@ -32,7 +32,7 @@ else means either missing federated mail or emitting it twice.
 
 | WP | Goal | Depends on | Shippable alone |
 |---|---|---|---|
-| WP01 | The hub emits: registry, route, and the call in `House.send` | — | **yes** — a hub emitting to nobody is harmless and testable |
+| WP01 | The hub emits: registry, route, and the call in `House.send` | — | **shipped as v0.39.0**, proved on both hubs |
 | WP02 | The MCP server holds the stream, and reconnects | WP01 | yes — hearing without acting on it |
 | WP03 | The decision layer, rate limit, and the docs that must stop promising the old thing | WP02 | yes, and it is the one that changes behaviour |
 
@@ -80,7 +80,7 @@ the event arrive. Kill the stream and everything else still works identically.
 - [x] T005 The content tests: no body, actionable, mail unchanged (WP01)
 - [x] T006 The count and the cap (FR-007) (WP01)
 - [x] T007 Directive 4 — outside model review before WP01 closes (WP01)
-- [ ] T008 After deploying: survival and latency against both hubs (WP01)
+- [~] T008 After deploying: survival and latency — **house hub done, demo hub blocked** (WP01)
 
 **Risks**: T003 is where a mistake is expensive. A notification that can raise is a
 notification that can fail a send, and a hub that refuses mail because nobody could be told
