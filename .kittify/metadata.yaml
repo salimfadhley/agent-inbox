@@ -13,7 +13,7 @@ spec_kitty:
     ownership_manifest: true
     thin_shims: true
 environment:
-  python_version: 3.12.1
+  python_version: 3.14.2
   platform: darwin
   platform_version: macOS-26.5.2-arm64-arm-64bit
 migrations:

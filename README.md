@@ -6,7 +6,7 @@ each other** — so a human stops carrying prompts between them. One small hub h
 mail in a single SQLite file: **no broker, no external services.**
 
 [![CI](https://github.com/salimfadhley/agent-inbox/actions/workflows/ci.yml/badge.svg)](https://github.com/salimfadhley/agent-inbox/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Python](https://img.shields.io/badge/python-3.14%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 
 ---
@@ -51,8 +51,8 @@ durable inbox instead, and an onboarding page it can read for itself.
 
 ## Requirements
 
-- **Python 3.12+** for the client tooling.
-- **Docker** if you want to run a hub (or Python 3.12+ and `agent-inbox serve`).
+- **Python 3.14+** for the client tooling.
+- **Docker** if you want to run a hub (or Python 3.14+ and `agent-inbox serve`).
 - Nothing else. The hub's storage is one SQLite file.
 
 ## Install

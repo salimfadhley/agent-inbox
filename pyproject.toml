@@ -103,7 +103,22 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q"
+# `--capture=sys` is a workaround for an upstream bug, not a preference. Under the
+# default fd-level capture, pytest 9.1.1 on CPython 3.14.2 fails a test roughly one full
+# run in two with `UnicodeDecodeError: 'utf-8' codec can't decode byte 0x94 in position
+# 0`, raised inside pytest's own `item_capture` teardown (_pytest/capture.py:899 →
+# FDCapture.snap). 0x94 is the third byte of an em-dash (e2 80 94), which this codebase
+# logs constantly — pytest's temp-file read/truncate cycle splits one across a boundary
+# and then strict-decodes the tail. It never reproduces in isolation, never happens on
+# 3.12, and lands on whichever test straddles the boundary rather than on a faulty one.
+#
+# Sys-level capture does not use that temp file: 10 consecutive full runs, zero failures.
+# It is safe here because nothing in the suite requires fd-level capture — no test uses
+# `capfd`, and no test spawns a real subprocess whose output is captured.
+#
+# Remove this when the upstream fix lands. Do not "fix" it by skipping the test that
+# happens to fail; the test is fine, and the next boundary would move it elsewhere.
+addopts = "-q --capture=sys"
 
 [tool.ruff]
 line-length = 88

@@ -11,10 +11,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Version-agnostic gates run once, on the primary Python. Style and types do not
-  # differ across 3.12/3.13, so running them in the matrix would only multiply the ways
-  # they can flake. pyright needs the clients extra installed (see below); pytest does
-  # not, which is why they are separate jobs.
+  # Style and types run once. So do the tests: this is an application, not a library —
+  # it ships its own interpreter and owes nobody multi-version support, so a matrix here
+  # would test a configuration nobody runs. The charter settles it (Languages/Frameworks).
+  # pyright needs the clients extra installed (see below); pytest does not, which is why
+  # they are separate jobs.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -32,7 +33,7 @@ jobs:
         # clients extra, not the dev group. Without it pyright cannot resolve the import
         # and fails on code that is fine — the hub image omits these deps deliberately
         # (ADR 0009), but the type check covers the whole source tree.
-        run: uv sync --python 3.12 --dev --extra clients
+        run: uv sync --python 3.14 --dev --extra clients
 
       - name: Lint (ruff check)
         run: uv run ruff check src tests
@@ -47,11 +48,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13"]
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,7 +62,7 @@ jobs:
         # With the clients extra: the MCP server module is only importable with
         # it, and an import-time error there is a crash on launch that no other
         # test can see — which is exactly how one shipped.
-        run: uv sync --python ${{ matrix.python-version }} --dev --extra clients
+        run: uv sync --python 3.14 --dev --extra clients
 
       - name: Tests (pytest)
         run: uv run pytest

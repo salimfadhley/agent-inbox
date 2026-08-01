@@ -13,7 +13,7 @@
 # Run:    docker run -p 8080:8080 -v agent-mailbox-data:/data \
 #           -e AGENT_INBOX_PUBLIC_URL=http://<host>:8080 agent-inbox
 
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /bin/uv
 
@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen --no-editable
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 RUN useradd --create-home --uid 10001 agentmailbox
 COPY --from=build --chown=agentmailbox:agentmailbox /app/.venv /app/.venv
