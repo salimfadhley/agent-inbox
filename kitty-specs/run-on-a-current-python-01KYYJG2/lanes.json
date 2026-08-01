@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "mission_slug": "run-on-a-current-python-01KYYJG2",
+  "mission_id": "01KYYJG2FGSXDRZCG1XBEDWRER",
+  "mission_branch": "kitty/mission-run-on-a-current-python-01KYYJG2",
+  "target_branch": "kitty/mission-current-python",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01"
+      ],
+      "write_scope": [
+        ".kittify/charter/charter.md",
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_inbox/**",
+        "tests/**"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "artifact-rendering",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "lane_id": "lane-c",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        ".github/workflows/**",
+        ".kittify/metadata.yaml",
+        "CONTRIBUTING.md",
+        "Dockerfile",
+        "README.md",
+        "doc/**"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "artifact-rendering",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    }
+  ],
+  "computed_at": "2026-08-01T14:43:27.332458+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": []
+}
