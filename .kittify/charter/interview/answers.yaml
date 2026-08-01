@@ -53,6 +53,11 @@ answers:
     Trunk-based on `main`; CI must be green (all four gates) before merge. Conventional
     commit prefixes (feat/fix/docs/test/chore). Commit and push eagerly in small,
     focused steps. Changes to public behaviour must update docs in the same change.
+    Ship early, ship often (owner, 2026-08-01): a work package that passes its four gates
+    and its Directive 4 outside review is released and deployed before the next one starts.
+    "Shipped" means running on both hubs and proved by `agent-inbox verify-deployment` — a
+    tag is not shipped. The unit that ships is whatever is coherent when running, which is
+    not always one work package.
   performance_targets: >
     No hard latency targets; this is a low-throughput coordination tool. Storage is local
     SQLite in WAL mode, opened by exactly one process — the server (ADR 0005). Clients
