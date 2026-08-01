@@ -166,7 +166,7 @@ def verify_request(
     sent = headers.get("date", "")
     try:
         when = parsedate_to_datetime(sent)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)

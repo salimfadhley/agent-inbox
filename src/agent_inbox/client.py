@@ -233,7 +233,7 @@ def load_global(env: dict[str, str] | None = None) -> dict[str, Any]:
     path = global_config_path(env)
     try:
         return tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError, tomllib.TOMLDecodeError:
         return {}
 
 
@@ -366,7 +366,7 @@ def configured_engines(start: Path | None = None) -> list[str]:
         return []
     try:
         data = tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError, tomllib.TOMLDecodeError:
         return []
     return [str(key) for key in (data.get("agents") or {})]
 
@@ -390,7 +390,7 @@ def duplicate_names(start: Path | None = None) -> dict[str, list[str]]:
         return {}
     try:
         data = tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError, tomllib.TOMLDecodeError:
         return {}
     seen: dict[str, list[str]] = {}
     for engine, entry in (data.get("agents") or {}).items():
@@ -798,7 +798,7 @@ class HubClient:
         """
         try:
             problem = json.loads(exc.read())
-        except (ValueError, OSError):
+        except ValueError, OSError:
             problem = {}
         detail = problem.get("detail") or exc.reason
         code = problem.get("code")

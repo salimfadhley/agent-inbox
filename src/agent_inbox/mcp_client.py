@@ -274,7 +274,7 @@ def _entries(path: Path) -> list[str]:
     """The engines configured in a project file, for saying what is actually there."""
     try:
         data = tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError, tomllib.TOMLDecodeError:
         return []
     return [str(k) for k in (data.get("agents") or {})]
 

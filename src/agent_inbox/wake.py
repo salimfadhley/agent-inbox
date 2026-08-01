@@ -174,7 +174,7 @@ def _lock_data(path: Path) -> tuple[int, float] | None:
     try:
         data = json.loads(path.read_text())
         return int(data["pid"]), float(data["created"])
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    except OSError, ValueError, KeyError, TypeError, json.JSONDecodeError:
         return None
 
 

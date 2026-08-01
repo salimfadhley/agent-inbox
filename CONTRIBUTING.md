@@ -10,7 +10,7 @@ uv sync --dev
 uv run pre-commit install    # optional but recommended
 ```
 
-You need **Python 3.12+** and nothing else — storage is a single local SQLite file, so
+You need **Python 3.14+** and nothing else — storage is a single local SQLite file, so
 the test suite requires no external services.
 
 ## Quality gates
