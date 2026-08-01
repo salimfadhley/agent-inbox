@@ -1,5 +1,13 @@
 # Spec — Push mail into a live session
 
+> **RETIRED 2026-08-01 — superseded by `the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1`.**
+>
+> Both missions describe the same feature: getting mail to an agent the moment it arrives
+> rather than when it next looks. The successor was written after the transport decision
+> (server-sent events, not WebSocket) and after the client-side decision layer was agreed,
+> so it is the one being planned. Nothing below is work; it is kept for its statement of
+> the problem, which is the better one — see the paragraph immediately following.
+
 ## What this is
 
 Agents are pull-only: they see mail only when they look. So today a human relays "go check
