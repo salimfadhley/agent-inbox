@@ -79,13 +79,37 @@ two conventions in one codebase.
 
 ## Open questions
 
-1. **3.14 now, or wait for 3.15.2?** Recommendation: 3.14 now. It is finished, and this mission
-   is cheap enough to run again in a year.
-2. **Does the free-threaded build interest us?** It is opt-in, and this hub is I/O-bound with
-   one process holding one SQLite file — so almost certainly not. Worth writing down so nobody
-   re-opens it. **Recommendation: explicitly out of scope.**
-3. **Is anything actually pinned to 3.12?** Needs checking rather than assuming, before any of
-   the above is planned.
+Both product questions are now decided. One check remains, and it is mine rather than the
+operator's.
+
+1. **~~Which version?~~ Decided 2026-08-01: 3.14.** Finished, two patch releases behind it, and
+   the version that carries PEP 649 — the only change here with a real payoff. 3.15 was
+   rejected for one specific reason rather than a vague one: a `.0` is where dependency wheels
+   are missing and native builds fail, and this project depends on cryptography, pydantic and
+   litestar. Revisit at 3.15.2.
+2. **~~Free-threaded build?~~ Decided 2026-08-01: explicitly out of scope**, and recorded so it
+   is not re-argued each release. See below.
+3. **Is anything actually pinned to 3.12?** Still to check — a task for the plan, not a
+   decision for anyone.
+
+## Free-threading: ruled out, and why
+
+The no-GIL build is opt-in from 3.14. It is **out of scope for this hub**, deliberately, and
+the reasoning is written here so nobody has to reconstruct it.
+
+**Where it would help, we have nothing.** Free-threading pays for CPU-bound work running in
+parallel threads. This hub is I/O-bound throughout: asyncio for everything, with blocking
+network calls pushed to threads precisely so they do not occupy the loop. There is no
+computation to spread.
+
+**Where we do have concurrency, the design refuses it anyway.** Exactly one process opens the
+SQLite file (ADR 0005, ADR 0006). Multiple writer threads are not a capability we want and
+then cannot use — they are a thing the storage model rules out on purpose.
+
+**And it is not free.** A second interpreter build to test, a smaller pool of wheels, and more
+variance in behaviour, in exchange for parallelism with nothing to parallelise.
+
+Revisit only if this hub ever grows genuinely CPU-bound work. Nothing on the roadmap does.
 
 ## Out of scope
 
