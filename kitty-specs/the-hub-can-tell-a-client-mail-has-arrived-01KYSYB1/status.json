@@ -1,0 +1,28 @@
+{
+  "event_count": 1,
+  "last_event_id": "01KYZHZHTTDETV9XM7EFR5W723",
+  "materialized_at": "2026-08-01T20:59:18.746972+00:00",
+  "mission_number": "",
+  "mission_slug": "the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1",
+  "mission_type": "software-dev",
+  "summary": {
+    "approved": 0,
+    "blocked": 0,
+    "canceled": 0,
+    "claimed": 0,
+    "done": 0,
+    "for_review": 0,
+    "in_progress": 0,
+    "in_review": 0,
+    "planned": 1
+  },
+  "work_packages": {
+    "WP01": {
+      "actor": "finalize-tasks",
+      "force_count": 0,
+      "lane": "planned",
+      "last_event_id": "01KYZHZHTTDETV9XM7EFR5W723",
+      "last_transition_at": "2026-08-01T20:59:18.746972+00:00"
+    }
+  }
+}
