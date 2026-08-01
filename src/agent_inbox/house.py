@@ -15,6 +15,7 @@ action. It permits it, refuses it, or watches it.
 
 import logging
 from collections.abc import Sequence
+from contextlib import suppress
 from types import TracebackType
 from typing import Any, Self
 
@@ -22,6 +23,7 @@ from agent_inbox import addressing, rules
 from agent_inbox.delivery import Receipt, RemoteDelivery, Sent
 from agent_inbox.exceptions import RemoteMailbox
 from agent_inbox.mailbox import Mailbox, _reply_subject
+from agent_inbox.notify import Arrival, Listeners
 from agent_inbox.policy import Attempt, Outcome, Policy, default_policies
 from agent_inbox.records import ActorRecord, ObjectRecord
 from agent_inbox.retry import Queued, RetryingDelivery, wrap
@@ -45,9 +47,15 @@ class House:
         policies: Sequence[Policy] | None = None,
         *,
         deliver: RemoteDelivery | None = None,
+        listeners: Listeners | None = None,
     ) -> None:
         self._mailbox = mailbox
         self._policies = tuple(policies if policies is not None else default_policies())
+        # Who is holding a connection open, waiting to be told mail arrived. Always a
+        # real registry, never None — "nobody is listening" is the ordinary case and is
+        # already what an empty one means, so a house without one would only add a
+        # second way to say the same thing and a branch at every call site.
+        self._listeners = listeners if listeners is not None else Listeners()
         # Injected, exactly as policies are. A house without one **refuses** remote
         # recipients rather than dropping them — see `send`.
         #
@@ -65,6 +73,11 @@ class House:
     @property
     def policies(self) -> tuple[Policy, ...]:
         return self._policies
+
+    @property
+    def listeners(self) -> Listeners:
+        """The open event streams. Per-process and in-memory; see `notify`."""
+        return self._listeners
 
     async def open(self) -> Self:
         """Establish standing invariants. Idempotent — reopening changes nothing."""
@@ -247,7 +260,54 @@ class House:
                 },
             )
         )
+        self._announce(sent)
         return sent
+
+    def _announce(self, sent: Sent) -> None:
+        """Tell anyone holding a stream that mail arrived. Best-effort, and final.
+
+        **After the write, and unable to fail the send.** Both halves matter and for
+        different reasons:
+
+        *After*, because an event that says mail exists before it exists is a lie a
+        client can act on — it would fetch, find nothing, and have no way to tell a race
+        from a bug. The store write has already happened by the time this runs, so an
+        event and the message it describes cannot disagree.
+
+        *Unable to fail*, because the send is the product and this is a convenience on
+        top of it. A hub that refuses mail because nobody could be told about it has
+        inverted its own priorities. `announce` is written not to raise, and this
+        catches anything anyway: the guarantee has to hold even if that module is later
+        changed by somebody who has not read this comment.
+
+        **`Exception`, deliberately, and not `BaseException`.** An outside review asked
+        whether a `CancelledError` could escape here. It cannot: everything inside the
+        `try` is synchronous, and asyncio delivers cancellation at `await` points, of
+        which there are none. What *could* arrive is `KeyboardInterrupt` or
+        `SystemExit`, and those must not be swallowed — the process is being asked to
+        stop, the mail is already stored, and a notification is not worth staying alive
+        for. The narrower catch is the correct one; `test_announce_stays_synchronous`
+        pins the assumption it rests on.
+
+        Called for local recipients only. Remote ones are a peer's business, and
+        `Sent.local_recipients` has already excluded them.
+        """
+        try:
+            arrival = Arrival.of(sent.record)
+            for who in sent.local_recipients:
+                self._listeners.announce(who, arrival)
+        except Exception:  # noqa: BLE001 - a send must survive anything that happens here
+            # Suppressed, because the handler is the last place a guarantee can be lost.
+            # Logging is synchronous and a handler can raise — a full disk, a broken
+            # remote sink — and an exception thrown *while reporting* that notification
+            # failed would do the exact thing this method exists to prevent. The same
+            # review found this: the `try` was guarded and the `except` was not.
+            with suppress(Exception):
+                logger.exception(
+                    "event=mailbox.listen.failed message=%s — mail was stored and is "
+                    "unaffected; only the notification was lost",
+                    sent.record.id,
+                )
 
     async def read(self, caller: str, object_id: str) -> ObjectRecord:
         attempt = Attempt(action="read", actor=caller, detail={"id": object_id})

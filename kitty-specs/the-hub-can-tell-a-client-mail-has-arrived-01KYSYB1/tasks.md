@@ -73,13 +73,13 @@ changes.
 **Independent test**: hold the stream with `curl -N`, send mail from another terminal, watch
 the event arrive. Kill the stream and everything else still works identically.
 
-- [ ] T001 The connection registry: per-actor, bounded, counted (WP01)
-- [ ] T002 `GET /actors/{name}/events`, authenticated as exactly that actor (WP01)
-- [ ] T003 Emit from `House.send` — best-effort, after the write, cannot fail a send (WP01)
-- [ ] T004 The disclosure tests: wrong identity, no identity, somebody else's mail (WP01)
-- [ ] T005 The content tests: no body, actionable, mail unchanged (WP01)
-- [ ] T006 The count and the cap (FR-007) (WP01)
-- [ ] T007 Directive 4 — outside model review before WP01 closes (WP01)
+- [x] T001 The connection registry: per-actor, bounded, counted (WP01)
+- [x] T002 `GET /actors/{name}/events`, authenticated as exactly that actor (WP01)
+- [x] T003 Emit from `House.send` — best-effort, after the write, cannot fail a send (WP01)
+- [x] T004 The disclosure tests: wrong identity, no identity, somebody else's mail (WP01)
+- [x] T005 The content tests: no body, actionable, mail unchanged (WP01)
+- [x] T006 The count and the cap (FR-007) (WP01)
+- [x] T007 Directive 4 — outside model review before WP01 closes (WP01)
 - [ ] T008 After deploying: survival and latency against both hubs (WP01)
 
 **Risks**: T003 is where a mistake is expensive. A notification that can raise is a

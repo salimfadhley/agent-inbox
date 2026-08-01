@@ -19,6 +19,7 @@ visibility rules hold however the caller was identified.
 
 import asyncio
 import hashlib
+import json
 import logging
 import sqlite3
 import time
@@ -36,6 +37,7 @@ from litestar.di import Provide
 from litestar.exceptions import HTTPException
 from litestar.handlers.base import BaseRouteHandler
 from litestar.openapi import OpenAPIConfig
+from litestar.response import ServerSentEvent, ServerSentEventMessage
 
 from agent_inbox import __version__, addressing
 from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
@@ -69,6 +71,7 @@ from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
 from agent_inbox.inbound import InboundRefused, parse_activity, read_create
 from agent_inbox.keys import SigningKey
 from agent_inbox.naming import validate_hub_name
+from agent_inbox.notify import TooManyListeners
 from agent_inbox.peers import fetch_actor_document, insecure_federation, peer_origin
 from agent_inbox.signatures import parse_signature, verify_request
 from agent_inbox.wire import (
@@ -132,6 +135,13 @@ def owns(name: str, caller: str, wire: Renderer) -> str:
 #: read — the cursor carries you to the rest — but a ceiling on what a single glance
 #: costs, so that ignoring your mail for a week cannot produce one unpayable reply.
 PAGE = 50
+
+#: How long an idle event stream waits before sending a comment frame. Proxies and load
+#: balancers close connections that go quiet, and the interval has to be comfortably
+#: under the shortest of those — Fly's idle timeout being the one that matters here.
+#: Short enough to hold the connection, long enough that a hub full of idle listeners is
+#: not a hub doing constant work.
+STREAM_KEEPALIVE_SECONDS = 15.0
 
 
 def _cursor_key(record: Any) -> tuple[str, str]:
@@ -907,6 +917,65 @@ class Api:
             page["items"] = [self._summary(m) for m in waiting]
         return page
 
+    def events(self, name: str, caller: str) -> ServerSentEvent:
+        """A held connection that says when mail arrives. Says nothing else, ever.
+
+        The one thing this hub contributes to being woken: *"there is mail for you, from
+        X, about Y"*. What a client does about that — whether to interrupt an agent
+        mid-turn, whether to wait for its next turn, whether to ignore it entirely — is
+        the client's, and the hub never learns which was chosen. It could not decide
+        well anyway: every harness is interrupted differently, and several cannot be.
+
+        **This is not a second way to read mail.** No body crosses this wire, nothing
+        here consumes, and no read is recorded. A client is told *that* a message exists
+        and fetches it by the ordinary route if it wants it, which is what keeps
+        `read_message` the only thing that marks anything handled.
+
+        **Polling loses nothing but immediacy.** A client that cannot hold a connection
+        — a CLI invocation, a harness with no MCP server, anything behind a proxy that
+        will not allow it — sees exactly the mailbox it saw before. That is the floor,
+        and it is deliberately still the floor: a hub that required a socket would have
+        broken every client that already exists.
+        """
+        owner = owns(name, caller, self.wire)
+        listeners = self.house.listeners
+        # Registered *before* the response is built, so a full hub can refuse with a
+        # status and a reason. Doing it inside the generator would mean the only
+        # available refusal is closing a stream that has already started, which a client
+        # cannot distinguish from a network fault.
+        try:
+            queue = listeners.open(owner)
+        except TooManyListeners as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        async def stream() -> AsyncIterator[ServerSentEventMessage]:
+            try:
+                while True:
+                    try:
+                        arrival = await asyncio.wait_for(
+                            queue.get(), timeout=STREAM_KEEPALIVE_SECONDS
+                        )
+                    except TimeoutError:
+                        # A comment, which is a legal SSE frame carrying no event. Idle
+                        # connections are what proxies and load balancers close, so a
+                        # stream that only spoke when there was mail would survive
+                        # exactly as long as it was busy — the opposite of useful.
+                        yield ServerSentEventMessage(comment="keep-alive")
+                        continue
+                    yield ServerSentEventMessage(
+                        event="mail",
+                        id=arrival.id,
+                        data=json.dumps(arrival.as_event()),
+                    )
+            finally:
+                # Reached on cancellation too, which is what a client vanishing looks
+                # like from here. Without this the registry fills with connections that
+                # closed hours ago and the hub reports itself busy while holding
+                # nothing.
+                listeners.close(owner, queue)
+
+        return ServerSentEvent(stream())
+
     def _threads(self, waiting: tuple[Any, ...]) -> list[dict[str, Any]]:
         """Unread mail gathered into conversations, newest conversation first.
 
@@ -1063,7 +1132,23 @@ class Api:
         # bug the inbox already had, for a reason nobody changing it would think about.
         # Normalising both is one string operation and removes the trap rather than
         # documenting it.
-        return await self.house.survey(since=unmangled_timestamp(since))
+        survey = await self.house.survey(since=unmangled_timestamp(since))
+        # Held connections, added here rather than in the house because they are a fact
+        # about *this process* and not about the mailbox: restart the hub and the number
+        # is zero while every message is exactly where it was.
+        #
+        # Named for what it counts. `listeningSessions`, not "online" and not
+        # "present" — an agent mid-turn on a long task is listening and reading
+        # nothing, and an agent
+        # with no MCP server never appears here and may be entirely here. What "present"
+        # means is issue #7's decision; this is one input to it, and a number labelled
+        # "online" would be that decision made by accident.
+        listeners = self.house.listeners
+        return {
+            **survey,
+            "listeningSessions": listeners.count(),
+            "listeningBy": listeners.by_actor(),
+        }
 
     async def observe_mailbox(self, name: str) -> Collection:
         items = await self.house.observe_mailbox(self.wire.name_from(name))
@@ -1664,6 +1749,17 @@ def build_api(
     ) -> Collection | dict[str, Any]:
         return await api.inbox(name, caller, view=view, since=since)
 
+    @get(
+        "/actors/{name:str}/events",
+        dependencies={"caller": Provide(provide_caller)},
+        # No `media_type` here on purpose. `ServerSentEvent` sets `text/event-stream`
+        # itself, and naming one on the decorator *overrides* it — which produced a
+        # stream served as `text/plain` that every hand-written test was happy with and
+        # a real `EventSource` would refuse outright.
+    )
+    async def events(name: str, caller: str) -> ServerSentEvent:
+        return api.events(name, caller)
+
     @post("/actors/{name:str}/inbox")
     async def federation_inbox(name: str, request: Request) -> dict[str, Any]:
         return await api.federation_inbox(name, request)
@@ -2070,6 +2166,7 @@ def build_api(
         actor,
         update_profile,
         inbox,
+        events,
         federation_inbox,
         outbox,
         view_object,
