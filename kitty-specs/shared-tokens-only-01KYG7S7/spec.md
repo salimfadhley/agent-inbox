@@ -37,6 +37,22 @@ revoking an informed act rather than a gamble.
 
 ## Requirements
 
+Each row links to the section that states it in full, below.
+
+| ID | Requirement | Status |
+|---|---|---|
+| **FR-001** | One `/tokens` screen lists every token on the hub — label, issued, last used, agents admitted, revoke. The per-agent pages go away. | Specified |
+| **FR-002** | One mint form: a label and a button. A label is **required** — a list of unlabelled tokens is a list nobody can act on. Nothing about minting names an agent. | Specified |
+| **FR-003** | Revoking takes effect on the token's next call, and the confirmation says which agents it had admitted, so the operator learns what they just cut off. Revoked tokens stay listed, marked. | Specified |
+| **FR-004** | `POST`/`GET /auth/tokens` and `DELETE /auth/tokens/{id}`, operator-only. The three `/auth/agents/{name}/tokens…` routes are removed. | Specified |
+| **FR-005** | Every successful authentication records the (token, agent) pair with first and last seen. **This is what makes revoking an informed act rather than a gamble.** | Specified |
+| **FR-006** | A token already bound to one actor keeps working, listed as **bound to `<name>`**. Nobody is locked out by an upgrade. | Specified |
+| **FR-007** | The words follow the code: prompt, `doctor`, console and API stop hedging between two token shapes. | Specified |
+| **FR-008** | Each row carries **when it was last used**, with "never" distinct from "long ago". | Specified |
+| **FR-009** | Recording last use is **coarse** — at most one write per token per bucket, not one per request. | Specified |
+| **FR-010** | "Issued to" (a label the operator typed) and "admitted" (what we observed) are separate columns. A claim must never be shown where a finding appears to be. | Specified |
+| **FR-011** | The admitted history is **last use per agent per token**, overwritten in place — bounded by the number of agents, not by traffic. | Specified |
+
 ### FR-001 — one Tokens screen, listing every token
 
 `/tokens` shows every token on the hub, not a list of agents. Each row carries:
@@ -151,3 +167,63 @@ Once per-agent tokens are gone, they must stop being described:
   `tests/test_auth_api.py` and `tests/test_console.py` all cover the current per-agent
   shape and need rewriting rather than deleting — the properties they pin
   (operator-only, shown once, revocation refuses) all still apply.
+
+
+---
+
+## Absorbed 2026-08-01: the listing, and what it shows
+
+Mission `tokens-you-can-see-01KYYGM6` described the same screen as FR-001 and has been **folded
+into this one and retired**. Its requirements land here rather than being built twice against
+the same page. Tracked as **#38**.
+
+### FR-008 — every row carries when it was last used
+
+**This is the field that makes the screen worth having.** Issued-date tells an operator a
+token is old; only last-used tells them it is *dead*. Without it, revoking is a guess, the
+safe-feeling choice is to leave every credential alive, and secrets outlive the machines they
+were minted for.
+
+A token never used says so, distinctly from one used long ago. "Never" and "a year ago" are
+different facts leading to different actions.
+
+### FR-009 — recording last use is **coarse**
+
+Decided 2026-08-01. At most **one write per token per bucket**, not one per request.
+
+This matters because authentication is the hottest path in the system and currently only
+*reads*. Nobody needs second-precision to decide whether a credential is abandoned, and the
+cheap version is the one that still works under load. Bucket size is a planning choice;
+anything from a minute to an hour satisfies this.
+
+### FR-010 — "issued to" is a claim; "admitted" is a finding. Never the same column.
+
+Decided 2026-08-01, and the distinction is deliberate.
+
+| Column | Is | Comes from |
+|---|---|---|
+| **Issued to** | what the operator typed at mint time — "Sal's laptop", "CI runner" | a claim, and it can be wrong or stale |
+| **Admitted** | which agents have actually authenticated with it | observed fact |
+
+A shared token is issued to a *machine*, not an agent, so "issued to" cannot be derived — it
+has to be asked for. And it must not be presented as though it were observed: this project
+keeps claims and findings visibly apart elsewhere, and a stale label sitting where a fact
+appears to be is exactly how an operator revokes the wrong credential.
+
+### FR-011 — the admitted history is bounded by construction
+
+Decided 2026-08-01: store **last use per agent, per token**, overwritten in place.
+
+One row per agent-token pair. Bounded by the number of agents no matter how much traffic
+flows, which is what stops this becoming a log that grows forever and presents as working —
+the same failure shape as an unbounded queue.
+
+The cost, accepted: no history. You can see that an agent last used a token on Tuesday, not
+that it used it heavily in June. Nobody has asked for the latter.
+
+### Out of scope, on purpose
+
+**Failed authentication attempts** — someone probing with a wrong or revoked credential — are
+**not** part of this. Decided 2026-08-01: they are a different feature with a different
+retention story and a write path driven by unauthenticated callers, and they deserve a
+hub-wide treatment rather than a corner of a token screen. Filed separately.
