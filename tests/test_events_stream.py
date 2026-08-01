@@ -29,7 +29,7 @@ import urllib.request
 import pytest
 import uvicorn
 
-from agent_inbox.api import IDENTITY_HEADER, build_api
+from agent_inbox.api import IDENTITY_HEADER, Api, build_api
 from agent_inbox.house import House
 from agent_inbox.mailbox import Mailbox
 from agent_inbox.notify import Arrival, Listeners, TooManyListeners
@@ -251,6 +251,26 @@ class TestTheSendIsUnaffected:
             assert sent.record.content == "still arrives"
             # And it is genuinely in the mailbox, not merely returned.
             assert [m.id for m in await house.peek(ROSEMARY)] == [sent.record.id]
+
+    def test_a_stream_that_is_never_read_holds_no_slot(self) -> None:
+        """Building the response must not register anything. Only reading does.
+
+        The leak this pins is invisible and permanent. An earlier version registered
+        beside the capacity check, above the generator, which reads better — and if the
+        response is never iterated, because the client disconnected between the headers
+        and the first frame, the `finally` that unregisters never runs at all: a
+        generator that was never started has nothing to unwind. Every such connection
+        burned one slot out of the cap for the lifetime of the process, until the hub
+        refused new streams while holding none.
+
+        Written against the count rather than against a disconnect, because the count is
+        the thing that would be wrong and it can be asked directly.
+        """
+        house = a_house()
+        api = Api(house, HUB)
+        response = api.events(ROSEMARY, ROSEMARY)
+        assert response is not None
+        assert house.listeners.count() == 0
 
     def test_announce_stays_synchronous(self) -> None:
         """Two guarantees rest on this, and both fail silently if it changes.

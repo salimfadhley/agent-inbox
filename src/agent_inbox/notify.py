@@ -154,6 +154,28 @@ class Listeners:
             actor: len(queues) for actor, queues in self._by_actor.items() if queues
         }
 
+    def at_capacity(self) -> bool:
+        """Whether the next :meth:`open` would be refused.
+
+        Asked separately from opening so that a caller which cannot refuse cleanly once
+        it has started responding — an HTTP handler, for instance — can refuse *before*
+        it starts. This is not a reservation: nothing stops two callers both seeing room
+        and both taking it, which briefly exceeds the cap and then drains as they leave.
+        The alternative, reserving a slot that a caller might never use, leaks it.
+        """
+        return self.count() >= self._max_listeners
+
+    def full_message(self) -> str:
+        """The refusal text, so a caller that checks separately says the same thing.
+
+        One sentence, one place. Two versions of "we are full" is how a route ends up
+        naming a cap that no longer matches the one being enforced.
+        """
+        return (
+            f"this hub is holding its maximum of {self._max_listeners} event streams — "
+            "poll `check_inbox` instead, which is unaffected"
+        )
+
     def open(self, actor: str) -> asyncio.Queue[Arrival]:
         """Register a connection for `actor`, or refuse because the hub is full.
 
@@ -167,11 +189,8 @@ class Listeners:
         Every caller must pair this with :meth:`close`. :meth:`listening` does that for
         you and is what tests should use.
         """
-        if self.count() >= self._max_listeners:
-            raise TooManyListeners(
-                f"this hub is holding its maximum of {self._max_listeners} event "
-                "streams — poll `check_inbox` instead, which is unaffected"
-            )
+        if self.at_capacity():
+            raise TooManyListeners(self.full_message())
         queue: asyncio.Queue[Arrival] = asyncio.Queue(maxsize=self._queue_depth)
         self._by_actor.setdefault(actor, set()).add(queue)
         logger.info("event=mailbox.listen.opened actor=%s open=%d", actor, self.count())

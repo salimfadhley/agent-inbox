@@ -939,16 +939,34 @@ class Api:
         """
         owner = owns(name, caller, self.wire)
         listeners = self.house.listeners
-        # Registered *before* the response is built, so a full hub can refuse with a
-        # status and a reason. Doing it inside the generator would mean the only
-        # available refusal is closing a stream that has already started, which a client
-        # cannot distinguish from a network fault.
-        try:
-            queue = listeners.open(owner)
-        except TooManyListeners as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Asked here so a full hub refuses with a status and a reason a client can read.
+        # Deciding it inside the generator instead would leave closing an
+        # already-started stream as the only available refusal, and a client cannot tell
+        # that from a network fault.
+        if listeners.at_capacity():
+            raise HTTPException(status_code=503, detail=listeners.full_message())
 
         async def stream() -> AsyncIterator[ServerSentEventMessage]:
+            # Registered *inside* the generator, and this is the subtle half. An earlier
+            # version registered above, next to the capacity check, which reads better
+            # and leaks: if the response is never iterated — a client that disconnects
+            # between the headers and the first frame — the `finally` below never runs,
+            # because a generator that was never started has nothing to unwind. Each
+            # occurrence would burn one slot out of the cap permanently, and a hub that
+            # refuses connections while holding none is the exact "presents as working"
+            # failure this module keeps trying to avoid.
+            #
+            # The cost is that check-then-register is not atomic: connections arriving
+            # together at the boundary can briefly exceed the cap between them. That is
+            # the safe direction — an overshoot of a few drains as those clients leave,
+            # while a leaked slot never comes back.
+            try:
+                queue = listeners.open(owner)
+            except TooManyListeners:
+                # Only reachable by that race, since the check above passed. There is
+                # nothing to say here that a client could act on: the stream simply
+                # ends, and its reconnect finds either room or an honest 503.
+                return
             try:
                 while True:
                     try:
@@ -969,9 +987,7 @@ class Api:
                     )
             finally:
                 # Reached on cancellation too, which is what a client vanishing looks
-                # like from here. Without this the registry fills with connections that
-                # closed hours ago and the hub reports itself busy while holding
-                # nothing.
+                # like from in here.
                 listeners.close(owner, queue)
 
         return ServerSentEvent(stream())
