@@ -1,6 +1,6 @@
 ---
 work_package_id: WP02
-title: 'The code: PEP 649 removal, and the failure only 3.14 shows'
+title: 'The code: PEP 649 removal, the 3.14-only failure, and the outside review'
 dependencies:
 - WP01
 requirement_refs:
@@ -12,6 +12,7 @@ planning_base_branch: kitty/mission-current-python
 merge_target_branch: kitty/mission-current-python
 branch_strategy: Planning artifacts for this mission were generated on kitty/mission-current-python. During /spec-kitty.implement this WP may branch from a dependency-specific base, but completed changes must merge back into kitty/mission-current-python unless the human explicitly redirects the landing branch.
 subtasks:
+- T005
 - T006
 - T007
 - T008
@@ -22,6 +23,9 @@ history:
 - at: 2026-08-01T14:45:00Z
   actor: system
   action: Prompt generated via /spec-kitty.tasks
+- at: 2026-08-01T16:20:00Z
+  actor: system
+  action: Renumbered after the charter subtask moved out of the mission; T006 and T009 added from analysis findings A2 and A3
 agent_profile: python-pedro
 authoritative_surface: src/agent_inbox/
 create_intent:
@@ -49,25 +53,28 @@ of this prompt.
 
 ## Objective
 
-Two things, and only the first is mechanical.
+Three things, and only the first is mechanical.
 
 1. Remove `from __future__ import annotations` from all 90 files that carry it, because
    PEP 649 makes it the default in 3.14.
-2. Explain the failure that appears only on 3.14 — intermittently, in capture teardown —
+2. **Show that removing it changed no behaviour** — which is not obvious, and is not what
+   Phase 0 measured.
+3. Explain the failure that appears only on 3.14 — intermittently, in capture teardown —
    instead of tolerating it.
+
+Then have an outside model review the result, per Directive 4.
 
 ## Prerequisites
 
-**WP01 must have landed.** The floor, the charter and pyright's `pythonVersion` are all set
-there; doing T006 first means removing a `__future__` import while the type checker still
-believes it is needed.
+**WP01 must have landed.** The floor and pyright's `pythonVersion` are set there; doing T005
+first means removing a `__future__` import while the type checker still believes it is needed.
 
 ## Subtasks
 
-### T006 — Remove `from __future__ import annotations`, all 90 files
+### T005 — Remove `from __future__ import annotations`, all 90 files
 
 Ninety of the ninety-two Python files under `src/` and `tests/` open with it. Under PEP 649
-every one is dead code.
+the annotation behaviour it requests is the default.
 
 The edit is mechanical. **The discipline is not.** FR-004 is worded to forbid a partial job,
 and the reason is worth holding in mind while you work: a codebase where some modules opt in
@@ -79,6 +86,37 @@ the convention was adopted, or they genuinely differ. Either way the end state i
 
 After the removal, run `uv run ruff check` and `uv run ruff format --check`: removing the
 import can leave a blank line or an import-ordering artifact at the top of a module.
+
+### T006 — Prove the removal changed no behaviour
+
+**Read this before you treat T005 as a no-op, because the plan was wrong to call it one.**
+
+`from __future__ import annotations` is **PEP 563**: it turns every annotation into a
+*string*. PEP 649 does something different — it gives back real objects, computed lazily.
+These are not the same, and removing the import changes what `__annotations__` yields at
+runtime.
+
+That matters here specifically, because this project hands annotated types to four libraries
+that introspect them: **litestar** (route signatures, DTOs), **msgspec** (struct decoding),
+**click** (parameter types) and **mcp / FastMCP** (tool schemas). Under PEP 563 they receive
+strings and resolve them themselves; afterwards they receive the objects directly. That is
+usually an improvement, and it is occasionally a behaviour change — most often around forward
+references, `TYPE_CHECKING`-only imports, and any type that is imported lazily.
+
+**And Phase 0 does not cover this.** The 961-passed / 18-skipped baseline in `plan.md` was
+measured on 3.14 **with the `__future__` imports still in place**. It proves the interpreter
+move. It says nothing about this removal.
+
+So:
+
+- Run the full suite immediately after T005, before anything else in this WP, and record that
+  number **as a separate result** from the Phase 0 baseline. Anything below 961 passed is a
+  finding, not a rounding error.
+- Pay particular attention to any module with imports under `if TYPE_CHECKING:` — those names
+  do not exist at runtime, and under PEP 563 nobody ever asked them to.
+- If the removal *does* change behaviour, say so plainly. FR-004 may then be a separable
+  mission rather than a step in this one, and that is a legitimate outcome — a worse one is
+  absorbing a behaviour change into a mission whose NFR-001 says there is none.
 
 ### T007 — The grep proof, as a test
 
@@ -92,7 +130,7 @@ looked nowhere fails rather than passes.
 
 This test is the reason FR-004 cannot quietly become 88 files. Eyes do not count to 90.
 
-### T008 — Characterise the intermittent `UnicodeDecodeError` [P]
+### T008 — Characterise and settle the intermittent `UnicodeDecodeError` [P]
 
 `tests/test_operators.py::TestRemoval::test_any_operator_can_be_removed` fails on 3.14 in
 roughly one full-suite run in two, and never on 3.12:
@@ -117,47 +155,71 @@ What Phase 0 established, so you do not repeat it:
 - It reproduced twice in four full-suite runs. Budget for repeat runs; a single green run
   proves nothing.
 
-Useful next moves: `-p no:randomly` (if ordering plugins are active) and `-x` with a fixed
-seed to find a minimal reproducing subset; `--capture=no` and `--capture=sys` to see whether
-it is fd-level capture specifically; and check whether the preceding tests write non-ASCII
-to a captured stream.
+Useful next moves: a fixed ordering seed to find a minimal reproducing subset; `--capture=no`
+and `--capture=sys` to see whether it is fd-level capture specifically; and check whether the
+preceding tests write non-ASCII to a captured stream.
 
 Three outcomes are possible, and you must say which: a pytest-capture bug on 3.14, an
 interaction with our logging configuration, or a latent defect of ours that 3.12 hid.
 
-### T009 — Fix it, or record the upstream issue and scope a workaround
-
-**Do not silence it.** An intermittent failure that gets marked flaky and skipped is how a
-real defect acquires a permanent home.
+Then settle it. **Do not silence it** — an intermittent failure that gets marked flaky and
+skipped is how a real defect acquires a permanent home.
 
 - **Ours** → fix it. That may enlarge this mission, and that is the correct outcome.
 - **Upstream** → link the issue in the commit message and add the narrowest possible
   test-side workaround, with a comment naming the condition under which it can be removed.
 
-Then prove it: **ten consecutive full-suite runs, green.** One run is not evidence for a
+Then prove it: **ten consecutive full-suite runs, green.** One run is not evidence about a
 failure that appears half the time.
+
+### T009 — Directive 4: outside model review before the mission closes
+
+Charter Directive 4 is a standing instruction and this mission does not close without it.
+The charter's own guidance on running it well: **ask one narrow question**, naming the
+specific invariant or failure mode, and let the reviewer write its own experiments. A broad
+"review this" has already been tried here and produced nothing usable.
+
+This mission's narrow question is T006's:
+
+> Does removing `from __future__ import annotations` change any runtime behaviour in a
+> codebase that hands annotated types to litestar, msgspec, click and mcp — particularly
+> around forward references and `TYPE_CHECKING`-only imports?
+
+Invoke as the charter specifies — a hard time lid and closed stdin:
+
+```bash
+perl -e 'alarm 300; exec @ARGV' codex exec "<question>" < /dev/null
+```
+
+**Treat findings as leads: reproduce independently before acting.** A finding you could not
+reproduce is worth recording as unreproduced, not worth acting on and not worth discarding.
 
 ## Definition of Done
 
 - [ ] `grep -rl 'from __future__ import annotations' src tests` returns nothing
 - [ ] A test enforces that, and fails if it scanned fewer files than the codebase has
-- [ ] The four gates pass — pytest, ruff check, ruff format --check, pyright — with real
-      exit codes
+- [ ] The post-removal suite result is recorded **separately** from the Phase 0 baseline, and
+      is at least 961 passed / 18 skipped
+- [ ] The four gates pass — pytest, ruff check, ruff format --check, pyright — with real exit
+      codes
 - [ ] The intermittent failure is explained in writing, and either fixed or linked upstream
 - [ ] Ten consecutive full-suite runs are green
-- [ ] Test count is **at least** the 961 passed / 18 skipped baseline (NFR-001: no behaviour
-      change means no tests lost)
+- [ ] The Directive 4 review has been run with a narrow question, and its findings are
+      recorded — reproduced, or explicitly marked unreproduced
 
 ## Risks
 
 | Risk | What to do |
 |---|---|
-| T006 is done to 88 of 90 files | T007 exists precisely for this. Write it before you believe the removal is complete |
+| T005 is treated as a no-op | It is not — see T006. PEP 563 and PEP 649 are different, and four libraries here introspect annotations |
+| T005 is done to 88 of 90 files | T007 exists precisely for this. Write it before you believe the removal is complete |
 | The flake gets skipped to finish the WP | Explicitly forbidden. Report instead — an enlarged mission beats a hidden defect |
 | Ten green runs are declared after one | The failure appears in ~50% of runs. One green run is a coin toss reported as a result |
+| Directive 4 is skipped because the WP looks done | It is a Definition-of-Done item, not a courtesy. It has found two real bugs in this project already |
 
 ## Reviewer guidance
 
-Check T007 fails when a `from __future__ import annotations` line is added back to any file
-— a test that cannot fail is not proof. Check the flake has a written verdict, not a
+Check T007 fails when a `from __future__ import annotations` line is added back to any file —
+a test that cannot fail is not proof. Check the post-removal suite number is recorded as its
+own result rather than conflated with Phase 0's. Check the flake has a written verdict, not a
 disposition; "seems flaky" is not an explanation.
