@@ -15,8 +15,6 @@ proved
 by removing the guard and watching them fail.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 
 import pytest

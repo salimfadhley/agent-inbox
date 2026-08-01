@@ -7,8 +7,6 @@ That is this project's recurring defect shape, so it is asserted directly here r
 than trusted to the design.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from agent_inbox.hub_settings import ResolvedSetting, resolve_hub_settings

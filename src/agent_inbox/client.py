@@ -13,8 +13,6 @@ one told the mailbox is unreachable, so every call carries a timeout and every f
 comes back as a sentence saying what to do.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import tomllib

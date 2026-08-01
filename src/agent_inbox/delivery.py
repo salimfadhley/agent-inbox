@@ -11,8 +11,6 @@ without federation and handed `atlas@beta.example` must say so, because a send t
 succeeds and reaches nobody is the worst failure shape available.
 """
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol

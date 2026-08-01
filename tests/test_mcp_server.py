@@ -7,8 +7,6 @@ agent's client reports that as "the mailbox tool is unavailable", which is how i
 unnoticed for a whole evening.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest

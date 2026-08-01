@@ -5,8 +5,6 @@ tests as pure functions; what is checked here is that orchestration wires them u
 correctly, and that storage genuinely does not matter.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path

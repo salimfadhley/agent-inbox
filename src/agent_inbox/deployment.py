@@ -23,8 +23,6 @@ afterwards: is the service actually running what I just released, and is it tell
 truth about itself?
 """
 
-from __future__ import annotations
-
 import json
 import urllib.error
 import urllib.request

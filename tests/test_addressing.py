@@ -5,8 +5,6 @@ the plainest question that can be asked of a mailbox: can ``a@local`` write to
 ``b@local``, and can ``b@local`` reply?
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 from pathlib import Path
 

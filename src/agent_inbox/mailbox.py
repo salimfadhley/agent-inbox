@@ -17,8 +17,6 @@ caller may claim any name. Authorisation is a different matter and is already en
 by the pure rules, below wherever authentication will eventually sit.
 """
 
-from __future__ import annotations
-
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta

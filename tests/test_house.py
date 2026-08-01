@@ -1,7 +1,5 @@
 """The house: standing residents and house rules over a working mailbox."""
 
-from __future__ import annotations
-
 import logging
 from collections.abc import AsyncIterator
 

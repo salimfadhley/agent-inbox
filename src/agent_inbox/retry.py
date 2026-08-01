@@ -21,8 +21,6 @@ itself, immediately before the request. Nothing in this module decides whether a
 allowed, and nothing in it stores an answer to that question.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable

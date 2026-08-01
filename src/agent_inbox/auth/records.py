@@ -6,8 +6,6 @@ record: ``password_hash`` is an Argon2id string, ``totp_secret_enc`` is Fernet
 ciphertext, ``token_hash`` is a SHA-256 hex digest. Never a plaintext secret.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import StrEnum
 

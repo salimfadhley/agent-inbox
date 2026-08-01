@@ -21,8 +21,6 @@ early) and keeps the hub a single SQLite file with nothing else to persist. The
 clock is injected so the windows are testable.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 

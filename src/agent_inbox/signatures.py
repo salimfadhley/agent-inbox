@@ -15,8 +15,6 @@ POSTed between hubs a `digest` header must join the covered set, and a signature
 did not cover the body would be worse than none.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta

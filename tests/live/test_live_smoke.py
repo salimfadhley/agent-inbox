@@ -18,8 +18,6 @@ smoke job launches the stack and points these at it. Deliberately stdlib-only (u
 so the module always imports and cleanly skips even without the client extras installed.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import urllib.error

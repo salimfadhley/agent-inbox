@@ -11,8 +11,6 @@ rather than discovered. We redeploy on every release, so a process exiting while
 holding messages it called `queued` is not an edge case — it is a scheduled event.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from agent_inbox.house import House

@@ -12,8 +12,6 @@ Two choices worth knowing:
   an agent that cannot ask a follow-up question, so a bare status is not enough.
 """
 
-from __future__ import annotations
-
 import logging
 import sqlite3
 from typing import Any

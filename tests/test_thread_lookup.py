@@ -12,8 +12,6 @@ for a turn they cannot see. Refusing first costs nothing: any thread you can see
 named by a turn you can see.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 
 import pytest

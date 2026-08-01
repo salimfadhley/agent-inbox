@@ -16,8 +16,6 @@ message" and "not yours". Distinguishing those would let an outsider probe what 
 stored, which is precisely what the visibility rules protect.
 """
 
-from __future__ import annotations
-
 
 class MailboxError(Exception):
     """Base for everything this package raises.

@@ -12,8 +12,6 @@ shim had exactly that flaw — `agent_mailbox.cli.main is agent_inbox.cli.main` 
 False.
 """
 
-from __future__ import annotations
-
 import sys
 
 import agent_inbox

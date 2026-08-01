@@ -12,8 +12,6 @@ Issued names come from a checked-in pool (:mod:`agent_inbox.name_pool`) — no
 generator library at runtime, because it is, in the end, two lists of words.
 """
 
-from __future__ import annotations
-
 import random
 import re
 import unicodedata

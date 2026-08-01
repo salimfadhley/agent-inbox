@@ -21,8 +21,6 @@ complete, correct backend, and the fact that it fits in a page is the evidence t
 port is narrow enough.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 

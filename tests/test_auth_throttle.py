@@ -4,8 +4,6 @@ The properties that matter for brute-force protection: failures accumulate to a 
 a lockout expires, a success forgives, sources are independent, and the window slides.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 
 from agent_inbox.auth.throttle import LoginThrottle

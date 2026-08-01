@@ -24,17 +24,24 @@ vetoes tends, over time, to veto for reasons nobody can reconstruct. If it can b
 runs before and says so; if it only watches, it cannot change what happened.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from agent_inbox.exceptions import MailboxError
 
-if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to the type checker
-    from agent_inbox.mailbox import Mailbox
+# Imported for real, not under TYPE_CHECKING. The guard here used to say it existed
+# because of an import cycle; there is no cycle — `mailbox` does not import `policy`, so
+# the comment described a structure that had already changed.
+#
+# It matters more than tidiness now. Under the old PEP 563 deferral a name that existed
+# only for the type checker was harmless, because every annotation was a string. Under
+# PEP 649 (the default from 3.14) annotations are real objects computed on access, so a
+# TYPE_CHECKING-only name makes `Policy.check.__annotations__` raise `NameError: name
+# 'Mailbox' is not defined` — for anything that introspects it, which includes most
+# serialisation and DI machinery.
+from agent_inbox.mailbox import Mailbox
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +291,6 @@ def _is_denial(error: BaseException | None) -> bool:
 
 # --------------------------------------------------------------- not built, and why
 
-
 #: **Obscenity filtering is deliberately not implemented.** A wordlist filter has
 #: well-known failure modes — it blocks Scunthorpe and misses anything deliberate — and
 #: for a mailbox whose correspondents are LLM agents it addresses the wrong risk. The
@@ -297,7 +303,6 @@ def _is_denial(error: BaseException | None) -> bool:
 #: whoever proposes it next. If a deployment wants one, it is a :class:`Policy` and
 #: needs no engine change — which is the point of this layer.
 OBSCENITY_FILTER_NOT_IMPLEMENTED = True
-
 
 DEFAULT_POLICIES: tuple[type[BasePolicy], ...] = (
     StandingResidents,

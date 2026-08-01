@@ -7,8 +7,6 @@ auth boundary uses (see ``test_auth_api.py``): a structural test, so a well-mean
 that leaks a harness concept into the hub fails loudly instead of eroding ADR 0005.
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 

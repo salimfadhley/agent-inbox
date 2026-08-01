@@ -15,8 +15,6 @@ do the most normal thing for the fediverse unless it conflicts with the goals of
 developer tool. It does not conflict here.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import hashes, serialization

@@ -10,8 +10,6 @@ activity type is checked against a list of one, and its content is data — neve
 instruction — which is charter directive 7's second bullet arriving over HTTP.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 

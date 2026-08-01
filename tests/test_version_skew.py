@@ -10,8 +10,6 @@ the
 direction of the answer and about **silence**, which is the part easy to get wrong.
 """
 
-from __future__ import annotations
-
 from agent_inbox import __version__, staleness
 
 

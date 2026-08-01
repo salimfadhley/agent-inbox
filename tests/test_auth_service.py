@@ -5,8 +5,6 @@ enrolment gate that lets a first-run account do nothing but enrol, single-use re
 codes, token resolution and revocation, and session expiry against an injected clock.
 """
 
-from __future__ import annotations
-
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 

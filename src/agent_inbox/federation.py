@@ -13,8 +13,6 @@ Note what is gated: **enabling the mode**, not federating. A hub that has switch
 federation on and has not been named is a state worth not having.
 """
 
-from __future__ import annotations
-
 from agent_inbox.exceptions import MailboxError
 
 #: The name every hub answers to in addition to its own, and the default.

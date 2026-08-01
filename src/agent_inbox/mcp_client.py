@@ -11,8 +11,6 @@ Being local is also what makes push possible later — a hosted server can only 
 whereas a process on the agent's machine can interrupt the session it serves.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import tomllib
@@ -89,7 +87,6 @@ pays a turn and none can decline.
 
 You see only your own turns of a thread; everyone addressed gets their own copy.
 """
-
 
 #: Where this server should look for the project's configuration. An MCP server is
 #: launched by the agent's *client*, often with a working directory that is not the

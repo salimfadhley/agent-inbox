@@ -9,8 +9,6 @@ here is an admin, and a second class of human would be a role by another name. T
 asymmetry is arithmetic — the list cannot become empty.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 
 import pytest

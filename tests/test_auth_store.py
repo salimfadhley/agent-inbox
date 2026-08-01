@@ -7,8 +7,6 @@ must fail),
 because that atomicity is the whole reason they are single statements.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 from typing import Any
 

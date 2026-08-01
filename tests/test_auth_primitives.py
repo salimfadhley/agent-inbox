@@ -6,8 +6,6 @@ A test that only shows the happy path would let a broken constant-time compare o
 no-op encryptor pass.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from agent_inbox.auth import secrets, totp

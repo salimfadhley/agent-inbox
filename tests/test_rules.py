@@ -5,8 +5,6 @@ literals in, decisions out. That is the point of the split: the rules that have 
 most in production are the ones that can now be checked by reading.
 """
 
-from __future__ import annotations
-
 from agent_inbox.records import ActorRecord, ObjectRecord
 from agent_inbox.rules import (
     EVERYONE,

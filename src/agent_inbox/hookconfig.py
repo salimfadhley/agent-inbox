@@ -7,8 +7,6 @@ entries and, on uninstall, removing *only* ours (identified by the ``wake-check`
 command). Re-install is idempotent (it strips ours first), and the write is atomic.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

@@ -1,7 +1,5 @@
 """Names: canonical form, adjudication, and even distribution (M1, FR-002/FR-003)."""
 
-from __future__ import annotations
-
 from collections import Counter
 
 import pytest

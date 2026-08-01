@@ -18,8 +18,6 @@ until somebody is in a hurry.
 search that filtered on file extension. It has none.
 """
 
-from __future__ import annotations
-
 import re
 import tomllib
 from pathlib import Path

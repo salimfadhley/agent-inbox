@@ -9,8 +9,6 @@ fail the suite on any machine without a daemon. It exits non-zero on failure so 
 run it as its own job when we want that.
 """
 
-from __future__ import annotations
-
 import json
 import sys
 import urllib.error

@@ -5,8 +5,6 @@ a hub with no name of its own, and that the descriptor stops claiming `federates
 when it is switched on.
 """
 
-from __future__ import annotations
-
 import pytest
 from litestar.testing import TestClient
 

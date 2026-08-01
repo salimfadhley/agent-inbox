@@ -6,8 +6,6 @@ the check silently becomes "not a command" and every agent reinstalls unconditio
 harmless the first time, wrong as a diagnosis, and invisible without this test.
 """
 
-from __future__ import annotations
-
 import io
 import json
 from pathlib import Path

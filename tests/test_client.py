@@ -5,8 +5,6 @@ so the tests lean on those: a value with a quote and a backslash must round-trip
 and writing one engine must not evict another.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 

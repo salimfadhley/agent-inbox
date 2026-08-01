@@ -8,8 +8,6 @@ fail. A test that asserts "the untrusted peer was not delivered to" is worthless
 nothing was ever delivered to anybody.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

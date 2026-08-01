@@ -5,8 +5,6 @@ AS2 goes in and out intact, that errors become honest statuses, and that no mess
 decision has quietly migrated up into this layer.
 """
 
-from __future__ import annotations
-
 import ast
 import contextlib
 import urllib.parse

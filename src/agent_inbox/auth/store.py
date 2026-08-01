@@ -14,8 +14,6 @@ read-then-write in Python a second connection could interleave with:
 * **revoking a token** — the same shape, so a token is refused from the next request on.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Protocol, Self, runtime_checkable

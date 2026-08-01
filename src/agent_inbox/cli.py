@@ -20,8 +20,6 @@ only on Windows) and it is now a base dependency rather than a client-only one, 
 the hub's own entry point runs through this module.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import sys

@@ -4,8 +4,6 @@ A harness that delivers regardless of addressing would make every later test pas
 the wrong reason, so the important test here is the one where nothing arrives.
 """
 
-from __future__ import annotations
-
 import contextlib
 
 import pytest
