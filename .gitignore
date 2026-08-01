@@ -77,3 +77,6 @@ doc/prompt/
 
 # Runtime lock for the wake waiter — one per project, never committed.
 .agent-mailbox-wake.lock
+
+# graphify builds a knowledge graph here; generated, and large
+graphify-out/

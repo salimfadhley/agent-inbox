@@ -6,7 +6,7 @@ Generated: 2026-07-22T21:09:38Z · Refreshed: 2026-07-24 (ActivityStreams re-pla
 
 ## Testing Standards
 
-- pytest only (never unittest), plain test functions, fixtures for shared setup. Tests live in /tests mirroring the source layout. The superseded package (`agent-mailbox-old/` at the repository root) is **excluded from the gates** — it is historical reference and will be deleted; spending gate time validating code we are removing is waste.
+- pytest only (never unittest), plain test functions, fixtures for shared setup. Tests live in /tests mirroring the source layout. (The superseded package `agent-mailbox-old/` was deleted on 2026-08-01, the new system having shipped and been deployed; it remains in git history if it is ever wanted.)
 
 - The store is a single SQLite file, so the whole suite (including end-to-end round-trips) runs against a temp-file database with **no external services and no gating** — it runs in normal CI. Prefer end-to-end coverage over heavy mocking. No fixed coverage floor is mandated for this POC-stage project.
 
@@ -59,7 +59,7 @@ template_set: software-dev-default
 
 - Deployment Constraints: Releasable via PyPI (Trusted Publishing / OIDC on `v*` tags) and as a multi-arch Docker image on Docker Hub (GHCR mirror). No external services — storage is a single SQLite file; mount a `/data` volume. No secrets in the repo. **Deploys are frozen until the new system is ready.**
 
-- Naming & consistency: the project is **agent-inbox** (package `agent_inbox`, command `agent-inbox`, env `AGENT_INBOX_*`, config `agent-inbox.toml`). That is the PyPI project name and has been throughout; the import package, console script and environment prefix were brought into line in v0.25.0 (owner's direction: "we need to be consistently called agent-inbox"). **Back-compat is deliberate and supported**, because the old names are baked into live deployments and into config files already written into other people's repositories: `agent_mailbox` remains as an alias package resolving to the same module objects, the `agent-mailbox` console script still runs, and `AGENT_MAILBOX_*` and `agent-mailbox.toml` are honoured as fallbacks. `agent-mail` is history and carries no alias. The superseded implementation lives at `agent-mailbox-old/` at the repository root as historical reference only, excluded from the gates, and is deleted once the new system is green.
+- Naming & consistency: the project is **agent-inbox** (package `agent_inbox`, command `agent-inbox`, env `AGENT_INBOX_*`, config `agent-inbox.toml`). That is the PyPI project name and has been throughout; the import package, console script and environment prefix were brought into line in v0.25.0 (owner's direction: "we need to be consistently called agent-inbox"). **Back-compat is deliberate and supported**, because the old names are baked into live deployments and into config files already written into other people's repositories: `agent_mailbox` remains as an alias package resolving to the same module objects, the `agent-mailbox` console script still runs, and `AGENT_MAILBOX_*` and `agent-mailbox.toml` are honoured as fallbacks. `agent-mail` is history and carries no alias. The superseded implementation was deleted on 2026-08-01 — the new system is green, shipped and deployed — and lives on only in git history.
 
 
 ## Project Directives

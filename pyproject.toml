@@ -88,7 +88,7 @@ source = "vcs"
 packages = ["src/agent_inbox", "src/agent_mailbox"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "doc", "README.md", "LICENSE"]  # not agent-mailbox-old
+include = ["src", "tests", "doc", "README.md", "LICENSE"]
 
 [dependency-groups]
 dev = [
@@ -109,10 +109,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-# The superseded implementation is kept for reference only and is deleted once the new
-# system is green; linting code we are removing is waste (charter: Testing Standards).
 exclude = [
-    "agent-mailbox-old",
     # One-off build script, kept for provenance of the checked-in name pool. It is
     # never imported, never shipped, and depends on libraries we removed.
     "tools",
@@ -123,7 +120,6 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pyright]
 include = ["src"]
-exclude = ["agent-mailbox-old"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venvPath = "."
