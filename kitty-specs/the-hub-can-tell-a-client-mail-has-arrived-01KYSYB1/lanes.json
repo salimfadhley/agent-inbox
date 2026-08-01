@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "mission_slug": "the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1",
+  "mission_id": "01KYSYB1Z1AQ10BRB4Z4JT2X4A",
+  "mission_branch": "kitty/mission-the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1",
+  "target_branch": "main",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01"
+      ],
+      "write_scope": [
+        "src/agent_inbox/api.py",
+        "src/agent_inbox/house.py",
+        "src/agent_inbox/notify.py",
+        "tests/test_events_stream.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_inbox/client.py",
+        "src/agent_inbox/mcp_client.py",
+        "tests/test_events_client.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "lane_id": "lane-c",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        "doc/**",
+        "src/agent_inbox/interrupt.py",
+        "src/agent_inbox/prompts.py",
+        "tests/test_interrupt_policy.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-b"
+      ],
+      "parallel_group": 2
+    }
+  ],
+  "computed_at": "2026-08-01T20:59:19.620345+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": []
+}
