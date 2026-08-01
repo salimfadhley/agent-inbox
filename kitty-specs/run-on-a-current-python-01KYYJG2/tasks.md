@@ -2,6 +2,10 @@
 
 **Mission**: `run-on-a-current-python-01KYYJG2` · **Spec**: [spec.md](spec.md) · **Plan**: [plan.md](plan.md)
 **Branch**: `kitty/mission-current-python` · **Supersedes**: issue #13
+**Status: complete.** Shipped in two releases, both proved running on both hubs —
+**v0.35.0** (the floor: WP01 + WP03, one unit because the charter requires it) and
+**v0.36.0** (WP02, the annotation removal). T008 was pulled forward into the first ship,
+because the floor move is what exposed the failure it deals with.
 
 **The charter was amended first, on `main` (2026-08-01, commit `6393e2b`)** — it now says the
 floor is 3.14 and the ambition is the latest Python. That was the mission's blocking
@@ -48,10 +52,10 @@ ownership reasons, not because either half is shippable alone.
 semantics rather than 3.12's.
 **Independent test**: `uv sync` on a machine with only 3.12 available refuses, naming 3.14.
 
-- [ ] T001 `requires-python` and the trove classifiers (WP01)
-- [ ] T002 ruff `target-version` and pyright `pythonVersion` (WP01)
-- [ ] T003 Re-run the four gates at 3.14 semantics and triage pyright (WP01)
-- [ ] T004 Regenerate the lock with the same dependency set (WP01)
+- [x] T001 `requires-python` and the trove classifiers (WP01)
+- [x] T002 ruff `target-version` and pyright `pythonVersion` (WP01)
+- [x] T003 Re-run the four gates at 3.14 semantics and triage pyright (WP01)
+- [x] T004 Regenerate the lock with the same dependency set (WP01)
 
 **Risks**: T003 is the only step whose size is genuinely unknown. Phase 0 saw pyright report
 zero errors — but it was still configured as 3.12, so that number proves nothing about T002's
@@ -66,11 +70,11 @@ change behaviour, the 3.14-only failure is explained rather than tolerated, and 
 model has reviewed the result.
 **Independent test**: the full suite runs ten times consecutively without a failure.
 
-- [ ] T005 Remove `from __future__ import annotations` — all 90 files (WP02)
-- [ ] T006 Prove the removal changed no behaviour (WP02)
-- [ ] T007 The grep proof, as a test (WP02)
-- [ ] T008 Characterise and settle the intermittent `UnicodeDecodeError` (WP02) [P]
-- [ ] T009 Directive 4 — outside model review before the mission closes (WP02)
+- [x] T005 Remove `from __future__ import annotations` — all 90 files (WP02)
+- [x] T006 Prove the removal changed no behaviour (WP02)
+- [x] T007 The grep proof, as a test (WP02)
+- [x] T008 Characterise and settle the intermittent `UnicodeDecodeError` (WP02) [P]
+- [x] T009 Directive 4 — outside model review before the mission closes (WP02)
 
 **T006 exists because the plan was wrong to call T005 mechanical.** `from __future__ import
 annotations` is PEP 563 — it stringifies annotations. PEP 649 hands over real objects.
@@ -91,10 +95,10 @@ any runtime behaviour in a codebase that hands annotated types to litestar and m
 rather than assumed.
 **Independent test**: `docker run` the built image and the four gates pass inside it.
 
-- [ ] T010 Both `Dockerfile` stages move to `python:3.14-slim` (WP03) [P]
-- [ ] T011 The gates pass **inside** the container (WP03)
-- [ ] T012 Collapse the CI matrix to 3.14 alone (WP03) [P]
-- [ ] T013 README, CONTRIBUTING, `.kittify/metadata.yaml` (WP03) [P]
+- [x] T010 Both `Dockerfile` stages move to `python:3.14-slim` (WP03) [P]
+- [x] T011 The gates pass **inside** the container (WP03)
+- [x] T012 Collapse the CI matrix to 3.14 alone (WP03) [P]
+- [x] T013 README, CONTRIBUTING, `.kittify/metadata.yaml` (WP03) [P]
 
 **Risks**: T010 has two `FROM` lines — build and runtime — and changing only one produces an
 image that builds on 3.14 and runs on 3.12. T011 is what catches that, and it is not
