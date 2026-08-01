@@ -31,14 +31,34 @@ charter
 
 ## Charter Check
 
-**One conflict, and it must be resolved before implementation rather than during it.**
+**Resolved 2026-08-01, before implementation and outside this mission** (`main`, commit
+`6393e2b`).
 
-`.kittify/charter/charter.md:50` states the stack as **"Python 3.12+ only"**. FR-001
-contradicts that line directly. The charter is non-negotiable inside a mission, so this
-cannot be settled by an implementer editing `pyproject.toml` and moving on — it needs an
-explicit charter amendment, which is a separate act.
+The charter previously stated the stack as "Python 3.12+ only", which FR-001 contradicted
+directly. It now says the floor is **3.14+** and that **the ambition is to run the latest
+Python** — falling behind is a defect to fix, not a state to maintain — together with the
+matching rule for libraries: do not knowingly adopt or hold an old version.
 
-**This is the mission's real gate.** Everything else here is mechanical.
+**The amendment was deliberately not made inside this mission.** A mission that resolves a
+charter conflict by editing the charter is a mission where the charter stopped governing
+anything. So there is no charter subtask; the mission now implements a policy that already
+exists.
+
+Three things had to be corrected to make the amendment stick, and they are worth knowing
+because the second one is a trap for anyone amending the charter again:
+
+- `interview/answers.yaml` still described the **pre-rebuild system** — a NATS JetStream
+  mailbox called `agent-mail`, published to GHCR. `charter.md` had been hand-refreshed three
+  times since; that file never was.
+- The charter's own Amendment Process said *"edit answers.yaml, regenerate, commit"* — which
+  would have **rebuilt the charter from a description of a system deleted in July**. It now
+  says what is actually done: `charter.md` is the source, edit it, run `charter sync`, and do
+  not regenerate.
+- The library list named **pydantic and pydantic-settings**, which this project does not
+  depend on and never imports, and Directive 1 told implementers to configure through a
+  pydantic-settings object that does not exist. Config is a frozen dataclass over the
+  `AGENT_INBOX_*` prefix (`hub_settings`). litestar, msgspec, argon2-cffi, cryptography,
+  pyotp and segno were all missing from the list.
 
 Otherwise:
 
@@ -56,12 +76,14 @@ project's own `.venv` was never touched.
 
 ### FR-006 is already satisfied, and this was the mission's biggest assumed risk
 
-The spec named dependency wheels as the thing most likely to bite: "litestar, pydantic,
-aiosqlite, cryptography, mcp/FastMCP, pyotp. Native builds are where this bites."
+The spec named dependency wheels as the thing most likely to bite: "litestar, msgspec,
+aiosqlite, cryptography, argon2-cffi, mcp/FastMCP, pyotp. Native builds are where this
+bites."
 
 **They do not bite.** The full dev + `clients` + `ui` set resolved and installed on 3.14.2
 with **no pinned exception and no source build failure**. `cryptography`, `msgspec`,
-`argon2-cffi` and `pydantic-core` — the four with native code — all had wheels.
+`argon2-cffi` and `pydantic-core` (transitive, via mcp) — the four with native code — all had
+wheels.
 
 This removes the main reason the mission was scheduled as "unhurried". It is smaller than
 it looked.
@@ -157,9 +179,20 @@ This is a consequence of the spec rather than a new decision, but it is worth st
 because "update the version in CI" and "delete the matrix" are different edits and only one
 of them is right.
 
-### `from __future__ import annotations` — all or none
+### `from __future__ import annotations` — all or none, and not a no-op
 
-90 of 92 files carry it. Under PEP 649 it is the default in 3.14, so every one is dead.
+90 of 92 files carry it. Under PEP 649 the behaviour it requests is the default in 3.14.
+
+**Correction to an earlier draft of this plan, which called the removal "mechanical".** It is
+not. `from __future__ import annotations` is **PEP 563** — it stringifies annotations. PEP 649
+gives back real objects, lazily. Removing the import changes what `__annotations__` yields at
+runtime, and this project hands annotated types to **litestar, msgspec, click and mcp**, all
+of which introspect them. Usually that is an improvement; occasionally it is a behaviour
+change, most often around forward references and `TYPE_CHECKING`-only imports.
+
+**Phase 0 does not cover this.** The 961/18 baseline below was measured with the imports still
+in place. It proves the interpreter move and says nothing about the removal, which is why
+WP02 carries a separate proof (T006).
 
 The removal is mechanical and must be complete in a single change. FR-004 is explicit and
 the reason bears repeating: a codebase where some modules opt in and others rely on the
@@ -181,18 +214,19 @@ They deserve their own mission. They do not deserve to make this one hard to rev
 
 ## Work, in order
 
-1. **Amend the charter.** `Python 3.12+ only` → `3.14+`. Nothing else may start first,
-   because everything else contradicts the charter until this lands.
-2. **The floor.** `pyproject.toml`: `requires-python`, classifiers, ruff `target-version`,
+0. **Amend the charter** — *done, outside this mission*. See Charter Check.
+1. **The floor.** `pyproject.toml`: `requires-python`, classifiers, ruff `target-version`,
    pyright `pythonVersion`. Then run the four gates and deal with whatever pyright says at
    3.14 semantics — this is the step with real, unpredictable work in it.
-3. **`from __future__ import annotations`, all 90 files**, with the grep proof.
-4. **CI and the image.** Collapse the matrix to 3.14; both `Dockerfile` stages; prove the
+2. **`from __future__ import annotations`, all 90 files**, with the grep proof.
+3. **CI and the image.** Collapse the matrix to 3.14; both `Dockerfile` stages; prove the
    gates inside the container (FR-003).
-5. **The words.** README, CONTRIBUTING, `.kittify/metadata.yaml`, and any doc stating a
+4. **The words.** README, CONTRIBUTING, `.kittify/metadata.yaml`, and any doc stating a
    version.
-6. **The intermittent failure.** Characterise it, then fix or upstream it. Not first —
+5. **The intermittent failure.** Characterise it, then fix or upstream it. Not first —
    nothing else waits on it — but this mission does not close with it unexplained.
+6. **The Directive 4 review**, with one narrow question. The obvious one is the annotation
+   question above, which is this mission's only genuine unknown.
 
 ## What could still go wrong
 

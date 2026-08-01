@@ -45,7 +45,7 @@ Not a general feature list — the things that touch code we have.
 
 | Risk | Why |
 |---|---|
-| **Dependency wheels** | litestar, pydantic, aiosqlite, cryptography, mcp/FastMCP, pyotp. Native builds are where this bites. |
+| **Dependency wheels** | litestar, msgspec, aiosqlite, cryptography, argon2-cffi, mcp/FastMCP, pyotp. Native builds are where this bites. |
 | **PEP 594 removals** | 3.13 removed the "dead batteries" modules. Unlikely to touch us, must be checked rather than assumed. |
 | **PEP 765** (3.14) | `return`/`break`/`continue` in a `finally` block is now a syntax warning. Cheap to grep for. |
 | **pyright** | A new interpreter changes what it infers. Expect churn, and treat any new complaint as a real finding rather than noise to silence. |
@@ -55,7 +55,7 @@ Not a general feature list — the things that touch code we have.
 
 | ID | Requirement | Status |
 |---|---|---|
-| **FR-001** | The floor becomes `>=3.14`, in `pyproject.toml` and everywhere else that states a version. | Draft |
+| **FR-001** | The floor becomes `>=3.14`, in `pyproject.toml` and everywhere else that states a version. | Draft — the charter was amended to match on 2026-08-01 (`main`, `6393e2b`), so this no longer conflicts with it |
 | **FR-002** | CI runs the four gates on 3.14. | Draft |
 | **FR-003** | The published Docker image runs 3.14, and the gates pass inside it. | Draft |
 | **FR-004** | `from __future__ import annotations` is removed where PEP 649 makes it redundant — completely, not partially. A codebase half-migrated is worse than either state, because the next reader cannot tell which convention applies. | Draft |
@@ -79,18 +79,20 @@ two conventions in one codebase.
 
 ## Open questions
 
-Both product questions are now decided. One check remains, and it is mine rather than the
-operator's.
+All three are now decided. Nothing here is waiting on anyone.
 
 1. **~~Which version?~~ Decided 2026-08-01: 3.14.** Finished, two patch releases behind it, and
    the version that carries PEP 649 — the only change here with a real payoff. 3.15 was
    rejected for one specific reason rather than a vague one: a `.0` is where dependency wheels
-   are missing and native builds fail, and this project depends on cryptography, pydantic and
-   litestar. Revisit at 3.15.2.
+   are missing and native builds fail, and this project depends on cryptography, msgspec and
+   argon2-cffi. Revisit at 3.15.2.
 2. **~~Free-threaded build?~~ Decided 2026-08-01: explicitly out of scope**, and recorded so it
    is not re-argued each release. See below.
-3. **Is anything actually pinned to 3.12?** Still to check — a task for the plan, not a
-   decision for anyone.
+3. **~~Is anything actually pinned to 3.12?~~ Answered 2026-08-01: no.** Checked
+   exhaustively during Phase 0 — see the table in `plan.md`. Every occurrence of the version
+   is a *declaration* (pyproject, Dockerfile, CI, README, CONTRIBUTING, the charter,
+   `.kittify/metadata.yaml`); none is a *constraint*. No code branches on the version and no
+   dependency caps it.
 
 ## Free-threading: ruled out, and why
 
