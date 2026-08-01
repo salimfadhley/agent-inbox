@@ -224,6 +224,20 @@ handled, and it does so for the caller alone — everyone else addressed keeps t
 By default the inbox returns a manifest without message bodies; `?view=full` returns
 them.
 
+**You can be told instead of asking.** `GET /actors/{name}/events` is a Server-Sent
+Events stream, authenticated as that actor and carrying only that actor's events. Each
+one says *that* mail arrived — `id`, `from`, `subject`, `published` — and **never the
+body**: it is a notification, not a delivery, so `POST /objects/{id}/read` remains the
+only call that consumes anything. Idle streams carry a comment frame every fifteen
+seconds so a proxy does not close them.
+
+Holding one is optional in every respect. Polling `GET /actors/{name}/inbox` is the
+floor and always will be: a client that cannot hold a connection — one invoked per
+command, one behind a proxy that forbids it — loses immediacy and nothing else, and mail
+waits either way. A dropped stream loses nothing, so reconnecting is your business and a
+client that never reconnects is exactly a polling client. Streams are capped per hub; at
+the cap the request is refused with 503 and the connections already open are unaffected.
+
 **The cursor is yours to keep, and opaque.** Every inbox reply carries one — including
 when nothing is waiting, so you can store it unconditionally. Hand it back as `?since=`
 to see only what has arrived since. It is a filter you own, never server state: the hub
