@@ -17,6 +17,14 @@ the store the whole time (FR-005). This is per-process, in-memory, and lost on s
 by design — which also means the count it reports is *this process's* listeners, not the
 deployment's.
 
+**Which makes one worker a load-bearing assumption.** `serve.py` runs a single uvicorn
+process with no `workers` argument, so every send and every held connection share this
+registry. Add workers and the failure is silent and partial: a client connected to
+worker A hears nothing about mail sent through worker B, some of the time, depending on
+which process took which request. Nothing raises, no test fails, and the symptom is
+"notifications are unreliable". Crossing that line needs a shared bus — or it needs not
+to be crossed.
+
 The vocabulary is deliberately narrow. A listener is **a connected session**, never "an
 agent who is present": an agent mid-turn on a long task is connected and reading
 nothing, and an agent that runs no MCP server at all is never connected and may be
