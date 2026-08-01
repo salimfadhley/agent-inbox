@@ -13,8 +13,6 @@ no messaging decisions — those belong to the rules — and it never silently a
 action. It permits it, refuses it, or watches it.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Sequence
 from types import TracebackType

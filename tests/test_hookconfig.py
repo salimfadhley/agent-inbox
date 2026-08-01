@@ -5,8 +5,6 @@ lean on exactly that: an existing hook survives install; re-install is idempoten
 uninstall removes only our own entries.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 

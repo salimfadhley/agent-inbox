@@ -4,8 +4,6 @@ Every agent meets the mailbox through this text, so a sentence that is wrong her
 wrong in more places than a sentence that is wrong anywhere else.
 """
 
-from __future__ import annotations
-
 from agent_inbox.prompts import onboarding
 
 

@@ -6,8 +6,6 @@ and importable — which is exactly why an accidental dependency on it would be 
 introduce and invisible until the old package is deleted.
 """
 
-from __future__ import annotations
-
 import pkgutil
 from importlib.metadata import version
 from pathlib import Path

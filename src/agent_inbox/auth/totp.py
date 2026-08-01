@@ -13,8 +13,6 @@ Recovery codes are minted here (they are the second-factor fallback) but
 *hashing* them is the store's job — this module only produces the plaintext.
 """
 
-from __future__ import annotations
-
 import pyotp
 import segno
 

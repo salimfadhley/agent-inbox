@@ -10,8 +10,6 @@ The clock is injected (like the mailbox's) so every time-dependent path —
 session expiry, the TOTP window — is deterministic in tests.
 """
 
-from __future__ import annotations
-
 import hmac
 import logging
 from collections.abc import Callable

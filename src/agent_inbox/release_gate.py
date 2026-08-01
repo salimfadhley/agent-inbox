@@ -8,8 +8,6 @@ agents use can install the exact released version. This module is intentionally 
 and stdlib-only so release workflows can gate both questions.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import logging

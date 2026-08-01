@@ -16,8 +16,6 @@ the thin, totally fail-silent I/O wrapper — a wake must never break, block, or
 turn.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import sys

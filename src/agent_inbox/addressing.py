@@ -21,8 +21,6 @@ nowhere: an agent learns immediately, and delivery later turns a clear error int
 delivery rather than changing what silence meant.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from agent_inbox.exceptions import MalformedAddress, RemoteMailbox

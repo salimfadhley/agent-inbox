@@ -13,8 +13,6 @@ transport that delivered to whoever was listening would make every policy test p
 the wrong reason — the failure mode this file exists to avoid.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
 from litestar.testing import TestClient

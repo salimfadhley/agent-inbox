@@ -15,8 +15,6 @@ do *not* do is pretend it is safe. It hands anyone who can read the environment 
 administrator's session with no second factor — that is the feature, not a defect.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 

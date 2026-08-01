@@ -14,8 +14,6 @@ cannot be got between and the send. A check in the caller would have to be remem
 which is exactly how the finding arose.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 

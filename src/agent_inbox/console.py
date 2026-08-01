@@ -21,8 +21,6 @@ Deliberately plain. An operator wants to see what is happening at a glance; a st
 and a handful of tables do that, and there is nothing to build or install.
 """
 
-from __future__ import annotations
-
 import html
 import json
 import os

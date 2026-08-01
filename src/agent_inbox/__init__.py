@@ -16,8 +16,6 @@ This package is written from scratch. The superseded implementation is kept at
 green; nothing here may import from it.
 """
 
-from __future__ import annotations
-
 from importlib.metadata import PackageNotFoundError, version
 
 try:

@@ -21,8 +21,6 @@ and a warning on every import of a working program is a cost with no action atta
 the prompt and the documentation already say which name is current.
 """
 
-from __future__ import annotations
-
 import importlib
 import importlib.abc
 import importlib.machinery

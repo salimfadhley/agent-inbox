@@ -13,8 +13,6 @@ The text is a function of the hub's address so the commands can be pasted as the
 rather than leaving a placeholder for someone to fill in wrongly.
 """
 
-from __future__ import annotations
-
 #: The oldest client that still holds the contract below — **not** the newest release.
 #:
 #: Tying the floor to the hub's own version was wrong twice over. It demanded an upgrade

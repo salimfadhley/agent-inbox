@@ -12,8 +12,6 @@ the old one is the guard `api.py` relies on to avoid "a silent success, which is
 worst failure shape we have".
 """
 
-from __future__ import annotations
-
 from agent_inbox.delivery import NOT_DURABLE, Receipt, Sent
 from agent_inbox.records import ObjectRecord
 

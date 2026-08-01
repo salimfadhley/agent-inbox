@@ -17,8 +17,6 @@ Authorisation is a different matter and is already enforced underneath, so the
 visibility rules hold however the caller was identified.
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import logging

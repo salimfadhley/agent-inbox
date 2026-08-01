@@ -18,8 +18,6 @@ is exactly the case that switch exists for.
 The charter allows this: real sockets, but no external services and no gating.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import socket

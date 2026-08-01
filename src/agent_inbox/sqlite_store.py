@@ -21,8 +21,6 @@ SQLite decides both, atomically, rather than a read-then-write in Python that a 
 connection could interleave with.
 """
 
-from __future__ import annotations
-
 import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path

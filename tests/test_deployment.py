@@ -14,8 +14,6 @@ are
 right and also passes when they are wrong is the thing being replaced.
 """
 
-from __future__ import annotations
-
 import json
 import threading
 from collections.abc import Iterator

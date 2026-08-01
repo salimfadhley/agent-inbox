@@ -5,8 +5,6 @@ The rejection tests assert on **the recipient's mailbox**, not the status code.
 anyway is exactly the failure that ordering exists to prevent.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 from typing import Any

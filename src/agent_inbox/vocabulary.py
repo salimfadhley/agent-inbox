@@ -12,8 +12,6 @@ called ``parent`` (``inReplyTo``), an opaque identity we called an assigned name
 Signatures.
 """
 
-from __future__ import annotations
-
 from enum import StrEnum
 from typing import Final
 

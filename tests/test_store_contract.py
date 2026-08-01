@@ -11,8 +11,6 @@ verbs on it.
 architecture that is only written down erodes; this one fails a test instead.
 """
 
-from __future__ import annotations
-
 import ast
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager

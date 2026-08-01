@@ -5,8 +5,6 @@ it and `serve` imports the API — so putting it there would be a cycle. It is a
 honest home: this is hub state, not server startup.
 """
 
-from __future__ import annotations
-
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass

@@ -13,8 +13,6 @@ The hub is stubbed in-process so the pages render without a network. The stub re
 which client methods were called, which is how the no-impersonation property is checked.
 """
 
-from __future__ import annotations
-
 import html
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta

@@ -22,8 +22,6 @@ Given and family names are drawn **independently**, so most names cross traditio
 ``rosemary_nasrin``, ``trevor_mahmood``. That is deliberate.
 """
 
-from __future__ import annotations
-
 from typing import Final
 
 #: tradition -> (given names, family names). Traditions are weighted equally.

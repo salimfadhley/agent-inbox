@@ -5,8 +5,6 @@ signature over a fresh date is the whole hole, so the tests are mostly attempts 
 a second way to succeed.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 
 import pytest

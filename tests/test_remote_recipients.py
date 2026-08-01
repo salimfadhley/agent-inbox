@@ -11,8 +11,6 @@ enough to assert one at a time, and it is the only way to assert that a request 
 **not attempted**.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 
 import pytest

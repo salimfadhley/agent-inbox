@@ -9,8 +9,6 @@ treated as text that will be shown to an operator, never as markup or instructio
 is charter directive 7's second bullet arriving over HTTP rather than in a message.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import time

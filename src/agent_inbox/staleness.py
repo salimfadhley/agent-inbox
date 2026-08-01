@@ -20,8 +20,6 @@ And it is the more useful comparison anyway: what matters is not whether a newer
 exists somewhere, but whether *this hub* speaks something this client does not.
 """
 
-from __future__ import annotations
-
 import re
 
 from agent_inbox import __version__

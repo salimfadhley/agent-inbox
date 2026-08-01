@@ -4,8 +4,6 @@ A peer's descriptor is untrusted input from a machine we have not verified. Most
 these tests are about what we refuse to do with it.
 """
 
-from __future__ import annotations
-
 import json
 import threading
 import time

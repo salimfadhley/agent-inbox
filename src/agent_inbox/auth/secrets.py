@@ -15,8 +15,6 @@ Three kinds of secret, three treatments, and the difference is the point:
 No storage, no I/O, no globals. The key is always an explicit argument.
 """
 
-from __future__ import annotations
-
 import hashlib
 import hmac
 import secrets as _secrets
@@ -31,7 +29,6 @@ _hasher = PasswordHasher()
 
 #: Bytes of entropy for a generated token. 32 bytes → ~43 url-safe chars, ~256 bits.
 _TOKEN_BYTES = 32
-
 
 # -- passwords -------------------------------------------------------------
 

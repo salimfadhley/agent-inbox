@@ -10,8 +10,6 @@ username, a wrong password, and a wrong second factor alike. Distinguishing them
 would tell an attacker which half they got right (FR-017).
 """
 
-from __future__ import annotations
-
 
 class AuthError(Exception):
     """Base for everything the auth layer raises. ``code`` is machine-readable."""

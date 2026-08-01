@@ -9,8 +9,6 @@ reason the port is a protocol rather than a bag of functions, and their atomicit
 asserted in a docstring everywhere else. Here it is demonstrated.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 from pathlib import Path

@@ -7,8 +7,6 @@ comparison anyway: what matters is whether *this hub* speaks something this clie
 not, rather than whether a newer release exists somewhere.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from agent_inbox import __version__, staleness

@@ -20,8 +20,6 @@ A test that *wants* an engine marker sets one with `monkeypatch.setenv`, which r
 after this and works exactly as before.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 
 import pytest

@@ -17,8 +17,6 @@ kept for storage. One extra line at the boundary, and the thing most likely to
 break, hence its own test (ADR 0006, ADR 0009).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import msgspec

@@ -6,8 +6,6 @@ that matter: SessionStart surfaces everything; the others surface only what's ne
 uses exit 2; announce-once holds; bodies are never emitted; the wrapper fails silent.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import time

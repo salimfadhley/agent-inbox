@@ -9,8 +9,6 @@ hostnames in the repo). Everything else has a sensible default so a bare `docker
 works.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from dataclasses import dataclass

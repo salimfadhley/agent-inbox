@@ -9,8 +9,6 @@ The load-bearing properties:
 - the engine never learns about auth — a structural test forbids the import both ways.
 """
 
-from __future__ import annotations
-
 import ast
 from collections.abc import Iterator
 from pathlib import Path
