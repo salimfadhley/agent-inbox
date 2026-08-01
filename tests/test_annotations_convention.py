@@ -83,10 +83,6 @@ def test_no_module_defers_annotations_by_hand() -> None:
     sorted(
         info.name
         for info in pkgutil.walk_packages(agent_inbox.__path__, prefix="agent_inbox.")
-        # The MCP server and its client live behind the `clients` extra, which the hub
-        # image deliberately omits (ADR 0009). Importing them here would fail on a
-        # perfectly valid install rather than find a real problem.
-        if "mcp" not in info.name
     ),
 )
 def test_every_annotation_can_be_resolved(module_name: str) -> None:
@@ -95,8 +91,25 @@ def test_every_annotation_can_be_resolved(module_name: str) -> None:
     This is what a `TYPE_CHECKING`-only import breaks under PEP 649, and it breaks it
     silently — the module imports, the tests pass, and the failure waits for whatever
     first asks a class what its arguments are.
+
+    Only objects this module *defines* are checked. That is not a shortcut, it is the
+    correct boundary twice over: another module's objects are covered by its own case,
+    and an over-broad sweep walks into third-party callables. An outside review found
+    that specific trap — introspecting everything registered on the Litestar app reaches
+    Litestar's own generated OPTIONS and OpenAPI handlers, whose annotations name
+    framework-internal types like `Scope` and `FromPath` that do not resolve from here.
+    That would be a failing test about somebody else's code.
     """
-    module = import_module(module_name)
+    try:
+        module = import_module(module_name)
+    except ImportError as exc:
+        # The MCP server and client live behind the `clients` extra, which the hub image
+        # deliberately omits (ADR 0009). They are checked when the extra is present —
+        # dev and CI both install it — and skipped when it is not, rather than excluded
+        # by name. The exclusion used to be unconditional, which left the largest
+        # annotation surface in the project untested against exactly the failure this
+        # module exists to catch.
+        pytest.skip(f"{module_name} needs an optional extra: {exc}")
     unresolvable: list[str] = []
     for name, obj in vars(module).items():
         if getattr(obj, "__module__", None) != module_name:
