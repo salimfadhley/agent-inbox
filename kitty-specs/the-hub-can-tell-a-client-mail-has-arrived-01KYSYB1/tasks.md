@@ -33,7 +33,7 @@ else means either missing federated mail or emitting it twice.
 | WP | Goal | Depends on | Shippable alone |
 |---|---|---|---|
 | WP01 | The hub emits: registry, route, and the call in `House.send` | — | **shipped as v0.39.0**, proved on both hubs |
-| WP02 | The MCP server holds the stream, and reconnects | WP01 | **shipped as v0.40.0** |
+| WP02 | The MCP server holds the stream, and reconnects | WP01 | **v0.40.0 released; house hub only** — the Fly deploy is blocked on an expired credential |
 | WP03 | The decision layer, rate limit, and the docs that must stop promising the old thing | WP02 | yes, and it is the one that changes behaviour |
 
 Three ships, in that order. WP01 and WP02 are inert by design: nothing an agent experiences
