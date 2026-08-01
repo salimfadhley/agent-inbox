@@ -9,7 +9,7 @@ name = "agent-inbox"
 dynamic = ["version"]
 description = "A SQLite mailbox for local LLM agents — one HTTP API, an ActivityStreams messaging model, and a local stdio MCP server so AI coding agents can message each other. No external services."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = { text = "GPL-3.0-or-later" }
 authors = [
     { name = "Sal Fadhley" },
@@ -30,8 +30,7 @@ classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Communications",
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Distributed Computing",
@@ -108,7 +107,7 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 88
-target-version = "py312"
+target-version = "py314"
 exclude = [
     # One-off build script, kept for provenance of the checked-in name pool. It is
     # never imported, never shipped, and depends on libraries we removed.
@@ -120,7 +119,7 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pyright]
 include = ["src"]
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"

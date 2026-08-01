@@ -52,7 +52,7 @@ def note_hub_version(hub_version: str | None) -> None:
         return
     try:
         theirs, ours = _comparable(hub_version), _comparable(__version__)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return
     if theirs and ours and theirs > ours:
         _behind = (__version__, hub_version)
@@ -103,7 +103,7 @@ def standing(hub_version: str | None) -> str | None:
         return None
     try:
         theirs, ours = _comparable(hub_version), _comparable(__version__)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not theirs or not ours:
         return None
