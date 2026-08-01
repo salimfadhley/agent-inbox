@@ -33,7 +33,7 @@ else means either missing federated mail or emitting it twice.
 | WP | Goal | Depends on | Shippable alone |
 |---|---|---|---|
 | WP01 | The hub emits: registry, route, and the call in `House.send` | — | **shipped as v0.39.0**, proved on both hubs |
-| WP02 | The MCP server holds the stream, and reconnects | WP01 | yes — hearing without acting on it |
+| WP02 | The MCP server holds the stream, and reconnects | WP01 | **shipped as v0.40.0** |
 | WP03 | The decision layer, rate limit, and the docs that must stop promising the old thing | WP02 | yes, and it is the one that changes behaviour |
 
 Three ships, in that order. WP01 and WP02 are inert by design: nothing an agent experiences
@@ -98,10 +98,10 @@ client at once.
 **Independent test**: start an MCP server, restart the hub, confirm the stream comes back
 without either process spinning.
 
-- [ ] T009 `HubClient` can consume the stream (WP02)
-- [ ] T010 The MCP server holds it, with backoff that survives a hub restart (WP02)
-- [ ] T011 Tests: a drop loses nothing, two clients same identity, reconnect (WP02)
-- [ ] T012 Directive 4 — outside model review before WP02 closes (WP02)
+- [x] T009 `HubClient` can consume the stream (WP02)
+- [x] T010 The MCP server holds it, with backoff that survives a hub restart (WP02)
+- [x] T011 Tests: a drop loses nothing, two clients same identity, reconnect (WP02)
+- [x] T012 Directive 4 — outside model review before WP02 closes (WP02)
 
 **Risks**: the reconnect storm is real and is in the plan for a reason — every client
 disconnects at the same instant on every release, which is several times a day here. Backoff

@@ -11,13 +11,19 @@ Being local is also what makes push possible later — a hosted server can only 
 whereas a process on the agent's machine can interrupt the session it serves.
 """
 
+import asyncio
 import json
 import logging
+import random
+import time
 import tomllib
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+import httpx
 from anyio.to_thread import run_sync
 from mcp.server.fastmcp import FastMCP
 
@@ -29,6 +35,7 @@ from agent_inbox.client import (
     Config,
     HubClient,
     NotConfigured,
+    SseParser,
     detect_engine,
     find_config,
     load_config,
@@ -168,7 +175,23 @@ def _instructions() -> str:
 
 logger = logging.getLogger("agent_inbox.mcp")
 
-mcp = FastMCP("agent-inbox", instructions=_instructions())
+
+@asynccontextmanager
+async def _lifespan(_server: FastMCP) -> AsyncIterator[None]:
+    """The server's life, so that what it starts it also stops.
+
+    Nothing is started here: which identity to listen as is unknown until the client
+    declares its roots, which happens after this. The teardown is the whole point —
+    `_start_listening` creates a task from a tool call, and something has to own its
+    end.
+    """
+    try:
+        yield
+    finally:
+        await _stop_listening()
+
+
+mcp = FastMCP("agent-inbox", instructions=_instructions(), lifespan=_lifespan)
 
 
 async def _resolve_project() -> None:
@@ -316,6 +339,10 @@ async def _guard(call: Any) -> Any:
     with it the very session we need for roots.
     """
     await _resolve_project()
+    # Now, and not earlier: this is the first moment we know which project — and so
+    # which identity — this server is serving. It starts a task and returns immediately,
+    # so a hub that is unreachable costs this call nothing.
+    _start_listening()
     try:
         # Imported by name: `import anyio` does not bind the submodule, and it only
         # resolved before because mcp happens to import it. Relying on another
@@ -347,6 +374,184 @@ async def _guard(call: Any) -> Any:
                 "a loop — check again next turn."
             )
         return result
+
+
+# -- being told, instead of asking ---------------------------------------------------
+#
+# This process is the only client with a lifetime long enough to hold anything open: the
+# CLI is invoked per command and exits, while this lives as long as the agent's session,
+# which is the thing that would want waking. The connection goes *outward* for a reason
+# that is not preference — an agent's machine may be the far side of NAT, so a hub
+# cannot open a connection to it and there is no address it could rely on if it tried.
+#
+# Consequence, stated plainly: no session, no connection, no wake. That is correct,
+# since there is nobody to interrupt — but it means the hub's connection count measures
+# running sessions and never "agents that exist".
+#
+# **Nothing an agent experiences changes here.** Hearing that mail arrived and deciding
+# to interrupt somebody about it are separate acts, and the second is not this work
+# package's. Arrivals go to `_on_arrival`, which does nothing until something fills it.
+
+#: The first backoff, and the ceiling. Small enough that an ordinary hub restart is
+#: invisible, capped so a hub down for an hour is not asked sixty times a minute.
+_RECONNECT_FIRST = 1.0
+_RECONNECT_CAP = 60.0
+
+#: How long we will wait to *connect*, and how long a held stream may be silent. The
+#: second is `None` on purpose: a stream is silent precisely when there is no mail,
+#: which is most of the time, and any read timeout would make quiet mailboxes reconnect
+#: for ever. The hub's keep-alive is what proves the connection is still alive.
+_CONNECT_TIMEOUT = 10.0
+
+#: How long a connection has to last before it counts as having worked, and so before
+#: the backoff starts again from the shortest delay. Two keep-alive intervals: long
+#: enough that a stream which was accepted and dropped does not qualify, short enough
+#: that an ordinary hub restart is followed by a prompt reconnection.
+_SETTLED_AFTER = 30.0
+
+#: Statuses that will never come good by being asked again within this process's life.
+#: A hub too old to have the route will not grow one; a credential this process holds
+#: will not become valid by repetition. Retrying either is a loop that costs the hub
+#: something and the agent nothing.
+_FINAL_STATUSES = frozenset({401, 403, 404, 405})
+
+
+#: What to do about an arrival. A seam, not a feature: the decision layer that will fill
+#: it in is deliberately a separate piece of work, because *whether* to interrupt an
+#: agent is a decision with its own rules and its own proof.
+def _ignore(_arrival: dict[str, Any]) -> None:
+    """The default: hearing about mail changes nothing until a decision layer exists."""
+
+
+_on_arrival: Callable[[dict[str, Any]], None] = _ignore
+
+_listening: asyncio.Task[None] | None = None
+
+
+def reconnect_delay(
+    attempt: int, *, rand: Callable[[], float] = random.random
+) -> float:
+    """How long to wait before the next attempt. Exponential, capped, fully jittered.
+
+    **The jitter is the part that matters**, and it is the part usually left out. This
+    hub is redeployed several times a day, and every release drops every connected
+    client in the same instant. Without jitter they all wait one second, all reconnect
+    together, and the hub's first act on coming up is to serve a thundering herd it
+    created itself — repeatedly, since a herd that fails together retries together.
+
+    Full jitter (uniform between zero and the ceiling) rather than a small wobble around
+    it: it spreads a simultaneous disconnect across the whole window, and the cost — an
+    occasional short wait — is a client reconnecting sooner than it strictly had to.
+    """
+    ceiling = min(_RECONNECT_CAP, _RECONNECT_FIRST * (2**attempt))
+    return ceiling * rand()
+
+
+async def _hold_the_stream(client: HubClient) -> None:
+    """Hold the hub's event stream open for as long as this process lives.
+
+    Every failure here is silent. A hub that is down, a hub too old to have the route, a
+    laptop with no network: each of those is a client that behaves exactly as it did
+    before this existed, polling as it always has. None of them is something to bother
+    an agent with, and an error surfaced into a session would be worse than the missing
+    immediacy it reports.
+    """
+    url, headers = client.events_url(), client.stream_headers()
+    attempt = 0
+    while True:
+        opened_at: float | None = None
+        try:
+            timeout = httpx.Timeout(_CONNECT_TIMEOUT, read=None)
+            async with (
+                httpx.AsyncClient(timeout=timeout) as http,
+                http.stream("GET", url, headers=headers) as response,
+            ):
+                if response.status_code in _FINAL_STATUSES:
+                    logger.info(
+                        "the hub will not stream events to us (%d); polling as before",
+                        response.status_code,
+                    )
+                    return
+                response.raise_for_status()
+                opened_at = time.monotonic()
+                logger.info("listening for mail on %s", url)
+                parser = SseParser()
+                async for chunk in response.aiter_text():
+                    for event in parser.feed(chunk):
+                        _deliver(event.event, event.data)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a lost stream is never the agent's problem
+            logger.info("event stream ended (%s); will reconnect", exc)
+        # Start over from the shortest delay only if the connection *lasted*. An earlier
+        # version reset as soon as one was accepted, which an outside review caught: a
+        # hub that accepts and immediately drops — a proxy answering 200 and closing, a
+        # server crashing on its first write — then reconnects about twice a second for
+        # ever, with the backoff reset each time and nothing in any log to say so. The
+        # client looks healthy while hammering something that is not.
+        if opened_at is not None and time.monotonic() - opened_at >= _SETTLED_AFTER:
+            attempt = 0
+        await asyncio.sleep(reconnect_delay(attempt))
+        attempt += 1
+
+
+def _deliver(event: str, data: str) -> None:
+    """Hand one arrival on, and never let the handler break the stream.
+
+    Wrapped because whatever fills `_on_arrival` will eventually be a decision layer
+    with configuration, rate limits and a wake adapter behind it — none of which should
+    be able to end the connection by raising. A stream that dies because a wake failed
+    is a client that then hears about nothing at all.
+    """
+    if event != "mail":
+        return  # an event type this version does not know; ignored, not an error
+    try:
+        _on_arrival(json.loads(data))
+    except Exception:  # noqa: BLE001 - the stream outlives any one handler
+        logger.exception("an arrival handler failed; the stream is unaffected")
+
+
+def _start_listening() -> None:
+    """Start holding the stream, at most once, and never at the cost of a tool call.
+
+    Started here rather than at process start because until the client has told us its
+    roots we do not know which project we are in, and therefore not which identity we
+    are. Guessing would mean holding the wrong agent's stream, which is worse than
+    holding none.
+    """
+    global _listening
+    if _listening is not None and not _listening.done():
+        return
+    try:
+        client = _client()
+    except NotConfigured:
+        return  # nothing to listen as; the tool call itself will say so
+    except Exception:  # noqa: BLE001 - never break a tool call by trying to listen
+        logger.exception("could not work out who to listen as")
+        return
+    _listening = asyncio.create_task(_hold_the_stream(client))
+
+
+async def _stop_listening() -> None:
+    """Let go of the stream when the server is asked to stop.
+
+    Without this the task is still pending when the loop closes, which produces a
+    "Task was destroyed but it is pending" warning on stderr — and an MCP server's
+    stderr is its client's log, so the noise lands somewhere a human will eventually
+    have to explain. Worse, a task mid-reconnect could hold the process open past the
+    point where the agent's session has gone.
+
+    A `finally`, not an `except`: the server stopping is the ordinary case, not a
+    failure, and a listener that only shut down cleanly on the happy path would leak on
+    exactly the exits that matter.
+    """
+    global _listening
+    task, _listening = _listening, None
+    if task is None or task.done():
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 def _summarise(note: dict[str, Any]) -> dict[str, Any]:

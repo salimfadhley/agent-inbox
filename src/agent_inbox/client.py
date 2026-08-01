@@ -659,7 +659,14 @@ class HubClient:
     """One hub, over HTTP.
 
     Deliberately uses the standard library. A client that an agent installs should not
-    drag a dependency tree behind it, and this is a dozen requests with no streaming.
+    drag a dependency tree behind it, and this is a couple of dozen small requests.
+
+    It does not hold the event stream, and that is not an oversight: every call here is
+    request-and-answer, while a stream is held for as long as a session lasts. The two
+    have different lifetimes and belong in different places. What this offers instead is
+    :meth:`events_url` and :meth:`stream_headers` — the address and the credential,
+    worked out exactly once, so that whatever *does* hold the connection cannot
+    authenticate differently from the rest of the client.
     """
 
     def __init__(
@@ -716,6 +723,27 @@ class HubClient:
         if not session:
             return self
         return HubClient(self.config, self.timeout, session=session)
+
+    # -- the event stream --------------------------------------------------
+
+    def events_url(self) -> str:
+        """Where this identity's event stream lives."""
+        return f"{self.config.base}/actors/{self.config.name}/events"
+
+    def stream_headers(self) -> dict[str, str]:
+        """The same credentials every other call sends, for a caller that is not us.
+
+        Duplicated auth is how a stream ends up working on an open hub and refused on an
+        authenticated one, months apart from the change that caused it. One place
+        decides what a request from this client looks like, and holding a connection
+        open does not make it a different client.
+        """
+        headers = {"Accept": "text/event-stream", IDENTITY_HEADER: self.config.name}
+        if self.config.token:
+            headers["Authorization"] = f"Bearer {self.config.token}"
+        if self.session:
+            headers["Cookie"] = f"{SESSION_COOKIE}={self.session}"
+        return headers
 
     # -- plumbing ----------------------------------------------------------
 
@@ -977,3 +1005,88 @@ class HubClient:
 def _leaf(value: str) -> str:
     """Accept a full object URI or a bare id — an agent will have either."""
     return value.rstrip("/").rsplit("/", 1)[-1]
+
+
+# -- the event stream ------------------------------------------------------------
+#
+# A hub can hold a connection open and say when mail arrives, so a client need not ask
+# repeatedly. Two pieces live here: the framing, which is pure and testable without a
+# socket, and the two details a caller needs to open the connection at all. What holds
+# the connection is *not* here — that is the MCP server, which is the only client
+# process with a lifetime long enough (see `mcp_client`).
+
+
+@dataclass(frozen=True, slots=True)
+class SseEvent:
+    """One complete server-sent event: its name, its payload, and its id.
+
+    The wire is the contract, deliberately. Decoding `data` into some client-side type
+    here would put a second definition of the event next to the hub's, and the two would
+    drift the first time a field was added.
+    """
+
+    event: str
+    data: str
+    id: str | None = None
+
+
+class SseParser:
+    """Server-sent event framing, fed a chunk at a time.
+
+    Incremental because the transport is: a read returns whatever arrived, which may be
+    half a line, several events, or a keep-alive comment on its own. A parser that
+    assumed one event per read would mis-frame the first time a packet split, which is
+    exactly the case nobody tests by hand.
+
+    The details that a naive `for line in response` gets wrong, and that this handles:
+
+      * **comments** — a line beginning with `:` carries no event. Idle hubs send one
+      every fifteen seconds to stop a proxy closing the connection, so this is the
+      *most* common line on a quiet stream, not an edge case;
+    * **multi-line data** — successive `data:` lines are one payload joined by newlines,
+      not several events;
+    * **the blank line** — which is what dispatches an event. Fields accumulate until
+      then, so an event split across two reads still arrives whole;
+    * **`\\r\\n`**, which is what the hub actually sends.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._data: list[str] = []
+        self._event = "message"
+        self._id: str | None = None
+
+    def feed(self, chunk: str) -> list[SseEvent]:
+        """Everything that became complete because of this chunk. Often nothing."""
+        self._buffer += chunk
+        events: list[SseEvent] = []
+        while "\n" in self._buffer:
+            line, _, self._buffer = self._buffer.partition("\n")
+            done = self._line(line.rstrip("\r"))
+            if done is not None:
+                events.append(done)
+        return events
+
+    def _line(self, line: str) -> SseEvent | None:
+        if line.startswith(":"):
+            return None  # a comment; the keep-alive arrives as one
+        if not line:
+            if not self._data:
+                # A blank line with nothing accumulated dispatches nothing. Two in a row
+                # are legal and mean nothing happened.
+                self._event, self._id = "message", None
+                return None
+            event = SseEvent(self._event, "\n".join(self._data), self._id)
+            self._data, self._event, self._id = [], "message", None
+            return event
+        field, _, value = line.partition(":")
+        value = value[1:] if value.startswith(" ") else value
+        if field == "data":
+            self._data.append(value)
+        elif field == "event":
+            self._event = value
+        elif field == "id":
+            self._id = value
+        # Any other field is ignored rather than refused, which is what the format asks
+        # for and what lets the hub add one without breaking a client that predates it.
+        return None
