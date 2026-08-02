@@ -10,8 +10,8 @@ environment prefix (`AGENT_INBOX_`).
 
 It was not always. The project was `agent-mail`, then `agent-inbox` with a package,
 command, config file and env prefix that all still said `agent-mailbox`, and this section
-used to exist to explain the mismatch. Finishing it is [issue
-#1](https://github.com/salimfadhley/agent-inbox/issues/1).
+used to exist to explain the mismatch. That was finished in v0.25.0 —
+[issue #1](https://github.com/salimfadhley/agent-inbox/issues/1) is closed.
 
 **The old names still work, and that is deliberate.** Nothing already installed or
 already joined may break because we renamed our own things:
@@ -40,9 +40,24 @@ The points that shape this codebase:
   `__init__.py`.
 - **Specific exceptions.** A project hierarchy lives in
   [`src/agent_inbox/exceptions.py`](src/agent_inbox/exceptions.py), based on
-  `MailboxError`. Throw the most specific type; catch narrowly. `except Exception:` only
-  at process boundaries — the wake hook and the purge loop are the deliberate examples,
-  and both say why in a comment.
+  `MailboxError`. Throw the most specific type; catch narrowly.
+
+  `except Exception:` is permitted **at a boundary where the alternative is worse than
+  the failure**, and nowhere else (charter, revised 2026-08-03). Four such boundaries:
+  process entry (CLI main, HTTP handler — always logged); fail-silent client surfaces,
+  where raising would damage something not ours to damage (the wake hook runs on every
+  turn of somebody's session; a lost event stream "is never the agent's problem"); the
+  best-effort work that follows a durable act (announcing an arrival already stored,
+  closing a socket, writing a watermark); and reading anything a human or another system
+  wrote (config, a policy file, a stored key, a signature), where malformed input is an
+  expected state.
+
+  Two rules hold at all four. **The comment says why**, naming what would otherwise
+  break — the `# noqa: BLE001 - …` lines are the model. And **it fails towards silence
+  or refusal, never towards permission**: swallowing an error to grant access, deliver a
+  message, or trust a sender is not covered and never will be. Anywhere else, catch the
+  specific exception — a broad catch around ordinary logic is a bug hidden from the
+  person who could have fixed it.
 - **Logging, not `print`.** Module loggers (`logging.getLogger(__name__)`). CLI
   user-facing output uses `click.echo`, and also logs.
 - **Two configuration surfaces, and they are not the same thing.**
@@ -56,7 +71,49 @@ The points that shape this codebase:
 - **pytest** in `/tests`; **ruff** for lint+format; **pyright** for types; **uv** for
   everything.
 
-Project-specific overrides to the baseline, if any, are recorded here. (None today.)
+Project-specific overrides to the baseline are recorded here. One today: the broadened
+`except Exception:` boundaries above, which the charter's Exception Policy sets out in
+full and which exist because a fail-silent client surface is a real boundary that the
+original two-item list did not name.
+
+## Python, and staying current
+
+**Python 3.14+ only**, managed exclusively with uv (`uv sync`, `uv run`, `uv add`).
+
+**The ambition is to run the latest Python** (owner, 2026-08-01), not the version we once
+chose. This ships its own interpreter; it owes nobody multi-version support, and an old
+floor buys nothing but old language. **Falling behind is a defect to fix, not a state to
+maintain.** The floor moves as one change — `requires-python`, the classifiers, ruff's
+`target-version`, pyright's `pythonVersion`, both `Dockerfile` stages and CI, or none of
+them.
+
+Adopt a release once it is *finished* — patch releases behind it and the whole dependency
+set resolving unpinned — not on the day it lands. A `.0` is where wheels are missing and
+native builds break, and this depends on cryptography, msgspec and argon2-cffi. That is a
+timing rule, not an excuse: "not yet" needs a named blocker. CI runs **one** version,
+because a matrix on an application tests a configuration nobody ships.
+
+**The same rule governs libraries: do not knowingly adopt or hold an old version.** A
+version cap added to work around a break is debt with an owner and a removal condition,
+never a resting place. There are none in `pyproject.toml` today; keep it that way.
+
+## Ship early, ship often
+
+**The unit of work is a thing that reaches the running hubs, not a thing that passes
+locally** (owner, 2026-08-01). A work package that passes its four gates and its outside
+review is released and deployed before the next one starts — not batched, not held for a
+milestone, not left on a branch.
+
+**"Shipped" means running on both hubs and proved.** A tag is not shipped; a green
+release workflow is not shipped. `agent-inbox verify-deployment` must assert that each
+target reports the released version. Three deploys have reported success over a hub that
+was down or five releases behind, and one hub silently sat five releases behind for
+weeks — which is why this is written down rather than assumed.
+
+**The unit that ships is whatever is coherent when running**, which is not always one
+work package. Where a change is only correct in pieces that land together, those pieces
+are one ship; splitting them produces a deployment that is broken and green on every
+gate.
 
 ## Quality gates
 
@@ -130,6 +187,14 @@ So: before a test asserts, make it prove that the thing it is examining is actua
 there. A regression test is not believable until you have watched it fail with its own
 fix removed.
 
+**Actually run the removal proof.** Delete the guard, watch the test fail, restore it,
+watch it pass — and check the *paired positive* still passes, so you have not merely
+proved that breaking things breaks things. Both halves have caught real mistakes here: a
+console test that exercised a helper rather than the rendered page could not tell a
+working guard from a missing call, and a fallback test passed with the fallback deleted
+because its fixture signalled an arrival the real case could never produce. Both were
+green, and both were worthless until the proof was run.
+
 ## Working in a shared worktree
 
 More than one agent may be working in this repository at the same time.
@@ -152,6 +217,17 @@ More than one agent may be working in this repository at the same time.
 - **Tooling commits too.** `spec-kitty specify` auto-commits its mission metadata to the
   current branch. Any command that writes to git is subject to the rule above, whether or
   not you typed `git`.
+- **`spec-kitty` will refuse to commit planning artifacts, and that is expected.**
+  `spec-commit` and `finalize-tasks` treat a primary branch as protected and direct the
+  work onto a feature branch; there is no setting to change it. We do not take that
+  direction — trunk-based is the charter's choice and it is working. Let them refuse,
+  keep what they *did* do (frontmatter normalisation, lane computation, `lanes.json`),
+  and commit `spec.md`, `plan.md` and `tasks.md` by hand. **This is a standing exception**
+  (charter, 2026-08-03); it had been hit on six missions before anyone wrote it down.
+- **`main` carries no branch protection on GitHub**, so nothing external stops a red
+  commit landing. The four gates are enforced by *running them before you push*. CI is
+  the second opinion, not the gate; an agent that pushes and then checks has the order
+  wrong.
 - Dirty files outside your lane are someone's active work until proven otherwise.
   Identify the likely owner and message them rather than assuming.
 - Never format the whole tree while another agent owns dirty source files.
