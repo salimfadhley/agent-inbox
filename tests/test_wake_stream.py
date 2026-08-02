@@ -286,3 +286,176 @@ class TestReconnecting:
             time.sleep(0.005)
         stream.close()
         assert conn.closed, "the connection outlived the reader"
+
+
+# -- WP02: the waiter's loop, sleeping on the stream ------------------------
+
+#: The streaming interval, shrunk for the tests. The loop's deadline is wall-clock, so
+#: a test that used the real sixty seconds would take a real ten minutes to prove the
+#: interval is bounded. Shrinking the constant keeps the *shape* — several bounded
+#: sleeps rather than one long one — which is the thing being asserted.
+#:
+#: `BASE` is the unstreamed interval and sits on `_wait_for_wake`'s own floor of
+#: 0.1s, so a test asking for less does not silently get the floor instead.
+TICK = 0.2
+BASE = 0.1
+
+
+class FakeStream:
+    """A stream the loop can be driven against, with no thread and no connection.
+
+    `_wait_for_wake` asks it for exactly three things — start, a sleeper, and close —
+    so supplying those three shows the loop's real behaviour and nothing else's.
+    """
+
+    def __init__(self, *, connected: bool = True, arrives_after: int | None = None):
+        self.connected = connected
+        #: Sleep number on which mail "arrives", cutting the sleep short. `None` never.
+        self.arrives_after = arrives_after
+        self.sleeps: list[float] = []
+        self.started = False
+        self.closed = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def wait(self, seconds: float) -> None:
+        """Sleeps for real, unless an arrival cuts it short — as the real one does."""
+        self.sleeps.append(seconds)
+        if self.arrives_after is not None and len(self.sleeps) >= self.arrives_after:
+            return
+        time.sleep(seconds)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _drive(monkeypatch, tmp_path, stream, unread, **kw) -> int:
+    """Run one wait against a supplied stream and a scripted sequence of inboxes."""
+    from agent_inbox import wake
+
+    queue = list(unread)
+
+    def fetch_unread(root):
+        return queue.pop(0) if queue else []
+
+    monkeypatch.setattr(wake, "_fetch_unread", fetch_unread)
+    monkeypatch.setattr(wake, "_stream_for", lambda root: stream)
+    monkeypatch.setattr(wake, "STREAMING_POLL_INTERVAL", TICK)
+    return wake.run(
+        "Stop",
+        root=tmp_path,
+        wait=True,
+        poll_interval=kw.pop("poll_interval", BASE),
+        wait_timeout=kw.pop("wait_timeout", 10.0),
+        sleep=kw.pop("sleep", lambda _s: None),
+    )
+
+
+def _msg(mid: str) -> dict[str, object]:
+    return {"id": mid, "attributedTo": "jed_smith", "summary": "flaky tests"}
+
+
+class TestTheWaiterSleepsOnTheStream:
+    """FR-002, FR-007, NFR-001."""
+
+    def test_an_arrival_reaches_the_wake_by_the_ordinary_path(
+        self, monkeypatch, tmp_path, capsys
+    ) -> None:
+        """The stream shortens the sleep; `wake_response` still decides what is said."""
+        stream = FakeStream(arrives_after=1)
+        code = _drive(monkeypatch, tmp_path, stream, [[], [_msg("a")]])
+
+        assert code == 2, "the arrival did not become a wake"
+        assert stream.sleeps == [TICK], "the loop did not sleep on the stream"
+        assert "flaky tests" in capsys.readouterr().err
+
+    def test_the_stream_is_started_and_closed(self, monkeypatch, tmp_path) -> None:
+        stream = FakeStream(arrives_after=1)
+        _drive(monkeypatch, tmp_path, stream, [[], [_msg("a")]])
+        assert stream.started and stream.closed
+
+    def test_it_is_closed_on_a_timeout_too(self, monkeypatch, tmp_path) -> None:
+        stream = FakeStream()
+        _drive(monkeypatch, tmp_path, stream, [[]], wait_timeout=0.0)
+        assert stream.closed, "a wait that woke nobody still leaked its connection"
+
+
+class TestTheIntervalIsBounded:
+    """FR-006, NFR-002 — and T010's removal proof."""
+
+    def test_it_lengthens_while_the_stream_is_connected(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        stream = FakeStream(connected=True, arrives_after=1)
+        _drive(monkeypatch, tmp_path, stream, [[], [_msg("a")]], poll_interval=BASE)
+        assert stream.sleeps == [TICK], "a held stream did not lengthen the poll"
+
+    def test_it_stays_at_todays_value_when_nothing_is_connected(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """A hub with no event route must not get a *slower* wake than it has today."""
+        stream = FakeStream(connected=False)  # never signals: there is no stream
+        _drive(monkeypatch, tmp_path, stream, [[], [_msg("a")]], poll_interval=BASE)
+        assert stream.sleeps == [BASE], "an unstreamed wait was slowed down"
+
+    def test_a_connected_but_silent_stream_is_still_polled(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """**T010's removal proof.** A proxy that buffers gives a stream that is open,
+        looks healthy, and delivers nothing. Only the poll underneath catches it.
+
+        Remove the bound — make the interval `remaining` — and this drops to a single
+        sleep spanning the whole wait, so mail that arrived in minute two is announced
+        in hour eight. That is the failure this asserts against.
+        """
+        stream = FakeStream(connected=True)
+        _drive(monkeypatch, tmp_path, stream, [], wait_timeout=TICK * 6)
+
+        assert len(stream.sleeps) > 1, "the whole wait was spent in one sleep"
+        assert max(stream.sleeps) <= TICK, "the interval is unbounded"
+
+
+class TestPollingIsStillTheFloor:
+    """FR-004, NFR-003 — T009's removal proof."""
+
+    def test_a_hub_with_no_event_route_still_wakes(
+        self, monkeypatch, tmp_path, capsys
+    ) -> None:
+        """**T009's removal proof.** A hub too old for the route never connects, so
+        nothing will ever shorten a sleep. The poll is the only thing that wakes it.
+
+        Delete the poll — leave the loop waiting on the stream alone — and this stops
+        waking at all, which is what proves the fallback under test is the fallback.
+        """
+        # It must never signal. A fake that pretends to would make this pass on the
+        # strength of the arrival rather than the poll — which is exactly what the
+        # removal proof caught the first time this test was written.
+        stream = FakeStream(connected=False)
+        code = _drive(monkeypatch, tmp_path, stream, [[], [_msg("a")]])
+
+        assert code == 2, "an unstreamed hub stopped waking"
+        # And woke *at the unstreamed interval*, not eventually. Without this second
+        # assertion the test passes even with the poll removed, because a single sleep
+        # spanning the whole wait still ends in a poll — eight hours late. Waking late
+        # enough is not waking.
+        assert stream.sleeps == [BASE], "it woke, but only after the whole wait"
+        assert "flaky tests" in capsys.readouterr().err
+
+    def test_no_stream_at_all_is_todays_behaviour(
+        self, monkeypatch, tmp_path, capsys
+    ) -> None:
+        """`_stream_for` returning `None` — unconfigured, unreadable, anything."""
+        sleeps: list[float] = []
+        code = _drive(
+            monkeypatch,
+            tmp_path,
+            None,
+            [[], [_msg("a")]],
+            poll_interval=BASE,
+            sleep=sleeps.append,
+        )
+
+        assert code == 2
+        assert sleeps == [BASE], "without a stream the injected sleeper must be used"
+        assert "flaky tests" in capsys.readouterr().err

@@ -126,6 +126,27 @@ audit. Candidates, pick the sharpest:
 - can a stream that connects and immediately drops produce a reconnect spin, given the
   settle logic was reused rather than the loop?
 
+**Done, 2026-08-02.** Asked all three interleavings at once. The verdict: *no durable
+arrival is lost by the threading; the SSE hint can be, and degrades into polling
+latency.* Specifically —
+
+- **(a) the flag races.** An arrival landing between `_run_once` returning and `wait`
+  being called is not lost: `Event.wait` returns at once. One landing between `wait`
+  returning and the `clear` could be cleared unobserved — which cost nothing, because
+  the caller polls immediately afterwards and the hub only announces mail it has already
+  stored. Tightened anyway: `wait` now clears only when it observed the flag set, so the
+  window is closed rather than merely harmless.
+- **(b) a blocked reader at exit.** The thread can genuinely stay stuck in `readline`
+  when closing the response does not interrupt the read — the code says so — but it
+  cannot hold the process open, because it is a daemon and `close` joins with a bound.
+  Confirmed rather than changed.
+- **(c) a stale `connected`.** Reachable: a half-open socket leaves the flag set while
+  nothing is being delivered, so the long interval is chosen when it should not be. **It
+  is bounded, and that is the point** — this is precisely the case FR-006 and T010's
+  removal proof exist for. The poll underneath still catches the mail.
+
+Nothing here needed fixing beyond (a), which was taken because it was free.
+
 ## Definition of done
 
 - An arrival wakes the loop without waiting out the interval, proved with a fake stream.

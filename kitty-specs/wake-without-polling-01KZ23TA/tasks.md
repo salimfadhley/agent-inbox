@@ -71,12 +71,12 @@ interval and a closed connection at the end. Nothing else about it moves.
 **Independent test**: an arrival on a fake stream wakes the loop without waiting out the
 interval; with no stream, the loop is byte-for-byte today's behaviour.
 
-- [ ] T006 The loop sleeps on the reader, and the reader is closed (WP02)
-- [ ] T007 The interval lengthens, and stays bounded (WP02)
-- [ ] T008 The existing wake tests pass unmodified (WP02)
-- [ ] T009 Removal proof for FR-004: delete the poll, an old hub stops waking (WP02)
-- [ ] T010 Removal proof for FR-006: unbound the interval, a silent stream stops waking (WP02)
-- [ ] T011 Directive 4 — outside model review before the mission closes (WP02)
+- [x] T006 The loop sleeps on the reader, and the reader is closed (WP02)
+- [x] T007 The interval lengthens, and stays bounded (WP02)
+- [x] T008 The existing wake tests pass unmodified (WP02)
+- [x] T009 Removal proof for FR-004: delete the poll, an old hub stops waking (WP02)
+- [x] T010 Removal proof for FR-006: unbound the interval, a silent stream stops waking (WP02)
+- [x] T011 Directive 4 — outside model review before the mission closes (WP02)
 
 **Sketch**: start the reader after the lock is taken, hand its `wait` in as the sleeper,
 close it in the `finally` that already releases the lock.

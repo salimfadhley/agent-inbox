@@ -213,9 +213,15 @@ class ArrivalStream:
 
         Signature and behaviour of `time.sleep` when nothing arrives, which is what lets
         it be substituted for one.
+
+        **Cleared only when it was actually observed set.** Clearing unconditionally
+        would drop an arrival that landed in the instant between the timeout returning
+        and the clear — harmless today, because the caller polls immediately afterwards
+        and the hub only announces mail it has already stored, but it would be a real
+        lost wake the moment anything came to rely on the flag alone.
         """
-        self._arrived.wait(seconds)
-        self._arrived.clear()
+        if self._arrived.wait(seconds):
+            self._arrived.clear()
 
     @property
     def connected(self) -> bool:
@@ -419,6 +425,34 @@ def _single_waiter(root: Path, *, max_age: float) -> Iterator[bool]:
             _release_lock(path)
 
 
+def _stream_for(root: Path) -> ArrivalStream | None:
+    """The stream for this project's identity, or `None` if we cannot have one.
+
+    Unconfigured, unreadable, or anything else at all: the answer is `None` and the
+    waiter polls. Nothing here is worth failing a wait over.
+    """
+    try:
+        return ArrivalStream(HubClient(load_config(start=root), timeout=_TIMEOUT))
+    except Exception:  # noqa: BLE001 - no stream is a supported state, not an error
+        return None
+
+
+def _interval(poll_interval: float, stream: ArrivalStream | None) -> float:
+    """How long to sleep before polling again.
+
+    Longer while a connection is actually open, because the stream will interrupt the
+    sleep long before it elapses. Never *unbounded*, though (FR-006): a stream that
+    connected and then went silent — a proxy that buffers is the ordinary cause — is
+    indistinguishable from a healthy one here, and this poll is what catches it.
+
+    `max` rather than a plain substitution, so a caller that deliberately asked for a
+    longer interval keeps it.
+    """
+    if stream is not None and stream.connected:
+        return max(poll_interval, STREAMING_POLL_INTERVAL)
+    return poll_interval
+
+
 def _wait_for_wake(
     event: str,
     root: Path,
@@ -433,24 +467,40 @@ def _wait_for_wake(
     with _single_waiter(root, max_age=wait_timeout + 60.0) as acquired:
         if not acquired:
             return 0
-        while True:
-            try:
-                code = _run_once(event, root)
-            except Exception:  # noqa: BLE001 - a blip must not end an 8-hour wait
-                # The one-shot hook may fail silently and be retried next turn. A
-                # waiter has no next turn: it *is* the thing keeping an idle session
-                # reachable, so dying here means no wake until a human intervenes, with
-                # nothing said. The hub being briefly unreachable is the normal case —
-                # it is restarted on every deploy — so treat it as "nothing waiting"
-                # and poll again. A permanently dead hub costs one request per
-                # interval and recovers by itself the moment it returns.
-                code = 0
-            if code != 0:
-                return code
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return 0
-            sleep(min(poll_interval, remaining))
+        # After the lock, never before: the lock is what keeps this to one waiter per
+        # project, and connecting first would open a stream only to discover somebody
+        # else already holds the project and close it again.
+        stream = _stream_for(root)
+        if stream is not None:
+            stream.start()
+            # The stream's `wait` *is* a sleeper — it sleeps, unless mail arrives. That
+            # is the whole change: the loop below is unaltered, and the arrival reaches
+            # `_run_once` by exactly the path a timed-out sleep takes.
+            sleep = stream.wait
+        try:
+            while True:
+                try:
+                    code = _run_once(event, root)
+                except Exception:  # noqa: BLE001 - a blip must not end an 8-hour wait
+                    # The one-shot hook may fail silently and be retried next turn. A
+                    # waiter has no next turn: it *is* the thing keeping an idle session
+                    # reachable, so dying here means no wake until a human intervenes,
+                    # with nothing said. The hub being briefly unreachable is the normal
+                    # case — it is restarted on every deploy — so treat it as "nothing
+                    # waiting" and poll again. A permanently dead hub costs one request
+                    # per interval and recovers by itself the moment it returns.
+                    code = 0
+                if code != 0:
+                    return code
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return 0
+                sleep(min(_interval(poll_interval, stream), remaining))
+        finally:
+            # On a wake, on a timeout, and on anything raised: a hook that leaks a
+            # connection per turn is a hook that gets uninstalled.
+            if stream is not None:
+                stream.close()
 
 
 def run(
