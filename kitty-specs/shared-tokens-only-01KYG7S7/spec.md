@@ -53,7 +53,7 @@ Each row links to the section that states it in full, below.
 | **FR-010** | "Issued to" (a label the operator typed) and "admitted" (what we observed) are separate columns. A claim must never be shown where a finding appears to be. | Specified |
 | **FR-011** | The admitted history is **last use per agent per token**, overwritten in place — bounded by the number of agents, not by traffic. | Specified |
 | **FR-012** | The interrupt gate's guarantee is restated: a shared token proves the *machine*, not the agent. The check stays; the words and `doc/interrupting-an-agent.md` stop claiming more than it gives. | Specified |
-| **FR-013** | The mint screen hands over the **token and the prompt that contains it, together**, at the one moment the secret exists. No paste box, no lookup, no second chance. | Specified |
+| **FR-013** | The mint screen hands over the **token and a setup prompt containing it, together**, at the one moment the secret exists. The standing prompt stays generic and token-free — it is served to anyone. No paste box, no lookup, no second chance. | Specified |
 
 ### FR-001 — one Tokens screen, listing every token
 
@@ -271,8 +271,28 @@ without changing how tokens are stored.
 That constraint picks the design. The mint response is the *only* moment in a token's life
 when the secret and the hub's identity are both in hand, so it is the only place a
 ready-to-use prompt can be produced without a lookup. So the mint screen shows the secret
-and, beside it, the onboarding prompt with that token already in it — one copy, and the
+and, beside it, an onboarding prompt with that token already in it — one copy, and the
 agent's setup has no second step.
+
+**Two prompts, and they must stay two.** Settled 2026-08-02.
+
+| | Where | Carries a token |
+|---|---|---|
+| The **standing** prompt | the Prompt tab and `/prompts/{role}` | **Never** |
+| The **setup** prompt | the mint response, once | Yes — that one token |
+
+The standing prompt is generic and stays exactly as it is: install, connect, join, the
+habit. It is fetched by agents with `curl` and is on the console's `OPEN_PATHS`, which
+means **it is served to anyone who can reach the hub, signed in or not** — a page that
+earns its openness by holding nothing secret. Putting a credential in it would hand that
+credential to every anonymous visitor, and the openness is not incidental: an agent needs
+that page *before* it has any way to authenticate.
+
+The setup prompt is a different document with a different life. It says: install the CLI,
+set this token, join with it, and here is what it admits. It exists in one HTTP response
+and is never served again.
+
+Keeping them apart is what makes the openness of the first one safe to keep.
 
 Consequences, both accepted:
 
