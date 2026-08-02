@@ -24,6 +24,7 @@ and a handful of tables do that, and there is nothing to build or install.
 import html
 import json
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -367,17 +368,47 @@ def _needs_login(exc: Exception) -> bool:
     return "not_authenticated" in str(exc) or "enrolment_required" in str(exc)
 
 
+#: `scheme://user:password@` — the credential some urls carry, wherever it appears.
+_URL_CREDENTIAL = re.compile(r"(?<=://)[^/\s@]+@")
+
+
+def _no_credentials(text: str) -> str:
+    """Strip `user:password@` from every url in a string. Applied to *all* of it.
+
+    A url may legitimately carry a credential, and this error page renders **before
+    sign-in** on the login route — so anything printed here must be fit for a stranger
+    to read.
+
+    **Prose, not just the url field**, and that is the whole point of doing it here
+    rather than at the one place a url is printed. An outside review caught the first
+    version of this doing exactly half the job: the configured url was redacted where
+    the page names it, while `client.py` builds *"cannot reach the mailbox at
+    {config.base}: …"* and the page then printed that message intact. The credential
+    walked back in through the sentence next to the one it had been removed from.
+    """
+    return _URL_CREDENTIAL.sub("", text)
+
+
 def _err(
     exc: Exception,
     hub: dict[str, Any] | None,
     title: str,
     *,
+    api: str = "",
     signed_in: bool = False,
 ) -> Response:
     """Every screen either renders or explains — never a blank page.
 
     An operator staring at nothing cannot tell "hub down" from "nothing here", so a
     failure says which it was rather than falling through to an empty table.
+
+    **It names the hub it asked.** "The hub did not answer" is only useful to someone
+    who already knows which hub that was, and the console's whole job is to front one
+    that lives at a different address than itself — an operator looking at
+    `hub.stodge.org` is being told about `api.hub.stodge.org`, which is a distinction
+    they cannot make from the prose alone. Naming the URL also catches the commonest
+    misconfiguration of all, a console pointed at the wrong hub, which otherwise
+    presents as an unexplained refusal.
 
     A hub that refuses for want of a credential is not a fault to report but a door to
     open: on an enforcing hub *every* page fails this way until someone signs in, and
@@ -387,14 +418,30 @@ def _err(
     **Unless they are already signed in.** Then the refusal is about something else —
     a page acting as the console's own identity, which has no token of its own — and
     bouncing them to a login they have already passed reads as a random logout and
-    hides the real cause. Signed in, they get the message.
+    hides the real cause. Signed in, they get the message, and with it the door as a
+    *link* rather than as a redirect: an expired session looks exactly like this, and
+    the one thing that fixes it should not have to be found from the navigation.
     """
     if _needs_login(exc) and not signed_in:
         return Redirect("/login")
+    # Named to whoever is entitled to know. An operator needs the address to tell "the
+    # console is pointed at the wrong hub" from "the hub is down"; a stranger who has
+    # not signed in needs neither, and on a self-hosted deployment that address is
+    # often an internal hostname worth not advertising. So: the url to them, the plain
+    # noun to everyone else.
+    asked = html.escape(_no_credentials(api)) if api and signed_in else "The hub"
     body = (
-        '<p class="warn">The hub did not answer this request: '
-        f"{html.escape(str(exc))}</p>"
+        f'<p class="warn">{asked} did not answer this request: '
+        f"{html.escape(_no_credentials(str(exc)))}</p>"
     )
+    if _needs_login(exc):
+        # Reaching here means they are signed in, so "sign in" on its own would read
+        # as nonsense. Say which of the two things it is before offering the fix.
+        body += (
+            "<p>You are signed in, so this is the hub refusing a request the console "
+            "makes as <em>itself</em> rather than as you — or your session has since "
+            'expired. <a href="/login">Sign in again</a> to rule out the second.</p>'
+        )
     return Response(_page(title, body, hub), media_type=MediaType.HTML, status_code=502)
 
 
@@ -499,7 +546,13 @@ def build_console(client: HubClient) -> Litestar:
             stats = seen_by(request).survey()
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Overview", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Overview",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
 
         cards = "".join(
             f'<div class="card"><div class="n">{n}</div>'
@@ -585,7 +638,13 @@ def build_console(client: HubClient) -> Litestar:
         try:
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Agents", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Agents",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
         rows = []
         for a in actors:
             name = a.get("preferredUsername", "")
@@ -621,7 +680,13 @@ def build_console(client: HubClient) -> Litestar:
             items = seen_by(request).observe_mailbox(name).get("items", [])
             info = seen_by(request).whois(name)
         except ClientError as exc:
-            return _err(exc, hub, name, signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                name,
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
 
         rows = []
         for n in reversed(items):  # newest first for a reader
@@ -657,7 +722,13 @@ def build_console(client: HubClient) -> Litestar:
             turns = seen_by(request).observe_thread(object_id).get("items", [])
             detail = seen_by(request).observe_object(object_id)
         except ClientError as exc:
-            return _err(exc, hub, "Message", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Message",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
 
         read_by = detail.get("readBy", []) if detail else []
         blocks = []
@@ -696,7 +767,13 @@ def build_console(client: HubClient) -> Litestar:
         try:
             items = acting.check_inbox().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Inbox", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Inbox",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
         rows = []
         for n in items:
             oid = _leaf(n.get("id"))
@@ -775,7 +852,13 @@ def build_console(client: HubClient) -> Litestar:
         try:
             acting_for(request)[0].send_message(recipients, body_text, subject=subject)
         except ClientError as exc:
-            return _err(exc, hub, "Compose", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Compose",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
         done = (
             "<p>Sent to "
             + ", ".join(f"<code>{html.escape(r)}</code>" for r in recipients)
@@ -914,7 +997,13 @@ def build_console(client: HubClient) -> Litestar:
         try:
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Tokens", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Tokens",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
         rows = [
             [
                 _mbox_link(a.get("preferredUsername", "")),
@@ -1256,7 +1345,13 @@ def build_console(client: HubClient) -> Litestar:
             stats = seen_by(request).survey()
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
-            return _err(exc, hub, "Graph", signed_in=_signed_in(request))
+            return _err(
+                exc,
+                hub,
+                "Graph",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
 
         edges = [
             {"from": str(frm), "to": str(to), "count": int(count)}
@@ -1367,7 +1462,7 @@ def build_console(client: HubClient) -> Litestar:
         try:
             status, body, set_cookie = client.auth_call("POST", "/auth/login", payload)
         except ClientError as exc:
-            return _err(exc, hub, "Sign in")
+            return _err(exc, hub, "Sign in", api=client.config.base)
         if status != 200:
             msg = (body or {}).get("detail", "sign in failed") if body else "failed"
             page = (

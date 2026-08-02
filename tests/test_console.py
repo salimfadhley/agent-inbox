@@ -883,6 +883,120 @@ def test_a_hub_that_wants_a_login_sends_you_to_the_login(console: TestClient) ->
     assert got.headers["location"].endswith("/login")
 
 
+def test_an_error_names_the_hub_it_actually_asked(console: TestClient) -> None:
+    """ "The hub did not answer" is only useful to someone who knows which hub that was.
+
+    The console fronts a hub at a different address than its own, so an operator
+    looking at the console is being told about the API — a distinction the prose alone
+    cannot make, and the one that catches a console pointed at the wrong hub.
+    """
+
+    class Broken(StubHub):
+        def survey(self, since: str = "") -> dict[str, Any]:
+            raise ClientError("connection refused")
+
+    client, _ = make(Broken())
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        got = c.get("/", follow_redirects=False)
+    assert HUB in got.text
+    assert "The hub did not answer" not in got.text
+
+
+def test_but_not_to_a_stranger_who_has_not_signed_in(console: TestClient) -> None:
+    """An address an operator needs is one a passer-by does not, and on a self-hosted
+    deployment it is often an internal hostname worth not advertising."""
+
+    class Broken(StubHub):
+        def survey(self, since: str = "") -> dict[str, Any]:
+            raise ClientError("connection refused")
+
+    client, _ = make(Broken())
+    with client as c:
+        got = c.get("/", follow_redirects=False)
+    assert HUB not in got.text
+    assert "The hub did not answer" in got.text
+
+
+def test_a_credential_is_never_printed_anywhere_on_the_page() -> None:
+    """A url may legitimately hold `user:password@`, and this page renders before
+    sign-in on the login route — so nothing it prints may carry a secret."""
+    from agent_inbox.console import _no_credentials
+
+    assert _no_credentials("https://sal:hunter2@api.invalid") == "https://api.invalid"
+    assert _no_credentials("https://api.invalid:8081/x") == "https://api.invalid:8081/x"
+    assert _no_credentials("") == ""
+    # The half an outside review caught missing: `client.py` puts the configured url
+    # inside the message, so redacting only the url field let it back in beside itself.
+    reached = _no_credentials(
+        "cannot reach the mailbox at https://u:p@inner:8081: down"
+    )
+    assert reached == "cannot reach the mailbox at https://inner:8081: down"
+
+
+def test_a_credential_inside_the_error_prose_does_not_reach_the_page(
+    console: TestClient,
+) -> None:
+    """Through the page, not through the helper — that distinction is the test.
+
+    An outside review found the first fix redacting the url where the page names it
+    while `client.py` builds *"cannot reach the mailbox at {config.base}: …"*, so the
+    credential arrived intact in the sentence beside the redacted one. A test of the
+    helper alone passes against exactly that bug, which is why this one renders.
+    """
+
+    class Broken(StubHub):
+        def survey(self, since: str = "") -> dict[str, Any]:
+            raise ClientError(
+                "cannot reach the mailbox at https://sal:hunter2@inner:8081: down"
+            )
+
+    client, _ = make(Broken())
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        got = c.get("/", follow_redirects=False)
+    assert "hunter2" not in got.text
+    assert "sal:" not in got.text
+    assert "inner:8081" in got.text, "the host still has to be identifiable"
+
+
+def test_a_refusal_offers_the_door_it_will_not_redirect_through(
+    console: TestClient,
+) -> None:
+    """A signed-in operator is not bounced to a login, but must still be able to reach
+    one: an expired session looks exactly like this, and the fix should not have to be
+    hunted for in the navigation."""
+
+    class RefusingInbox(StubHub):
+        def check_inbox(self) -> dict[str, Any]:
+            raise ClientError("requires authentication [not_authenticated]")
+
+    client, _ = make(RefusingInbox())
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        got = c.get("/inbox", follow_redirects=False)
+    assert got.status_code == 502
+    assert 'href="/login"' in got.text
+    # and it says which of the two things it is, because "sign in" alone reads as
+    # nonsense to somebody who just did.
+    assert "You are signed in" in got.text
+
+
+def test_an_ordinary_fault_does_not_offer_a_login(console: TestClient) -> None:
+    """A sign-in link on a database error sends the operator to fix the wrong thing."""
+
+    class Broken(StubHub):
+        def check_inbox(self) -> dict[str, Any]:
+            raise ClientError("connection refused")
+
+    client, _ = make(Broken())
+    with client as c:
+        c.cookies.set(SESSION_COOKIE, "sess-xyz")
+        got = c.get("/inbox", follow_redirects=False)
+    assert got.status_code == 502
+    assert 'href="/login"' not in got.text
+
+
 def test_a_hub_that_is_merely_broken_still_reports_the_fault(
     console: TestClient,
 ) -> None:
