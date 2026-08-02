@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "mission_slug": "wake-without-polling-01KZ23TA",
+  "mission_id": "01KZ23TA6Z7T25C1KVXWMWJ825",
+  "mission_branch": "kitty/mission-wake-without-polling-01KZ23TA",
+  "target_branch": "main",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01",
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_inbox/wake.py",
+        "tests/test_wake_stream.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        "doc/interrupting-an-agent.md",
+        "src/agent_inbox/cli.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "tracker-integration"
+      ],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    }
+  ],
+  "computed_at": "2026-08-02T20:55:16.422082+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": [],
+  "collapse_report": {
+    "events": [
+      {
+        "wp_a": "WP01",
+        "wp_b": "WP02",
+        "rule": "write_scope_overlap",
+        "evidence": "overlapping globs: 'src/agent_inbox/wake.py' vs 'src/agent_inbox/wake.py', 'tests/test_wake_stream.py' vs 'tests/test_wake_stream.py'; WP02 depends on WP01"
+      }
+    ],
+    "total_merges": 1,
+    "independent_wps_collapsed": 0,
+    "by_rule": {
+      "write_scope_overlap": 1
+    }
+  }
+}
