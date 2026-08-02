@@ -415,7 +415,7 @@ def _err(
     **It names the hub it asked.** "The hub did not answer" is only useful to someone
     who already knows which hub that was, and the console's whole job is to front one
     that lives at a different address than itself — an operator looking at
-    `hub.stodge.org` is being told about `api.hub.stodge.org`, which is a distinction
+    `hub.example.org` is being told about `api.hub.example.org`, which is a distinction
     they cannot make from the prose alone. Naming the URL also catches the commonest
     misconfiguration of all, a console pointed at the wrong hub, which otherwise
     presents as an unexplained refusal.
