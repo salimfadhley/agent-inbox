@@ -80,7 +80,7 @@ the event arrive. Kill the stream and everything else still works identically.
 - [x] T005 The content tests: no body, actionable, mail unchanged (WP01)
 - [x] T006 The count and the cap (FR-007) (WP01)
 - [x] T007 Directive 4 — outside model review before WP01 closes (WP01)
-- [~] T008 After deploying: survival and latency — **house hub done, demo hub blocked** (WP01)
+- [~] T008 After deploying: survival and latency — **house hub done, stodge node blocked** (WP01)
 
 **Risks**: T003 is where a mistake is expensive. A notification that can raise is a
 notification that can fail a send, and a hub that refuses mail because nobody could be told

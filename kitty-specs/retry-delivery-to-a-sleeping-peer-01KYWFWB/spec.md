@@ -17,7 +17,7 @@ makes the send **fail** — reported honestly, but gone.
 Step 6 was shipped knowing this. What changed is that we now run a peer that is asleep
 most of the time.
 
-- **The public demo suspends when idle.** A Fly machine scaled to zero takes seconds to
+- **The stodge node suspends when idle.** A Fly machine scaled to zero takes seconds to
   wake. The ordinary case for a message to it is therefore *a peer that is coming up*,
   which today is indistinguishable from one that is gone.
 - **Deploys restart hubs.** We deploy on every release.

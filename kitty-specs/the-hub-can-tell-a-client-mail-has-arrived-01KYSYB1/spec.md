@@ -112,7 +112,7 @@ the client polled anyway proves nothing.
 ## Open questions
 
 1. ~~**SSE or WebSocket?**~~ **Answered: SSE.** See below.
-2. **Does this need to survive a scale-to-zero host?** The public demo suspends when idle. A
+2. **Does this need to survive a scale-to-zero host?** The stodge node suspends when idle. A
    held connection either prevents suspension — changing the cost model — or dies on it,
    making immediacy conditional on the deployment. Worth measuring early; it may decide
    question 1.
@@ -220,7 +220,7 @@ is closed.
 
 The consequence, recorded rather than discovered later: **a hub with any client connected is
 a hub that is always on.** Scale-to-zero stops being a property of the deployment and
-becomes a property of whether anyone is listening. For the public demo that changes the cost
+becomes a property of whether anyone is listening. For the stodge node that changes the cost
 model — an idle hub is free, a watched hub is not — and the switch is thrown by any client,
 not by the operator. FR-007's connection count is what makes that visible rather than
 surprising.

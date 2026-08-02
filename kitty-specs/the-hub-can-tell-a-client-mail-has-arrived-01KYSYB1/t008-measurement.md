@@ -27,9 +27,9 @@ regression rather than on a slow afternoon.
 Four minutes idle is past every proxy timeout in the ordinary range, so the fifteen-second
 keep-alive is doing its job here.
 
-## The public demo — **not measured**, and this is a blocker, not an omission
+## The stodge node — **not measured**, and this is a blocker, not an omission
 
-The demo hub runs `v0.39.0` and enforces authentication. Holding a stream needs an
+That hub ran `v0.39.0` at the time and enforces authentication. Holding a stream needs an
 identity on *that* hub, and there is none available:
 
 - no device token for it in `~/.config`, and none in the private deploy repo;
@@ -57,7 +57,7 @@ Neither changes WP01, which is deployed and working. Both are inputs to WP02, wh
 backoff and reconnect behaviour is the thing that has to be right if the answer to (1) is
 "no".
 
-**To unblock:** a device token for the demo hub, minted by whoever can log into its
+**To unblock:** a device token for the stodge node, minted by whoever can log into its
 console. One value, passed in the environment; nothing about it belongs in this repo.
 
 ## How it was measured
