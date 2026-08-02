@@ -102,7 +102,7 @@ silently dropped.
 - [x] T012 Fail outstanding deliveries on close (FR-008) (WP03)
 - [x] T013 `@local` never enters the queue — removal proof for FR-007 (WP03)
 - [x] T014 Audit-log the outcome (WP03)
-- [ ] T015 Does our own inbox de-duplicate a retried activity? (WP03)
+- [x] T015 Does our own inbox de-duplicate a retried activity? (WP03) — **yes, sequentially; two issues raised**
 - [x] T017 Outside model review before the mission closes (Directive 4) (WP03)
 
 **Risks**: T012 is what makes the in-memory queue (C-001) acceptable rather than
@@ -111,6 +111,21 @@ deploy — which we do on every release.
 
 T015 may find a defect in the *receiving* half. If it does, that is a new issue, not extra
 scope here.
+
+**T015's answer, 2026-08-02.** Yes — `api.federation_inbox` checks `seen_activity` before
+delivering, the activity id derives from the record and so repeats across attempts, and a
+retry costs the recipient nothing. Two real hubs prove it, with a paired positive so the
+assertion cannot pass by de-duplicating everything.
+
+It found two defects, both raised rather than fixed, as instructed:
+
+- **#40** — one record naming two remote recipients on the *same* peer sends one activity
+  id twice, so the second recipient is discarded as a retry while the sender is told
+  `delivered`. Silent loss. A strict `xfail` in the suite marks it and will fail the day it
+  is fixed.
+- **#41** — the de-duplication is check-then-act across two commits, so a retry racing its
+  own in-flight first attempt, or a crash between the send and the marker, can still
+  duplicate. The sequential case the queue actually produces is safe; the tail is not.
 
 ---
 

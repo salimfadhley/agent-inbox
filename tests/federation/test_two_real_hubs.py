@@ -357,3 +357,135 @@ class TestSendingToAPeer:
         assert sent.record.id, "and the sender still has their own copy"
         # Put it back: the fixture is module-scoped and later tests expect the peering.
         asyncio.run(alpha.house.mailbox.add_peer(peer_origin(beta.base), "2026-07-30"))
+
+
+class TestARetriedActivityArrivesOnce:
+    """Step 7's open question — T015 of `retry-delivery-to-a-sleeping-peer-01KYWFWB`.
+
+    An attempt can fail *after* the peer received it: a timeout on a POST that in fact
+    succeeded is, from the sending side, indistinguishable from one that never arrived.
+    So the retry queue will sometimes send a message the recipient already holds, and
+    whether that costs them a duplicate is a property of the **receiving** half — which
+    is why it is asked here, of two real hubs, rather than of the retry loop's fakes.
+
+    **What these prove, and what they do not.** They prove the sequential case: one
+    attempt finishing before the next begins, which is what the queue actually does.
+    They do not prove atomicity, and it is not there — see issue #41 for the two
+    windows (a retry racing its own in-flight first attempt, and a crash between the
+    send and the marker) in which a duplicate is still reachable.
+    """
+
+    @staticmethod
+    def _copies(beta, marker: str) -> int:
+        landed = asyncio.run(beta.house.observe_mailbox("alice"))
+        return sum(1 for m in landed if m.content == marker)
+
+    def test_the_same_activity_sent_twice_lands_once(self, hubs) -> None:
+        """The premise holds: `id` derives from the record, so a retry repeats it."""
+        from agent_inbox.outbound import deliver, resolve
+
+        alpha, beta = hubs
+        asyncio.run(alpha.house.join("retrier"))
+        key, key_id = TestSendingToAPeer._keys(alpha)
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        marker = "delivered twice, on purpose"
+        activity = {
+            "type": "Create",
+            "id": f"{alpha.base}/act/t015-stable",
+            "object": {
+                "type": "Note",
+                "to": ["alice"],
+                "content": marker,
+                "summary": "the retry that was not needed",
+            },
+        }
+        outcome = [
+            deliver(
+                who,
+                activity,
+                key=key,
+                key_id=key_id,
+                settings=asyncio.run(alpha.house.mailbox.hub_settings()),
+                peers=asyncio.run(alpha.house.mailbox.peers()),
+            )
+            for _ in range(2)
+        ]
+
+        assert len(outcome) == 2, "both attempts must have been made"
+        assert self._copies(beta, marker) == 1, (
+            "a retried activity must not cost the recipient a second copy"
+        )
+
+    def test_a_changed_id_is_a_different_message(self, hubs) -> None:
+        """The paired positive, and the proof the assertion above can fail.
+
+        De-duplication that swallowed everything would pass the test above for the
+        wrong reason. Two genuinely distinct activities must both arrive.
+        """
+        from agent_inbox.outbound import deliver, resolve
+
+        alpha, beta = hubs
+        key, key_id = TestSendingToAPeer._keys(alpha)
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        marker = "two distinct activities"
+        for n in (1, 2):
+            deliver(
+                who,
+                {
+                    "type": "Create",
+                    "id": f"{alpha.base}/act/t015-distinct-{n}",
+                    "object": {
+                        "type": "Note",
+                        "to": ["alice"],
+                        "content": marker,
+                        "summary": "not a retry",
+                    },
+                },
+                key=key,
+                key_id=key_id,
+                settings=asyncio.run(alpha.house.mailbox.hub_settings()),
+                peers=asyncio.run(alpha.house.mailbox.peers()),
+            )
+
+        assert self._copies(beta, marker) == 2, (
+            "distinct activities must not be mistaken for a retry of one"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="issue #40 — one record, two recipients on one peer, one activity id",
+    )
+    def test_two_recipients_on_one_peer_both_receive(self, hubs) -> None:
+        """What the de-duplication above costs, found while answering T015.
+
+        The activity id derives from the *record*, and one record can name several
+        remote recipients. Two of them on the same hub therefore arrive as the same
+        activity id, and the second is discarded as a retry of the first — while the
+        sender is told `delivered`. Silent loss, which this codebase already calls the
+        worst failure shape it has.
+
+        Marked strict so it fails the day it starts passing: the fix belongs in how the
+        id is minted or how the activity is addressed, not in this package (T015).
+        """
+        alpha, beta = hubs
+        asyncio.run(beta.house.join("bob"))
+        asyncio.run(alpha.house.join("fanout"))
+        marker = "one message, two recipients on one hub"
+
+        sent = asyncio.run(
+            alpha.house.send(
+                "fanout",
+                [
+                    f"alice@beta.localhost:{beta.port}",
+                    f"bob@beta.localhost:{beta.port}",
+                ],
+                marker,
+                subject="fan-out to one peer",
+            )
+        )
+
+        assert [r.state for r in sent.receipts] == ["delivered", "delivered"]
+        landed = asyncio.run(beta.house.observe_mailbox("bob"))
+        assert marker in [m.content for m in landed], (
+            "the second recipient on a peer was told delivered but got nothing"
+        )
