@@ -282,21 +282,28 @@ class StubHub(HubClient):
         if path.endswith("/tokens") and method == "POST":
             if not session:
                 return 401, {"detail": "log in as an operator"}, None
-            minted = {
-                "id": "tok1",
-                "token": "secret-shown-once",
-                "actor": path.split("/")[-2],
-            }
+            label = str((body or {}).get("label", "")).strip()
+            if not label:
+                return 400, {"detail": "give the token a label"}, None
             self.tokens.append(
-                {"id": "tok1", "label": (body or {}).get("label", ""), "created": ""}
+                {
+                    "id": "tok1",
+                    "label": label,
+                    "created": "2026-08-02T10:00:00Z",
+                    "lastUsed": None,
+                    "revoked": False,
+                    "boundTo": None,
+                    "admitted": [],
+                }
             )
-            return 201, minted, None
+            return 201, {"id": "tok1", "token": "secret-shown-once"}, None
         if "/tokens/" in path and method == "DELETE":
             if not session:
                 return 401, {"detail": "log in as an operator"}, None
             for t in self.tokens:
                 t["revoked"] = True
-            return 204, None, None
+            # The hub says what it just cut off; the console relays it.
+            return 200, {"revoked": True, "admitted": ["jed_smith"]}, None
         # The trust list. Operator-gated on the real hub; the stub refuses without
         # a session for the same reason the token routes do — the console must relay
         # that refusal rather than decide for itself.
@@ -371,14 +378,9 @@ def console() -> Iterator[TestClient]:
 # -- device tokens ---------------------------------------------------------
 
 
-def test_minting_a_token_requires_an_operator_session(console: TestClient) -> None:
-    """The console decides nothing here — it relays and reports what the hub says.
-
-    Minting is an operator action behind a human login. The console must not invent
-    its own answer, in either direction: no session means the hub's refusal is shown
-    and the reader is sent to sign in.
-    """
-    got = console.get("/tokens/rosemary_nasrin")
+def test_the_tokens_screen_requires_an_operator_session(console: TestClient) -> None:
+    """The console decides nothing here — it relays and reports what the hub says."""
+    got = console.get("/tokens")
     assert got.status_code == 200
     assert "operator action" in got.text
     assert "/login" in got.text
@@ -387,34 +389,99 @@ def test_minting_a_token_requires_an_operator_session(console: TestClient) -> No
 def test_a_minted_token_is_shown_once_with_what_to_do_with_it(
     console: TestClient,
 ) -> None:
-    """The hub stores only a hash, so this page is the single chance to read it.
-
-    Anything the agent needs must therefore be here and pasteable — the command that
-    installs it, not a description of the file it goes in.
-    """
+    """The hub stores only a hash, so this page is the single chance to read it."""
     console.cookies.set(SESSION_COOKIE, "sess-xyz")
-    got = console.post("/tokens/rosemary_nasrin/mint", data={"label": "laptop"})
+    got = console.post("/tokens/mint", data={"label": "laptop"})
     assert got.status_code == 200
     assert "secret-shown-once" in got.text
     assert "only time it can be read" in got.text
-    assert "agent-inbox join rosemary_nasrin --token secret-shown-once" in got.text
-    # and it now appears in the list, so the page reflects the mint that just happened
+    assert "config set --global token" in got.text
+    # and it appears in the list, so the page reflects the mint that just happened
     assert "laptop" in got.text
 
 
-def test_a_token_can_be_revoked_from_the_same_page(console: TestClient) -> None:
-    """A token you cannot revoke is worse than no token — this is the whole point."""
+def test_the_minted_page_carries_a_setup_prompt_with_the_token_in_it(
+    console: TestClient,
+) -> None:
+    """FR-013. The one moment the secret exists is the only moment a prompt containing
+    it can be produced — the hub keeps a hash, so it can never be rebuilt."""
     console.cookies.set(SESSION_COOKIE, "sess-xyz")
-    console.post("/tokens/rosemary_nasrin/mint", data={"label": "laptop"})
-    got = console.post("/tokens/rosemary_nasrin/revoke", data={"id": "tok1"})
+    got = console.post("/tokens/mint", data={"label": "laptop"}).text
+    assert "Copy the setup prompt" in got
+    assert "uv tool install" in got
+    assert "agent-inbox join --hub" in got
+    # the token is inside the prompt, not merely beside it
+    prompt = got.split('id="setup"')[1]
+    assert "secret-shown-once" in prompt.split("</pre>")[0]
+
+
+def test_no_console_page_may_be_cached(console: TestClient) -> None:
+    """Found by outside review: the minted token sat in a page a browser could keep.
+
+    The hub cannot recover that secret — it stores only a hash — so a copy in a cache,
+    in history, or in the back-forward cache is a copy nobody knows exists. `no-store`
+    is set for every response rather than for the one page that needs it today, because
+    the next page that shows something once should not have to remember.
+    """
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    minted = console.post("/tokens/mint", data={"label": "laptop"})
+    assert "no-store" in minted.headers.get("cache-control", "")
+    for path in ("/", "/tokens", "/agents", "/prompts"):
+        got = console.get(path)
+        assert "no-store" in got.headers.get("cache-control", ""), path
+
+
+def test_the_public_prompt_never_carries_a_token(console: TestClient) -> None:
+    """The other half of FR-013, and the reason the two are separate documents.
+
+    `/prompts*` is served without a session — an agent needs it before it can
+    authenticate — so a credential there would be handed to every anonymous visitor.
+    """
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    console.post("/tokens/mint", data={"label": "laptop"})
+    assert "secret-shown-once" not in console.get("/prompts").text
+    assert "secret-shown-once" not in console.get("/prompts/agent").text
+
+
+def test_an_unlabelled_token_is_refused_rather_than_invented(
+    console: TestClient,
+) -> None:
+    """A list of unlabelled tokens is a list nobody can act on."""
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    got = console.post("/tokens/mint", data={"label": "  "})
+    assert got.status_code == 200
+    assert "label" in got.text.lower()
+    assert "secret-shown-once" not in got.text
+
+
+def test_revoking_says_which_agents_it_just_cut_off(console: TestClient) -> None:
+    """The only question an operator is asking is *what will this break?*"""
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    console.post("/tokens/mint", data={"label": "laptop"})
+    got = console.post("/tokens/revoke", data={"id": "tok1"})
     assert got.status_code == 200
     assert "Revoked" in got.text
+    assert "jed_smith" in got.text
     assert "locked out" in got.text
 
 
-def test_the_agents_table_links_to_each_agent_s_tokens(console: TestClient) -> None:
-    """Discoverability: the feature existed in the API and nowhere a human could see."""
-    assert "/tokens/rosemary_nasrin" in console.get("/agents").text
+def test_the_screen_keeps_the_claim_and_the_finding_apart(console: TestClient) -> None:
+    """FR-010. A stale label sitting where a fact appears to be is how an operator
+    revokes the wrong credential, and merging the columns is the easy mistake."""
+    console.cookies.set(SESSION_COOKIE, "sess-xyz")
+    got = console.get("/tokens").text
+    assert "Issued to" in got and "Admitted" in got
+    assert "what you typed" in got and "actually seen use it" in got
+
+
+def test_the_agents_directory_no_longer_offers_per_agent_tokens(
+    console: TestClient,
+) -> None:
+    """A token belongs to no agent, so a per-agent link described a relationship that
+    does not exist."""
+    body = console.get("/agents").text
+    assert "/tokens/rosemary_nasrin" not in body
+    assert "Keys" not in body
 
 
 # -- the prompt ------------------------------------------------------------
@@ -856,12 +923,6 @@ def test_tokens_are_reachable_from_the_navigation(console: TestClient) -> None:
     assert "href='/tokens'" in console.get("/").text
     index = console.get("/tokens")
     assert index.status_code == 200
-    assert "/tokens/rosemary_nasrin" in index.text
-
-
-def test_the_agent_directory_labels_its_token_column(console: TestClient) -> None:
-    """A blank header is why the existing link went unnoticed."""
-    assert "Keys" in console.get("/agents").text
 
 
 def test_a_hub_that_wants_a_login_sends_you_to_the_login(console: TestClient) -> None:

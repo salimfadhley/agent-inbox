@@ -274,7 +274,7 @@ def console(host: str, port: int) -> int:
     "--reset-user-table",
     is_flag=True,
     help="on this start only: delete all operator accounts and seed a new admin, "
-    "printing its password. Agents' device tokens and all mail are untouched. Start "
+    "printing its password. Agents' tokens and all mail are untouched. Start "
     "once with it, take the password from the log, then remove it.",
 )
 def serve(reset_user_table: bool) -> int:
@@ -346,7 +346,7 @@ def reset_admin(username: str) -> int:
 @click.option("--force", is_flag=True, help="replace an existing entry")
 @click.option(
     "--token",
-    help="a device token minted for this agent; saved to its entry. Not needed when a "
+    help="a token minted by an operator; saved to this project. Not needed when a "
     "shared token is in the machine-wide config.",
 )
 @click.pass_context
@@ -695,20 +695,20 @@ def role(ctx: click.Context, name: str | None) -> int:
 
 
 def _token_help(hub_url: str, name: str, path: Path) -> str:
-    """What to do about a missing device token, in the order someone can act on it.
+    """What to do about a missing token, in the order someone can act on it.
 
     An agent cannot fix this alone — minting a token is an operator action behind a
     human login — so the text is written to be handed straight to a human, naming the
     exact command rather than describing it.
     """
     return (
-        "\nThis hub authenticates, and this engine has no device token.\n"
+        "\nThis hub authenticates, and this machine has no token.\n"
         "A token is issued by a human operator, so ask yours to:\n\n"
         f"  1. Sign in to the console for {hub_url}\n"
-        "  2. Tokens -> Mint a shared token (it is shown once, with a copy button)\n"
-        "  3. Give it to you, and run **one** of:\n\n"
-        "       agent-inbox config set --global token <token>   # this whole machine\n"
-        "       agent-inbox config set token <token>            # this project only\n\n"
+        "  2. Tokens -> Mint (it is shown once, with a copy button)\n"
+        "  3. Give you the setup prompt shown beside it — that has the token in it\n"
+        "     already. Failing that, the token alone, and run:\n\n"
+        "       agent-inbox config set --global token <token>\n\n"
         "Do not edit the files by hand: `config` knows where each setting belongs\n"
         f"(machine-wide, or {path}) and writes it readable only by you. A shared\n"
         "token admits the machine, so one is enough however many agents run here.\n"
@@ -950,7 +950,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
         # and this is the reason, stated as something a person can act on.
         _err(
             f"{bad} credentials     "
-            + (f"token {token_state}" if token_state else "no device token")
+            + (f"token {token_state}" if token_state else "no token")
         )
         if verdict := remote.get("verdict"):
             _err(f"     the hub says: {verdict}")
@@ -971,9 +971,9 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     click.echo(
         f"{ok} credentials     "
         + (
-            f"device token accepted by the hub{source}"
+            f"token accepted by the hub{source}"
             if token_state == "accepted"
-            else f"device token present{source}"
+            else f"token present{source}"
             if has_token
             else "none needed — this hub does not authenticate"
         )

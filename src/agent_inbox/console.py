@@ -37,7 +37,6 @@ from litestar.params import Body
 from litestar.response import Redirect, Response
 
 from agent_inbox import __version__
-from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING
 from agent_inbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_inbox.exceptions import MailboxError
@@ -193,7 +192,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
             f'<p class="warn"><strong>{html.escape(INSECURE_ADMIN_WARNING)}.</strong> '
             "<code>AGENT_MAILBOX_ADMIN_PASSWORD</code> is set, so <code>admin</code> "
             "can sign in with it <strong>without a second factor</strong> and then "
-            "reset passwords and issue or revoke device tokens. Anyone who can read "
+            "reset passwords and issue or revoke tokens. Anyone who can read "
             "this hub's environment controls it. Intended for manual testing and for "
             "recovering a hub whose password or authenticator is lost — unset it "
             "afterwards.</p>"
@@ -234,12 +233,23 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
 
 
 def _add_csp(response: Response) -> Response:
-    """Attach the Content-Security-Policy to every response, from one place.
+    """Attach the security headers to every response, from one place.
 
-    An `after_request` hook rather than a per-handler header, so the CSP cannot be
+    An `after_request` hook rather than a per-handler header, so these cannot be
     forgotten on a single route — which is exactly how a script-injection hole opens.
+
+    **`no-store` is here rather than on the one page that needs it**, and that is the
+    point. An outside review found the freshly minted token — which the hub itself
+    cannot recover, since it keeps only a hash — sitting in a page a browser was free to
+    keep in its cache, its history and its back-forward cache. Marking only the mint
+    page would work until somebody adds the next page that shows something once.
+
+    Nothing here is worth caching anyway: every screen is a live view of a hub that
+    changes under it, so a cached console page is a *wrong* console page even when it
+    holds no secret.
     """
     response.headers["Content-Security-Policy"] = CSP
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     return response
 
 
@@ -660,10 +670,12 @@ def build_console(client: HubClient) -> Litestar:
                     html.escape(str(a.get("type", ""))),
                     html.escape((a.get("summary") or "")[:80]),
                     f'<span class="dim">{facts}</span>',
-                    f'<a href="/tokens/{html.escape(name)}">Tokens</a>',
                 ]
             )
-        body = _table(["Who", "Type", "About", "Profile", "Keys"], rows, "Nobody yet.")
+        # No Tokens column. A token belongs to no agent, so a per-agent link into one
+        # was describing a relationship that does not exist — and the Tokens screen it
+        # pointed at is now a list of tokens, which this table cannot usefully filter.
+        body = _table(["Who", "Type", "About", "Profile"], rows, "Nobody yet.")
         return Response(
             _page("Agents", body, hub, "/agents"), media_type=MediaType.HTML
         )
@@ -874,149 +886,133 @@ def build_console(client: HubClient) -> Litestar:
             '<p><a href="/compose">Write another</a> · <a href="/inbox">Inbox</a></p>'
         )
 
-    # -- device tokens -----------------------------------------------------
+    # -- tokens -----------------------------------------------------
 
-    def _token_instructions(name: str, secret: str) -> str:
+    def _setup_prompt(secret: str, hub_url: str) -> str:
+        """The prompt an agent needs, with this token already in it (FR-013).
+
+        **A second document, not the standing prompt.** The Prompt tab is on the
+        console's open paths — served to anyone who can reach the hub, signed in or
+        not — because an agent needs it *before* it has any way to authenticate. It
+        earns that openness by holding nothing secret, and a credential in it would be
+        handed to every anonymous visitor.
+
+        This one exists inside a single HTTP response and is never served again. The hub
+        keeps only a hash of the token, so there is no way to rebuild this page later
+        even for the operator who made it.
+        """
+        return (
+            f"Set up the agent-inbox mailbox on this machine.\n\n"
+            f"1. Install the client:\n"
+            f"     uv tool install --no-cache --force 'agent-inbox[clients]'\n\n"
+            f"2. Install the credential. It admits this whole machine, so every agent\n"
+            f"   here is covered and there is nothing to repeat per project:\n"
+            f"     agent-inbox config set --global token {secret}\n\n"
+            f"3. Claim a name on the hub and write this project's configuration:\n"
+            f"     agent-inbox join --hub {hub_url}\n\n"
+            f"4. Prove it:\n"
+            f"     agent-inbox doctor\n\n"
+            f"The token is sent automatically from now on; you never type it again.\n"
+            f"It admits the machine, not you: your name still comes from your own\n"
+            f"configuration, and every agent here uses the same credential.\n\n"
+            f"Then read {hub_url}/prompts/agent for how the mailbox works."
+        )
+
+    def _token_instructions(secret: str, hub_url: str) -> str:
         """What to do with a token, shown at the only moment it is visible.
 
         The hub stores a hash, so this is the one and only time anyone can read it.
         Anything the agent needs must therefore be on this page, in a form that can be
-        pasted — not a description of the file, but the command that writes it.
+        pasted — not a description of the file, but the command that writes it, and
+        (FR-013) the whole setup prompt with the token already in place.
         """
+        prompt = _setup_prompt(secret, hub_url)
         return (
             '<div class="warn"><p><strong>Copy it now.</strong> The hub keeps only a '
-            "hash, so this is the only time it can be read. If it is lost, mint "
-            "another and revoke this one.</p>"
+            "hash, so this is the only time it can be read — and that goes for the "
+            "setup prompt below too, which contains it. If either is lost, mint "
+            "another token and revoke this one.</p>"
             f'<p><code id="minted">{html.escape(secret)}</code></p>'
             "<p><button data-copy='minted' data-said='copied' type='button'>"
             "Copy the token</button> <span id='copied' class='dim'></span></p></div>"
-            + (
-                "<p>Put it in <code>~/.config/agent-inbox/config.toml</code> on the "
-                "machine it is for. Every agent there is then admitted, whatever name "
-                "each of them uses — there is nothing to do per agent and nothing to "
-                "repeat per project:</p>"
-                f'<pre>token = "{html.escape(secret)}"</pre>'
-                "<p>Any agent on that machine can confirm it with "
-                "<code>agent-inbox doctor</code>.</p>"
-                if name == SHARED_ACTOR
-                else "<p>Give it to the agent and have it run:</p>"
-                f"<pre>agent-inbox join {html.escape(name)} "
-                f"--token {html.escape(secret)}</pre>"
-                "<p>That writes the token into <code>agent-inbox.toml</code> in the "
-                "agent's project root, under its own engine's entry, and it is sent "
-                "automatically from then on. <code>agent-inbox doctor</code> "
-                "confirms it works.</p>"
-            )
+            "<p>Put it in <code>~/.config/agent-inbox/config.toml</code> on the "
+            "machine it is for. Every agent there is then admitted, whatever name "
+            "each of them uses — there is nothing to do per agent and nothing to "
+            "repeat per project:</p>"
+            f'<pre>token = "{html.escape(secret)}"</pre>'
+            "<h2>Or hand this to the agent</h2>"
+            "<p>The same token, inside the instructions that use it. One copy and the "
+            "agent sets itself up — there is no second step where somebody remembers "
+            "to pass the credential separately.</p>"
+            f'<pre id="setup">{html.escape(prompt)}</pre>'
+            "<p><button data-copy='setup' data-said='prompt-copied' type='button'>"
+            "Copy the setup prompt</button> "
+            "<span id='prompt-copied' class='dim'></span></p>"
+            "<p class='dim'>This is not the prompt on the Prompt tab. That one is "
+            "public and never carries a credential; this one exists only on this "
+            "page, once.</p>"
         )
 
-    def _tokens_page(request: Request, name: str, extra: str = "") -> Response:
-        """List an agent's device tokens, and offer to mint another.
+    def _tokens_body(
+        items: list[dict[str, Any]], hub: dict[str, Any] | None, extra: str
+    ) -> str:
+        """Every token on the hub — the screen this mission exists for.
 
-        Operator-only, and the console holds none of that judgement itself — it relays
-        the human's session inward and reports whatever the hub decides.
+        Not a list of agents. A token belongs to no agent, which is why a shared one
+        used to be unfindable the moment its "shown once" page was closed: there was no
+        screen it appeared on, and revoking it meant opening the database.
         """
-        hub = hub_or_none()
-        sid = request.cookies.get(SESSION_COOKIE)
-        status, body, _ = client.auth_call(
-            "GET", f"/auth/agents/{name}/tokens", session=sid
-        )
-        if status in (401, 403):
-            page = (
-                f"<p>Minting a token for <code>{html.escape(name)}</code> is an "
-                "operator action. <a href='/login'>Sign in</a> first.</p>"
-            )
-            return Response(
-                _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
-            )
-        if status >= 400:
-            detail = (body or {}).get("detail", "the hub refused")
-            hint = (
-                "<p class='dim'>This hub has authentication turned off, so device "
-                "tokens do nothing here. Set <code>AGENT_MAILBOX_AUTH_MODE</code> to "
-                "<code>warn</code> or <code>enforce</code> to use them.</p>"
-                if (hub or {}).get("authenticated") is False
-                else ""
-            )
-            page = f"<p>{html.escape(str(detail))}</p>{hint}"
-            return Response(
-                _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
-            )
-
-        safe = html.escape(name)
 
         def actions(t: dict[str, Any]) -> str:
             if t.get("revoked"):
                 return '<span class="dim">revoked</span>'
             tid = html.escape(str(t.get("id", "")))
             return (
-                f'<form method="post" action="/tokens/{safe}/revoke">'
+                '<form method="post" action="/tokens/revoke">'
                 f'<input type="hidden" name="id" value="{tid}">'
                 "<button type='submit'>Revoke</button></form>"
             )
 
+        def issued_to(t: dict[str, Any]) -> str:
+            """What the operator *claimed*. Never what we observed — see `admitted`."""
+            bound = t.get("boundTo")
+            label = html.escape(str(t.get("label") or ""))
+            if bound:
+                return (
+                    f"{label} <span class='dim'>· bound to "
+                    f"<code>{html.escape(str(bound))}</code></span>"
+                )
+            return label or "<span class='dim'>—</span>"
+
+        def _seen(u: dict[str, Any]) -> str:
+            return _shortdate(str(u.get("lastSeen") or ""))
+
+        def admitted(t: dict[str, Any]) -> str:
+            """What the hub *observed*. Kept in its own column on purpose (FR-010): a
+            stale label sitting where a fact appears to be is how somebody revokes the
+            wrong credential."""
+            names = t.get("admitted") or []
+            if not names:
+                return "<span class='dim'>nobody yet</span>"
+            return ", ".join(
+                f"<code>{html.escape(str(u.get('name', '')))}</code>"
+                f"<span class='dim'> ({_seen(u)})</span>"
+                for u in names
+            )
+
         rows = [
             [
-                f"<code>{html.escape(str(t.get('id', '')))}</code>",
-                html.escape(str(t.get("label") or "")),
+                issued_to(t),
                 f'<span class="dim">{_shortdate(str(t.get("created") or ""))}</span>',
+                # "never" and a date are different facts leading to different actions,
+                # which is the whole reason this column exists.
                 '<span class="dim">'
                 f"{_shortdate(str(t.get('lastUsed') or '')) or 'never'}</span>",
+                admitted(t),
                 actions(t),
             ]
-            for t in (body or {}).get("items", [])
+            for t in items
         ]
-        page = (
-            f"<h2>Device tokens for <code>{safe}</code></h2>"
-            f"{extra}"
-            + _table(
-                ["Id", "Label", "Created", "Last used", ""],
-                rows,
-                "No tokens. This agent cannot authenticate yet.",
-            )
-            + "<h2>Mint a token</h2>"
-            f'<form method="post" action="/tokens/{safe}/mint">'
-            "<label>Label (what machine or session is this for?)</label>"
-            '<input type="text" name="label" placeholder="laptop, ci, …">'
-            "<p style='margin-top:.6rem'><button type='submit'>Mint</button></p>"
-            "</form>"
-        )
-        return Response(
-            _page("Tokens", page, hub, "/agents"), media_type=MediaType.HTML
-        )
-
-    @get("/tokens", media_type=MediaType.HTML, sync_to_thread=True)
-    def token_index(request: Request) -> Response:
-        """Every agent, and the way in to minting one a key.
-
-        This exists because the per-agent page was reachable only from an unlabelled
-        column at the end of the directory table — which is to say, not reachable. A
-        capability nobody can find is the same as one that was never built, and this
-        one had already been built twice: the API could mint before any page could.
-        """
-        hub = hub_or_none()
-        try:
-            actors = seen_by(request).list_agents().get("items", [])
-        except ClientError as exc:
-            return _err(
-                exc,
-                hub,
-                "Tokens",
-                api=client.config.base,
-                signed_in=_signed_in(request),
-            )
-        rows = [
-            [
-                _mbox_link(a.get("preferredUsername", "")),
-                '<span class="dim">'
-                f"{html.escape((a.get('summary') or '')[:60])}</span>",
-                f'<a href="/tokens/{html.escape(a.get("preferredUsername", ""))}">'
-                "Tokens</a>",
-            ]
-            for a in actors
-        ]
-        # The hub descriptor says whether tokens are *required*, not which mode is set —
-        # `authMode` lives on /doctor, and quoting a field that is not here would print
-        # a confident "auth off" at a hub that is merely warning.
         note = (
             '<p class="warn">This hub does not require a token yet, so mail works '
             "without one. Minting now is still worth doing: an agent that already has "
@@ -1025,35 +1021,65 @@ def build_console(client: HubClient) -> Litestar:
             if (hub or {}).get("authenticated") is False
             else ""
         )
-        body = (
-            "<p>A device token is how an agent proves it may use this hub once "
-            "authentication is enforced. Each is shown once and can be revoked "
-            "on its own.</p>"
-            f"{note}"
-            "<h2>One token for a whole machine</h2>"
-            "<p>A <strong>shared</strong> token names no agent: it admits whoever "
-            "holds it, and each agent still says which name it is using. Put one in "
-            "<code>~/.config/agent-inbox/config.toml</code> and every agent on that "
-            "machine is admitted, without minting one apiece.</p>"
-            '<pre>token = "…"</pre>'
-            "<p class='dim'>The trade is real: anyone who can read that file can act "
-            "as any agent here. That is the right trade for your own laptop and the "
-            "wrong one for a machine you share — mint per-agent tokens there.</p>"
-            f'<form method="post" action="/tokens/{SHARED_ACTOR}/mint">'
-            "<label>Label (which machine is this for?)</label>"
-            '<input type="text" name="label" placeholder="workshop laptop">'
-            "<p style='margin-top:.6rem'>"
-            "<button type='submit'>Mint a shared token</button></p></form>"
-            "<h2>Per-agent tokens</h2>"
-            + _table(["Agent", "About", ""], rows, "Nobody has joined yet.")
-        )
-        return Response(
-            _page("Tokens", body, hub, "/tokens"), media_type=MediaType.HTML
+        return (
+            "<p>A token admits a <strong>machine</strong>. Whoever holds it is let in, "
+            "and each agent still says which name it is using — so one token covers "
+            "every agent on a laptop, and there is nothing to mint per agent.</p>"
+            f"{note}{extra}"
+            + _table(
+                ["Issued to", "Created", "Last used", "Admitted", ""],
+                rows,
+                "No tokens yet. Nothing can authenticate here.",
+            )
+            + "<p class='dim'><strong>Issued to</strong> is what you typed when you "
+            "minted it. <strong>Admitted</strong> is who the hub has actually seen use "
+            "it — that is the column to revoke from.</p>"
+            "<h2>Mint a token</h2>"
+            "<p>The secret is shown once, with a prompt you can hand straight to an "
+            "agent.</p>"
+            '<form method="post" action="/tokens/mint">'
+            "<label>Label — which machine is this for?</label>"
+            '<input type="text" name="label" placeholder="workshop laptop" required>'
+            "<p style='margin-top:.6rem'><button type='submit'>Mint</button></p>"
+            "</form>"
         )
 
-    @get("/tokens/{name:str}", media_type=MediaType.HTML, sync_to_thread=True)
-    def tokens(name: str, request: Request) -> Response:
-        return _tokens_page(request, name)
+    def _tokens_page(request: Request, extra: str = "") -> Response:
+        """The Tokens screen. Operator-only, and the console judges none of that itself:
+        it relays the human's session inward and reports whatever the hub decides."""
+        hub = hub_or_none()
+        sid = request.cookies.get(SESSION_COOKIE)
+        status, body, _ = client.auth_call("GET", "/auth/tokens", session=sid)
+        if status in (401, 403):
+            page = (
+                "<p>Tokens are an operator action. "
+                "<a href='/login'>Sign in</a> first.</p>"
+            )
+            return Response(
+                _page("Tokens", page, hub, "/tokens"), media_type=MediaType.HTML
+            )
+        if status >= 400:
+            detail = (body or {}).get("detail", "the hub refused")
+            return Response(
+                _page("Tokens", f"<p>{html.escape(str(detail))}</p>", hub, "/tokens"),
+                media_type=MediaType.HTML,
+            )
+        items = (body or {}).get("items", [])
+        return Response(
+            _page("Tokens", _tokens_body(items, hub, extra), hub, "/tokens"),
+            media_type=MediaType.HTML,
+        )
+
+    @get("/tokens", media_type=MediaType.HTML, sync_to_thread=True)
+    def token_index(request: Request) -> Response:
+        """Every token on the hub.
+
+        This used to list *agents*, with a per-agent page behind each one — which meant
+        a shared token, belonging to no agent, appeared on no screen at all once its
+        "shown once" page was closed. It could not be reviewed and could not be revoked
+        without opening the database. That is the fault this mission opened with.
+        """
+        return _tokens_page(request)
 
     def _refused(
         body: dict[str, Any] | None, fallback: str, hub: dict[str, Any] | None
@@ -1180,45 +1206,56 @@ def build_console(client: HubClient) -> Litestar:
             _purge_page(fresh or {}, hub, note=note), media_type=MediaType.HTML
         )
 
-    @post("/tokens/{name:str}/mint", status_code=200, sync_to_thread=True)
-    def mint(name: str, request: Request, data: Form) -> Response:
-        hub = hub_or_none()
+    @post("/tokens/mint", status_code=200, sync_to_thread=True)
+    def mint(request: Request, data: Form) -> Response:
+        """Mint, and show the secret with the prompt that uses it — once (FR-013).
+
+        A POST response on purpose. A page carrying a live credential must not be
+        re-fetchable, cacheable or linkable, and a response to a form submission is none
+        of those: reload it and the token is gone, which is correct.
+        """
         sid = request.cookies.get(SESSION_COOKIE)
         status, body, _ = client.auth_call(
             "POST",
-            f"/auth/agents/{name}/tokens",
+            "/auth/tokens",
             {"label": str(data.get("label", ""))},
             session=sid,
         )
         if status not in (200, 201):
             detail = (body or {}).get("detail", "the hub refused to mint a token")
-            return Response(
-                _page(
-                    "Tokens",
-                    f"<p>{html.escape(str(detail))}</p>"
-                    f"<p><a href='/tokens/{html.escape(name)}'>Back</a></p>",
-                    hub,
-                    "/agents",
-                ),
-                media_type=MediaType.HTML,
+            return _tokens_page(
+                request, f"<p class='warn'>{html.escape(str(detail))}</p>"
             )
-        return _tokens_page(
-            request, name, _token_instructions(name, str((body or {}).get("token", "")))
-        )
+        secret = str((body or {}).get("token", ""))
+        return _tokens_page(request, _token_instructions(secret, client.config.base))
 
-    @post("/tokens/{name:str}/revoke", status_code=200, sync_to_thread=True)
-    def revoke(name: str, request: Request, data: Form) -> Response:
+    @post("/tokens/revoke", status_code=200, sync_to_thread=True)
+    def revoke(request: Request, data: Form) -> Response:
+        """Revoke, and say what was just cut off.
+
+        The hub returns the agents that token had admitted, because that is the only
+        question an operator is actually asking — *what will this break?* Reporting a
+        bare "revoked" leaves them to find out from whoever stops working.
+        """
         sid = request.cookies.get(SESSION_COOKIE)
         token_id = str(data.get("id", ""))
         status, body, _ = client.auth_call(
-            "DELETE", f"/auth/agents/{name}/tokens/{token_id}", session=sid
+            "DELETE", f"/auth/tokens/{token_id}", session=sid
         )
-        note = (
-            "<p>Revoked. Any agent still using it is now locked out.</p>"
-            if status in (200, 204)
-            else f"<p>{html.escape(str((body or {}).get('detail', 'failed')))}</p>"
+        if status not in (200, 204):
+            detail = (body or {}).get("detail", "failed")
+            return _tokens_page(
+                request, f"<p class='warn'>{html.escape(str(detail))}</p>"
+            )
+        admitted = (body or {}).get("admitted") or []
+        who = (
+            "It had admitted "
+            + ", ".join(f"<code>{html.escape(str(n))}</code>" for n in admitted)
+            + " — those agents are locked out from their next call."
+            if admitted
+            else "It had never admitted anyone, so nothing was using it."
         )
-        return _tokens_page(request, name, note)
+        return _tokens_page(request, f"<p class='warn'>Revoked. {who}</p>")
 
     # -- the prompt --------------------------------------------------------
 
@@ -1784,7 +1821,7 @@ def build_console(client: HubClient) -> Litestar:
             "recorded and shown, and no check anywhere reads them — an account marked "
             "<code>user</code> can do everything an <code>admin</code> can. The "
             "intention is that <code>admin</code> may add and remove users while "
-            "<code>user</code> is read-only and may mint device tokens. Until that is "
+            "<code>user</code> is read-only and may mint tokens. Until that is "
             "built, do not rely on this to restrain anybody.</p>"
             "<h3>This hub</h3>"
             "<form method='post' action='/settings/save'>"
@@ -2109,7 +2146,6 @@ def build_console(client: HubClient) -> Litestar:
             settings_peer_add,
             settings_peer_remove,
             token_index,
-            tokens,
             mint,
             revoke,
             prompts,

@@ -124,7 +124,7 @@ def test_doctor_keeps_the_global_token_when_identity_is_unresolved(
     # The property this test was written for, unchanged: the shared token reaches the
     # hub and is reported as accepted even though no identity could be resolved.
     assert FakeHubClient.configs[0].token == "shared-secret"
-    assert "device token accepted by the hub" in out
+    assert "token accepted by the hub" in out
     assert "shared, from" in out
     # The wording moved with the explicit-engine mission. "No entry for this engine"
     # was the old diagnosis and it was wrong here: the project has two entries, and

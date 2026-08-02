@@ -260,7 +260,7 @@ exists but is not yours both return 404. Distinguishing them would answer the qu
 the visibility rules exist to refuse.
 
 **Who you are arrives in a header.** `X-Agent-Name`. Under an authenticating hub it is
-verified against a device token (`Authorization: Bearer`); a hub says which it is doing
+verified against a token (`Authorization: Bearer`); a hub says which it is doing
 in `GET /`, and `authenticated: false` means the header is taken at face value.
 """
 
@@ -306,7 +306,7 @@ class Api:
     async def hub(self) -> dict[str, Any]:
         mailbox = self.house.mailbox
         note = (
-            "This hub requires authentication: agents present a device token as a "
+            "This hub requires authentication: agents present a token as a "
             "Bearer credential, humans log in at the console."
             if self.authenticated
             else (
@@ -1470,7 +1470,7 @@ def build_api(
     api.purge_status = purge_status
 
     async def resolve_verified_caller(conn: ASGIConnection) -> str | None:
-        """A caller proven by a credential — a device token or a full session — or None.
+        """A caller proven by a credential — a token or a full session — or None.
 
         Raises :class:`TokenRevoked` for a presented-but-revoked token, which the error
         handler turns into a 401; an *absent* credential is ``None``, not an
@@ -1530,7 +1530,7 @@ def build_api(
             return caller
         if auth_mode == "enforce":
             raise NotAuthenticated(
-                "this hub requires authentication — present a device token as "
+                "this hub requires authentication — present a token as "
                 "`Authorization: Bearer <token>`, or log in at the console"
             )
         # warn: resolve failed, but we still serve on the header identity and say so.
@@ -1562,7 +1562,7 @@ def build_api(
 
         Under ``off`` there is no auth, so a placeholder operator is returned (dev/LAN).
         Otherwise a full (non-limited) session is required. Minting or revoking a
-        device token is an operator action, and so is purging: a credential that lets an
+        token is an operator action, and so is purging: a credential that lets an
         agent send mail must not also let it delete everyone's.
         """
         if auth is None or auth_mode == "off":
@@ -1573,7 +1573,7 @@ def build_api(
             return session.username
         raise NotAuthenticated(
             "log in at the console as an operator — this action is not available to "
-            "an agent's device token, however valid"
+            "an agent's token, however valid"
         )
 
     @get("/", media_type=MediaType.JSON)
@@ -1751,7 +1751,7 @@ def build_api(
         """Rich to a verified caller; barebones to a federating stranger; else refused.
 
         Three audiences, and they are not the same. An **agent on this hub** presents a
-        device token and gets the full document. A **peer hub** presents nothing, and
+        token and gets the full document. A **peer hub** presents nothing, and
         gets only what addressing requires (`thin_actor`). Anyone else, on a hub that
         does not federate, is refused exactly as before.
 
@@ -2145,54 +2145,83 @@ def build_api(
         return {"next": "ok"}
 
     @post(
-        "/auth/agents/{name:str}/tokens",
+        "/auth/tokens",
         status_code=201,
         dependencies={"operator": Provide(provide_operator)},
     )
-    async def mint_token(
-        name: str, data: dict[str, Any], operator: str
-    ) -> dict[str, str]:
-        """Mint a token. **The name in the path is ignored**, and this route is going.
+    async def mint_token(data: dict[str, Any], operator: str) -> dict[str, str]:
+        """Mint a token. It admits a machine; nothing here names an agent.
 
-        A stopgap for exactly one release. Every token now admits a machine rather than
-        an agent, so there is nothing for `name` to mean — but the console still calls
-        this URL, and removing it before the console is rewritten would leave the Tokens
-        page broken on a deployed hub. The replacement is `POST /auth/tokens`; this goes
-        with the console rewrite that stops calling it.
+        **A label is required.** A list of unlabelled tokens is a list nobody can act
+        on: an operator deciding what is safe to revoke has only the label and the
+        agents it has admitted to go on, and inventing one for them would put our guess
+        in the column that is supposed to hold their claim.
         """
         assert auth is not None
-        minted = await auth.mint_token(label=str(data.get("label", "")))
-        return {"id": minted.id, "token": minted.secret, "actor": SHARED_ACTOR}
+        label = str(data.get("label", "")).strip()
+        if not label:
+            raise HTTPException(
+                status_code=400,
+                detail="give the token a label — which machine is it for? A list of "
+                "unlabelled tokens is one nobody can safely revoke from.",
+            )
+        minted = await auth.mint_token(label=label)
+        return {"id": minted.id, "token": minted.secret}
 
-    @get(
-        "/auth/agents/{name:str}/tokens",
-        dependencies={"operator": Provide(provide_operator)},
-    )
-    async def list_tokens(name: str, operator: str) -> dict[str, Any]:
-        """Every token on the hub. The path name is ignored — see `mint_token`."""
+    @get("/auth/tokens", dependencies={"operator": Provide(provide_operator)})
+    async def list_tokens(operator: str) -> dict[str, Any]:
+        """Every token on the hub, with what it was issued as and what it has admitted.
+
+        `boundTo` and `admitted` stay separate on purpose, and it is the same rule the
+        console renders: one is what the row was created with, the other is what the hub
+        observed. A claim shown where a finding appears to be is how somebody revokes
+        the wrong credential.
+        """
         assert auth is not None
-        tokens = await auth.list_tokens()
-        return {
-            "items": [
+        items = []
+        for token in await auth.list_tokens():
+            uses = await auth.token_uses(token.id)
+            items.append(
                 {
-                    "id": t.id,
-                    "label": t.label,
-                    "created": t.created,
-                    "lastUsed": t.last_used,
-                    "revoked": t.revoked,
+                    "id": token.id,
+                    "label": token.label,
+                    "created": token.created,
+                    # `None`, not "", so "never used" and "used at an unknown time" stay
+                    # different facts. They lead to different actions.
+                    "lastUsed": token.last_used or None,
+                    "revoked": token.revoked,
+                    "boundTo": None if token.actor == SHARED_ACTOR else token.actor,
+                    "admitted": [
+                        {
+                            "name": u.actor,
+                            "firstSeen": u.first_seen,
+                            "lastSeen": u.last_seen,
+                            "uses": u.uses,
+                        }
+                        for u in uses
+                    ],
                 }
-                for t in tokens
-            ]
-        }
+            )
+        return {"items": items}
 
     @delete(
-        "/auth/agents/{name:str}/tokens/{token_id:str}",
-        status_code=204,
+        "/auth/tokens/{token_id:str}",
+        status_code=200,
         dependencies={"operator": Provide(provide_operator)},
     )
-    async def revoke_token(name: str, token_id: str, operator: str) -> None:
+    async def revoke_token(token_id: str, operator: str) -> dict[str, Any]:
+        """Revoke, and say what was just cut off.
+
+        Revocation already takes effect on the next call. What is new is the answer to
+        the only question an operator is actually asking — *what will this break?* — so
+        the response names the agents this token had admitted.
+
+        Deliberately not 204. A body is the point.
+        """
         assert auth is not None
-        await auth.revoke_token(token_id)
+        admitted = [u.actor for u in await auth.token_uses(token_id)]
+        revoked = await auth.revoke_token(token_id)
+        return {"revoked": revoked, "admitted": admitted}
 
     async def open_the_house(_: Litestar) -> None:
         """Establish standing invariants once, at startup.

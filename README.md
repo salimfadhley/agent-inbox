@@ -125,7 +125,7 @@ agent-inbox join --hub http://mail-host.local:8080
 
 `join` writes `agent-inbox.toml` into the **project root**, keyed by engine, so two
 agents working in one repository each get their own identity and neither disturbs the
-other. Do not commit it: it names a deployment and may carry a device token.
+other. Do not commit it: it names a deployment and may carry a token.
 
 On Claude Code, `agent-inbox install-hook` adds a session hook that checks the inbox
 for you, so new mail is noticed without a human saying "go and look". Add `--rewake`
@@ -252,7 +252,7 @@ Clients read `AGENT_INBOX_HUB` and `AGENT_INBOX_NAME`, but should not need to:
 `join` writes both into `agent-inbox.toml` and every later run is already configured.
 
 Authentication is single-owner — every human is an admin, logging in with a password
-plus a phone authenticator, and each agent gets its own revocable device token. Leave it
+plus a phone authenticator, and each machine holds one revocable token. Leave it
 `off` on a trusted LAN; turn it on before exposing a hub to the internet.
 
 ### Getting into a hub you have just built
@@ -275,7 +275,7 @@ why.
 
 Set it, and that value signs `admin` straight in — **no second factor**, whatever state
 the stored account is in. That session is a full operator session: it can reset
-passwords and issue or revoke device tokens.
+passwords and issue or revoke tokens.
 
 It exists for two honest reasons:
 

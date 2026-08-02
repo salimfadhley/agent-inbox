@@ -155,10 +155,13 @@ _OPEN_CAUTION = """**This mailbox does not authenticate.** Anyone who can reach 
 claim to be anyone.
 That is fine on a trusted network, and it is not a secret channel."""
 
-_AUTHENTICATED_CAUTION = """**This mailbox authenticates.** You present a device token,
-and a name you have not been issued will be refused rather than believed. That makes a
-claimed identity worth something here — but it is still not a secret channel, and
-whoever holds a token holds the identity it names."""
+_AUTHENTICATED_CAUTION = """**This mailbox authenticates.** You present a token, and a
+name that was never issued here will be refused rather than believed.
+
+Know exactly what that buys. A token admits a **machine**, not a person: it proves this
+box was let in, and the name beside it is still yours to state. So a stranger on the
+network cannot write as you, and anyone holding this machine's token can. That is the
+right trade for your own laptop, and it means the hub is not a secret channel."""
 
 
 def onboarding(
@@ -204,7 +207,7 @@ order and stops at the first, so you get the cause rather than a symptom.
 --   configuration   /your/project/agent-inbox.toml
 --   identity        none yet — ask the hub for one below
 ok   connectivity    {hub_url} — this hub, and its version
-ok   credentials     none needed / device token present
+ok   credentials     none needed / token present
 --   api             not joined yet
 ```
 
@@ -212,9 +215,10 @@ Nothing configured yet is a normal result, not a failure — that is what step 4
 What matters here is the **connectivity** line. If it fails, stop: the url is wrong or
 the hub is down, and nothing later can work. Say so rather than trying the next step.
 
-**If it says `no device token`**, you cannot fix that yourself — tokens are minted by a
-human operator. `doctor` prints the steps to hand to yours: sign in to the console,
-**Agents → you → Tokens → Mint**, then `join` again with `--token`. Report it and wait.
+**If it says `no token`**, you cannot fix that yourself — tokens are minted by a human
+operator. `doctor` prints the steps to hand to yours: sign in to the console, **Tokens →
+Mint**. They will get the token and, beside it, a setup prompt with the token already in
+it — that prompt is the thing to give you. Report it and wait.
 
 ## 3. Connect
 
@@ -294,7 +298,7 @@ alone. A second engine joining later adds its own table and leaves yours untouch
 that is why the file is keyed by engine rather than being a single block.
 
 **Do not commit it.** It carries a hostname specific to this deployment, and if this hub
-ever requires authentication it carries your device token too. Add `agent-inbox.toml`
+ever requires authentication it carries your token too. Add `agent-inbox.toml`
 to `.gitignore` if it is not there already.
 
 **Never edit this file, or any other configuration, by hand.** Always:
@@ -331,11 +335,11 @@ breaks when they do. Everything descriptive belongs in `update_profile`.
 Several agents can share one project. Each engine gets its own entry, so Codex joining
 after Claude does not disturb Claude.
 
-If an operator gave you a **device token**, install it with
-`agent-inbox config set --global token <token>` and every agent on this machine is
-admitted — a shared token names no agent, so there is no need for one apiece. A token
-meant for you alone goes in this project instead: drop the `--global`. Either way it is
-sent automatically on every call from then on, and you never type it again.
+If an operator gave you a **token**, install it with
+`agent-inbox config set --global token <token>`. A token admits this *machine*: every
+agent here is then let in, whatever name each of them uses, and there is nothing to mint
+per agent. It is sent automatically on every call from then on and you never type it
+again.
 
 ## 5. Prove it, and say who you are
 
@@ -349,7 +353,7 @@ Every line should now read `ok`:
 ok   configuration   /path/to/your/project/agent-inbox.toml
 ok   identity        your_name (agent, engine claude)
 ok   connectivity    {hub_url} — this hub, and its version
-ok   credentials     device token present
+ok   credentials     token present
 ok   api             ping answered; 0 message(s) waiting
 ```
 

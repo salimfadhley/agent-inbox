@@ -70,7 +70,7 @@ class Settings:
     secret_key: str = ""
     #: **Low-security mode.** When set, this value logs `admin` in directly — no second
     #: factor, whatever state the stored account is in — and that session can reset
-    #: passwords and issue or revoke device tokens. It exists for manual testing and for
+    #: passwords and issue or revoke tokens. It exists for manual testing and for
     #: getting back into a hub whose password or authenticator is lost.
     #:
     #: Anyone who can read the environment is then an administrator of this hub. It is
@@ -179,7 +179,7 @@ def build_app(
             logger.warning(
                 "%s. AGENT_MAILBOX_ADMIN_PASSWORD is set: `admin` can sign in with it "
                 "WITHOUT a second factor, and can then reset passwords and issue or "
-                "revoke device tokens. Anyone who can read this hub's environment "
+                "revoke tokens. Anyone who can read this hub's environment "
                 "controls it. Intended for manual testing and for recovering a hub "
                 "whose password or authenticator is lost — unset it afterwards.",
                 INSECURE_ADMIN_WARNING,

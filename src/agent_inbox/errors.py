@@ -61,7 +61,7 @@ STATUS_BY_CODE: dict[str, int] = {
     "not_authenticated": 401,
     # the account must finish first-run enrolment before acting
     "enrolment_required": 403,
-    # a revoked device token was presented
+    # a revoked token was presented
     "token_revoked": 401,
     # too many failed logins from one source
     "too_many_attempts": 429,

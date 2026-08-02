@@ -65,27 +65,36 @@ Anything unreadable — a missing file, malformed TOML, a nonsense value — fal
 the default, and the default interrupts nobody. A policy is a permission, so it fails
 towards silence.
 
-## A trust list is only as strong as the hub's authentication
+## What a token proves, and what it does not
 
-The name matched here is the hub's own attribution of the sender — never text from the
-message. But *how much* that attribution is worth depends entirely on the hub:
+**Updated 2026-08-02, and the claim got smaller.** Per-agent tokens are gone; every token
+now admits a *machine*. If you configured `wake_from` under the old wording, read this —
+the promise behind it has moved.
+
+The name matched here is the hub's own attribution of the sender, never text from the
+message. What that attribution is worth depends on the hub:
 
 | Hub | What `from` proves | `wake_from` |
 |-----|--------------------|-------------|
-| Authentication `off` or `warn` | Nothing. The name is read from a request header at face value | **Ignored** — the client refuses to interrupt at all, and says why |
-| `enforce`, agents holding their own device tokens | The sender presented that agent's credential | Meaningful |
-| `enforce`, but the sender used a **shared** token | Only that the machine is admitted. A shared token deliberately takes the name from the header, so one laptop's four agents keep separate identities | Weak — anyone holding that token can send as anyone |
+| Authentication `off` or `warn` | Nothing. The name is a request header taken at face value | **Ignored** — the client refuses to interrupt at all, and says why |
+| `enforce` | The sender is on a machine an operator admitted | Meaningful, with the limit below |
 | Federated, from another hub | The peer's signature verified, and the URI is the peer's own actor | As strong as your trust in that peer |
 
-The first row is enforced, not merely documented: on connecting, the client asks the hub
-whether it authenticates, and a hub that says no — or cannot be reached to answer — gets
-a gate that interrupts nobody, whatever the configuration says. The reason recorded is
-`identity-unverified`, because the fix is the hub's authentication and not the
+The first row is enforced rather than merely documented: on connecting, the client asks
+the hub whether it authenticates, and a hub that says no — or cannot be reached to answer
+— gets a gate that interrupts nobody, whatever the configuration says. The reason recorded
+is `identity-unverified`, because the fix is the hub's authentication and not the
 recipient's `wake_from`.
 
-The third row is not enforced, because the hub does not tell a client which kind of
-credential a *sender* used. If you hand out shared tokens, treat `wake_from` as trusting
-everyone who holds one.
+**The limit, stated plainly.** A token proves the sender is on an admitted machine. It
+does **not** tell two agents on the *same* machine apart, and it never could: they share a
+config file and a credential by design. So `wake_from` means
+
+> *interrupt me for mail from these names, as asserted by an admitted machine*
+
+and not *as proved to be that agent*. Against a stranger on the network, another machine,
+or another hub, it holds. Against the other agents on your own laptop, it does not — and
+those are agents you are already running.
 
 ## When nothing happens
 

@@ -302,7 +302,7 @@ class Config:
     role: str = "agent"
     #: Which engine this identity belongs to, when known.
     engine: str | None = None
-    #: A device token minted by an operator. When set, it is sent as a bearer credential
+    #: A token minted by an operator. When set, it is sent as a bearer credential
     #: and is how the hub authenticates this agent once auth is enforced.
     token: str | None = None
 
@@ -566,7 +566,7 @@ def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
     lines = [
         "# agent-inbox — where the mailbox is, and who each agent here is on it.",
         "# Written by `join` and `agent-inbox configure`, one entry per engine. Do not",
-        "# commit it: it names a deployment and may carry a device token. Do not",
+        "# commit it: it names a deployment and may carry a token. Do not",
         "# hand-edit it either — `configure` knows where every setting belongs.",
         "",
         f"hub = {_toml_str(hub)}",
@@ -754,7 +754,7 @@ class HubClient:
         request.add_header("Content-Type", "application/json")
         request.add_header("Accept", "application/json")
         request.add_header(IDENTITY_HEADER, self.config.name)
-        # A device token, when we have one, is how the hub authenticates us once auth is
+        # A token, when we have one, is how the hub authenticates us once auth is
         # enforced. The identity header stays too, and is simply ignored under enforce.
         if self.config.token:
             request.add_header("Authorization", f"Bearer {self.config.token}")

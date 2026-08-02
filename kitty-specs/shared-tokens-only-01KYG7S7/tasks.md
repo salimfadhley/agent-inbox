@@ -14,11 +14,17 @@ answer, and only then do the words describe it.
 | WP01 | The usage table, and one credential shape | — | Yes — invisible, but the whole foundation |
 | WP02 | Three routes in, three out | WP01 | Yes |
 | WP03 | One screen that lists tokens, not agents | WP02 | **Ships together with WP02** — see below |
-| WP04 | The words follow the code | WP03 | Yes |
+| WP04 | The words follow the code | WP03 | **Ships with WP02+WP03** — see below |
 
 **WP04 must not lead.** Prose describing behaviour that has not shipped is a failure this
 project keeps finding — a promise corrected in one file and left standing in another leaves
 the reader with two answers.
+
+**WP04 joined that release too**, decided during implementation. WP03 removes the
+per-agent token screens, so the moment it ships the prompt and `doctor` describe a
+feature that is gone. Holding the prose back would create exactly the window WP04 exists
+to prevent — the rule is that prose must not *lead*, and shipping together does not
+break it.
 
 **WP02 and WP03 ship as one release** (analysis finding A1). The console fetches
 `/auth/agents/{name}/tokens` today; WP02 removes that route and WP03 repairs the console, so
@@ -96,12 +102,12 @@ route that can mint one bound to a single actor.
 **Independent test**: `POST /auth/tokens` with no label is refused; with one it returns a
 secret once; `GET` lists it with an empty `admitted`; `DELETE` revokes it.
 
-- [ ] T007 `POST /auth/tokens` — label required, refuses an empty one (WP02)
-- [ ] T008 `GET /auth/tokens` — every token, with `admitted` and `boundTo` (WP02)
-- [ ] T009 `DELETE /auth/tokens/{id}` — and the confirmation says what it cut off (WP02)
-- [ ] T010 The three `/auth/agents/{name}/tokens…` routes are removed (WP02)
-- [ ] T011 Tests: operator-only, shown once, revocation refuses on the next call (WP02)
-- [ ] T012 Directive 4 — outside review before WP02 closes (WP02)
+- [x] T007 `POST /auth/tokens` — label required, refuses an empty one (WP02)
+- [x] T008 `GET /auth/tokens` — every token, with `admitted` and `boundTo` (WP02)
+- [x] T009 `DELETE /auth/tokens/{id}` — and the confirmation says what it cut off (WP02)
+- [x] T010 The three `/auth/agents/{name}/tokens…` routes are removed (WP02)
+- [x] T011 Tests: operator-only, shown once, revocation refuses on the next call (WP02)
+- [x] T012 Directive 4 — outside review before WP02 closes (WP02)
 
 **Risks**: removing routes is the irreversible half. Anything still calling them — the
 console, tests, `doctor` — breaks at once rather than degrading, which is the right
@@ -118,12 +124,12 @@ that makes it worth having — when it was last used — and the agents it has a
 **Independent test**: mint from the console; it appears with its label; an agent
 authenticates; the agent's name appears against it; revoke; the row stays, marked.
 
-- [ ] T013 `/tokens` lists every token on the hub (WP03)
-- [ ] T014 The mint form: a label and a button, and the label is required (WP03)
-- [ ] T015 Revoking says which agents it just cut off (WP03)
-- [ ] T016 `/tokens/{name}` and the Agents directory's Tokens column go away (WP03)
-- [ ] T017 Tests: the screen renders, the claim and the finding stay apart (WP03)
-- [ ] T018 Directive 4 — outside review before WP03 closes (WP03)
+- [x] T013 `/tokens` lists every token on the hub (WP03)
+- [x] T014 The mint form: a label and a button, and the label is required (WP03)
+- [x] T015 Revoking says which agents it just cut off (WP03)
+- [x] T016 `/tokens/{name}` and the Agents directory's Tokens column go away (WP03)
+- [x] T017 Tests: the screen renders, the claim and the finding stay apart (WP03)
+- [x] T018 Directive 4 — outside review before WP03 closes (WP03)
 
 **Risks**: FR-010. **Issued to** is a claim the operator typed; **Admitted** is what the
 hub observed. Rendering them as one column is how somebody revokes the wrong credential,
@@ -140,12 +146,12 @@ documentation says what a shared token actually proves.
 **Independent test**: search the repository for the per-agent token story; every hit is
 either corrected or is a dated record of what was true at the time.
 
-- [ ] T019 The served prompt stops describing a per-agent token (WP04)
-- [ ] T020 The prompt's doctor paragraph stops sending operators to `Agents -> you -> Tokens` (WP04)
-- [ ] T021 The MCP `join` tool's `token` parameter, and `README.md` (WP04)
-- [ ] T022 FR-012: `doc/interrupting-an-agent.md` says what a shared token proves (WP04)
-- [ ] T023 Tests: no surviving sentence describes a token bound to one agent (WP04)
-- [ ] T024 Directive 4 — outside review before WP04 closes (WP04)
+- [x] T019 The served prompt stops describing a per-agent token (WP04)
+- [x] T020 The prompt's doctor paragraph stops sending operators to `Agents -> you -> Tokens` (WP04)
+- [x] T021 The MCP `join` tool's `token` parameter, and `README.md` (WP04)
+- [x] T022 FR-012: `doc/interrupting-an-agent.md` says what a shared token proves (WP04)
+- [x] T023 Tests: no surviving sentence describes a token bound to one agent (WP04)
+- [x] T024 Directive 4 — outside review before WP04 closes (WP04)
 
 **Risks**: T022 is the one with teeth. `v0.41.0` gates interruption on identity and refuses
 when the hub does not authenticate. After this mission `authenticated` stays true while the

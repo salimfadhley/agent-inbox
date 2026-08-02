@@ -209,17 +209,29 @@ class TestLoginFlow:
             )
             assert done.status_code == 200 and done.json()["next"] == "ok"
             # the session now authorises an operator action: mint a token
-            minted = c.post(f"/auth/agents/{ROSEMARY}/tokens", json={"label": "l"})
+            minted = c.post("/auth/tokens", json={"label": "the laptop"})
             assert minted.status_code == 201
             assert "token" in minted.json()
+            assert "actor" not in minted.json(), "a token admits a machine"
 
     async def test_token_admin_requires_a_session(self) -> None:
         client, _ = _build("enforce")
         with client as c:
             # no session cookie → refused
+            assert c.post("/auth/tokens", json={"label": "l"}).status_code == 401
+            assert c.get("/auth/tokens").status_code == 401
+            assert c.delete("/auth/tokens/whatever").status_code == 401
+
+    async def test_the_per_agent_routes_are_gone(self) -> None:
+        """Not deprecated — removed. Leaving a second way to mint is the thing this
+        mission exists to stop, and a 404 is the proof it is actually unreachable."""
+        client, _ = _build("enforce")
+        with client as c:
             assert (
-                c.post("/auth/agents/x/tokens", json={"label": "l"}).status_code == 401
+                c.post("/auth/agents/x/tokens", json={"label": "l"}).status_code == 404
             )
+            assert c.get("/auth/agents/x/tokens").status_code == 404
+            assert c.delete("/auth/agents/x/tokens/t1").status_code == 404
 
 
 class TestLoginThrottle:
@@ -444,6 +456,100 @@ class TestSharedToken:
                 },
             )
             assert got.status_code == 200
+
+
+class TestTheTokenApi:
+    """One operator-only API for tokens, and nothing in it names an agent."""
+
+    async def _operator(self, c, auth) -> None:
+        pw = await auth.bootstrap()
+        c.post("/auth/login", json={"username": "admin", "password": pw})
+        body = c.get("/auth/enrol").json()
+        secret = body["provisioningUri"].split("secret=")[-1].split("&")[0]
+        c.post(
+            "/auth/enrol",
+            json={"password": "newpassword", "otp": totp.current_code(secret)},
+        )
+
+    async def test_an_empty_label_is_refused_rather_than_invented(self) -> None:
+        """A list of unlabelled tokens is a list nobody can safely revoke from, and
+        inventing one puts our guess in the column meant to hold the operator's."""
+        client, auth = _build("enforce")
+        with client as c:
+            await self._operator(c, auth)
+            refused = c.post("/auth/tokens", json={"label": "   "})
+            assert refused.status_code == 400
+            assert "label" in refused.json()["detail"]
+
+    async def test_the_list_keeps_the_claim_and_the_finding_apart(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            await self._operator(c, auth)
+            minted = c.post("/auth/tokens", json={"label": "workshop"}).json()
+            token = await auth.resolve_token(minted["token"])
+            assert token is not None
+            await auth.admit(token, ROSEMARY)
+            row = next(
+                t
+                for t in c.get("/auth/tokens").json()["items"]
+                if t["id"] == minted["id"]
+            )
+        assert row["label"] == "workshop"
+        assert row["boundTo"] is None, "a shared token is bound to nobody"
+        assert [u["name"] for u in row["admitted"]] == [ROSEMARY]
+
+    async def test_never_used_is_null_not_empty(self) -> None:
+        """ "Never" and "at an unknown time" are different facts leading to different
+        actions, so they must not both render as a blank."""
+        client, auth = _build("enforce")
+        with client as c:
+            await self._operator(c, auth)
+            minted = c.post("/auth/tokens", json={"label": "fresh"}).json()
+            row = next(
+                t
+                for t in c.get("/auth/tokens").json()["items"]
+                if t["id"] == minted["id"]
+            )
+        assert row["lastUsed"] is None
+
+    async def test_a_legacy_bound_token_is_listed_as_bound(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            await self._operator(c, auth)
+            await _legacy_bound(auth, ROSEMARY)
+            rows = c.get("/auth/tokens").json()["items"]
+        bound = [t for t in rows if t["boundTo"]]
+        assert [t["boundTo"] for t in bound] == [ROSEMARY]
+
+    async def test_revoking_reports_what_it_cut_off(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            await self._operator(c, auth)
+            minted = c.post("/auth/tokens", json={"label": "workshop"}).json()
+            token = await auth.resolve_token(minted["token"])
+            assert token is not None
+            await auth.admit(token, ROSEMARY)
+            gone = c.delete(f"/auth/tokens/{minted['id']}")
+        assert gone.status_code == 200
+        assert gone.json() == {"revoked": True, "admitted": [ROSEMARY]}
+
+    async def test_a_revoked_token_stays_listed_with_its_history(self) -> None:
+        """A revoked token that vanishes takes the record of what it did with it."""
+        client, auth = _build("enforce")
+        with client as c:
+            await self._operator(c, auth)
+            minted = c.post("/auth/tokens", json={"label": "workshop"}).json()
+            token = await auth.resolve_token(minted["token"])
+            assert token is not None
+            await auth.admit(token, ROSEMARY)
+            c.delete(f"/auth/tokens/{minted['id']}")
+            row = next(
+                t
+                for t in c.get("/auth/tokens").json()["items"]
+                if t["id"] == minted["id"]
+            )
+        assert row["revoked"] is True
+        assert [u["name"] for u in row["admitted"]] == [ROSEMARY]
 
 
 class TestTheAdmittedRecordCannotBeSteered:

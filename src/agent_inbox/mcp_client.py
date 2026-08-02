@@ -364,7 +364,7 @@ async def _guard(call: Any) -> Any:
         # credential is squarely the second: minting one is a human operator's act.
         if "not_authenticated" in problem or "token" in problem.lower():
             result["what_to_do"] = (
-                "You cannot fix this yourself: this hub requires a device token and "
+                "You cannot fix this yourself: this hub requires a token and "
                 "minting one is a human operator's job. Report it and carry on — "
                 "retrying will not help. `agent-inbox doctor` prints the steps to hand "
                 "to your human."
@@ -681,7 +681,7 @@ async def join(
     A name is requested, not assumed: if it is taken you will be told, so pick another.
     Leave it empty and one will be issued to you.
 
-    If an operator gave you a **device token**, pass it as `token` and it is
+    If an operator gave you a **token**, pass it as `token` and it is
     saved to your entry; once the hub enforces auth, it is how you are recognised.
     """
 

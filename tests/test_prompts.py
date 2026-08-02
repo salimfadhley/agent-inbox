@@ -38,12 +38,30 @@ class TestTheAuthCautionMatchesTheHub:
         )
 
     def test_an_authenticated_hub_still_says_what_a_token_does_not_buy(self) -> None:
-        """Authentication is not secrecy, and a token names whoever holds it. Dropping
-        that when the warning changed would have traded one wrong caution for
+        """Authentication is not secrecy, and it is not proof of *who*.
+
+        A token admits a machine — several agents share one — so the caution has to
+        name the boundary rather than imply the hub checked which agent is calling.
+        Dropping this when the warning changed would trade one wrong caution for
         another."""
         text = onboarding("http://hub.example", authenticated=True)
         assert "not a secret channel" in text
-        assert "holds the identity it names" in text
+        assert "admits a **machine**" in text
+        assert "anyone holding this machine's token can" in text
+
+    def test_no_prompt_describes_a_token_bound_to_one_agent(self) -> None:
+        """FR-007. The words follow the code, and the code has one credential now."""
+        for auth in (True, False):
+            text = onboarding("http://hub.example", authenticated=auth)
+            assert "device token" not in text
+            assert "meant for you alone" not in text
+            assert "one apiece" not in text
+
+    def test_and_says_what_the_one_credential_does(self) -> None:
+        """A negative assertion alone would pass against a prompt that says nothing."""
+        text = onboarding("http://hub.example", authenticated=True)
+        assert "config set --global token" in text
+        assert "admits this *machine*" in text
 
     def test_mail_is_data_either_way(self) -> None:
         """ADR 0008 does not depend on authentication, so neither may this line."""
