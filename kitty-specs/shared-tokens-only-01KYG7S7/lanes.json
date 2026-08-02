@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "mission_slug": "shared-tokens-only-01KYG7S7",
+  "mission_id": "01KYG7S7XBV5MGER28978A4FJH",
+  "mission_branch": "kitty/mission-shared-tokens-only-01KYG7S7",
+  "target_branch": "main",
+  "lanes": [
+    {
+      "lane_id": "lane-a",
+      "wp_ids": [
+        "WP01"
+      ],
+      "write_scope": [
+        "src/agent_inbox/auth/**",
+        "tests/test_auth_service.py",
+        "tests/test_auth_store.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [],
+      "parallel_group": 0
+    },
+    {
+      "lane_id": "lane-b",
+      "wp_ids": [
+        "WP02"
+      ],
+      "write_scope": [
+        "src/agent_inbox/api.py",
+        "tests/test_auth_api.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-a"
+      ],
+      "parallel_group": 1
+    },
+    {
+      "lane_id": "lane-c",
+      "wp_ids": [
+        "WP03"
+      ],
+      "write_scope": [
+        "src/agent_inbox/console.py",
+        "tests/test_console.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "artifact-rendering",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-b"
+      ],
+      "parallel_group": 2
+    },
+    {
+      "lane_id": "lane-d",
+      "wp_ids": [
+        "WP04"
+      ],
+      "write_scope": [
+        "README.md",
+        "doc/interrupting-an-agent.md",
+        "src/agent_inbox/cli.py",
+        "src/agent_inbox/mcp_client.py",
+        "src/agent_inbox/prompts.py",
+        "tests/test_prompts.py"
+      ],
+      "predicted_surfaces": [
+        "api",
+        "legacy-cleanup"
+      ],
+      "depends_on_lanes": [
+        "lane-c"
+      ],
+      "parallel_group": 3
+    }
+  ],
+  "computed_at": "2026-08-02T14:03:57.223342+00:00",
+  "computed_from": "dependency_graph+ownership",
+  "planning_artifact_wps": []
+}
