@@ -52,6 +52,7 @@ Each row links to the section that states it in full, below.
 | **FR-009** | Recording last use is **coarse** — at most one write per token per bucket, not one per request. | Specified |
 | **FR-010** | "Issued to" (a label the operator typed) and "admitted" (what we observed) are separate columns. A claim must never be shown where a finding appears to be. | Specified |
 | **FR-011** | The admitted history is **last use per agent per token**, overwritten in place — bounded by the number of agents, not by traffic. | Specified |
+| **FR-012** | The interrupt gate's guarantee is restated: a shared token proves the *machine*, not the agent. The check stays; the words and `doc/interrupting-an-agent.md` stop claiming more than it gives. | Specified |
 
 ### FR-001 — one Tokens screen, listing every token
 
@@ -191,10 +192,14 @@ different facts leading to different actions.
 
 Decided 2026-08-01. At most **one write per token per bucket**, not one per request.
 
-This matters because authentication is the hottest path in the system and currently only
-*reads*. Nobody needs second-precision to decide whether a credential is abandoned, and the
-cheap version is the one that still works under load. Bucket size is a planning choice;
-anything from a minute to an hour satisfies this.
+**Corrected 2026-08-02.** This was written believing authentication only *reads* today. It
+does not: `AuthService.resolve_token` calls `touch_token` on every successful call, which is
+an `UPDATE` plus a `commit` per authenticated request. So coarse recording is not a new cost
+to be justified — it is a **fix for a write that is already on the hot path**, and the
+existing `last_used` write should be folded into the same bucket rather than left beside it.
+
+Nobody needs second-precision to decide whether a credential is abandoned. Bucket size is a
+planning choice; anything from a minute to an hour satisfies this.
 
 ### FR-010 — "issued to" is a claim; "admitted" is a finding. Never the same column.
 
@@ -220,6 +225,37 @@ the same failure shape as an unbounded queue.
 
 The cost, accepted: no history. You can see that an agent last used a token on Tuesday, not
 that it used it heavily in June. Nobody has asked for the latter.
+
+### FR-012 — what this does to who may interrupt an agent
+
+Added 2026-08-02, from analysis before planning. **This mission changes the meaning of a
+guarantee another feature depends on**, and that has to be settled here rather than
+discovered there.
+
+`v0.41.0` lets a recipient name senders allowed to interrupt it mid-turn, gated on identity
+and never on anything the sender wrote. It refuses entirely when the hub does not
+authenticate, because a hub with authentication off takes the sender's name from a request
+header at face value. That check reads `authenticated` from the hub descriptor.
+
+Once every token is shared, `provide_caller` takes the name from `X-Agent-Name` on **every**
+call — that is already what it does for `SHARED_ACTOR`, and after this mission there is no
+other kind. So `authenticated` stays `true` while the name behind it is header-supplied.
+Left alone, the interrupt gate would report identity as verified and honour a trust list over
+a name anyone holding the machine's token can set: the same hole, reinstated behind a check
+that now says it is fine, which is worse than having no check.
+
+**Decided: the boundary is the machine, and the words must say so.** A shared token proves
+the sender is on a machine an operator admitted. That is a real and useful guarantee — it
+still stops a stranger on the network, another machine, and (with signatures) another hub.
+What it does not do is tell two agents on the *same* machine apart, and it never could: they
+share a config file and a credential by design.
+
+So the check stays, because it still separates "anyone who can reach this hub" from "a
+machine the operator admitted". What changes is the claim made for it. `wake_from` means
+*interrupt me for mail from these names, as asserted by an admitted machine* — not *as proved
+to be that agent*. The reason code `identity-unverified` keeps its meaning; the documentation
+in `doc/interrupting-an-agent.md`, whose table still has a row for per-agent device tokens,
+must lose that row and say plainly what remains.
 
 ### Out of scope, on purpose
 
