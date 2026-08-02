@@ -14,6 +14,15 @@ harness-specific (charter). The core decision is a **pure function**
 (:func:`wake_response`), testable without a network or a live session; :func:`run` is
 the thin, totally fail-silent I/O wrapper — a wake must never break, block, or slow a
 turn.
+
+The ``--wait`` waiter — the opt-in `asyncRewake` hook that keeps an *idle* session
+reachable — **holds the hub's event stream, and polls underneath it**. An arrival ends
+the sleep, so a wake takes about a second rather than up to the poll interval. The poll
+is still there and still unconditional: a hub too old to serve the stream, a proxy that
+will not hold a connection, a revoked credential, or a bug in :class:`ArrivalStream`
+each leave the waiter behaving exactly as it did before the stream existed. **The stream
+can only ever shorten a sleep**, which is what makes that true rather than merely
+intended.
 """
 
 import json

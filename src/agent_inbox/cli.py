@@ -1249,7 +1249,8 @@ def retention(ctx: click.Context) -> int:
 @click.option(
     "--wait",
     is_flag=True,
-    help="poll until new mail arrives; intended for asyncRewake Stop hooks",
+    help="hold the hub's event stream until mail arrives, polling underneath; "
+    "intended for asyncRewake Stop hooks",
 )
 @click.option(
     "--poll-interval",

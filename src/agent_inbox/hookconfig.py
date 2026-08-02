@@ -21,6 +21,11 @@ EVENTS = ("SessionStart", "UserPromptSubmit", "Stop")
 _TIMEOUT = 10
 
 #: The opt-in asyncRewake Stop hook is a real waiter, not a one-shot check.
+#:
+#: The interval is the **floor**, not the whole story: the waiter holds the hub's event
+#: stream and polls underneath it, lengthening this while a connection is actually open.
+#: What it fixes is the unstreamed case — a hub too old for the route, or a network that
+#: will not hold a connection — which must keep waking at the speed it always did.
 _REWAKE_TIMEOUT = 8 * 60 * 60
 _REWAKE_POLL_INTERVAL = 5
 

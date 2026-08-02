@@ -97,8 +97,8 @@ longer one.
 **Independent test**: nothing user-facing says the waiter polls for mail, except where it
 correctly says polling is the floor.
 
-- [ ] T012 The prose stops saying the waiter polls (WP03)
-- [ ] T013 `--wait`'s CLI help says what it now does (WP03)
+- [x] T012 The prose stops saying the waiter polls (WP03)
+- [x] T013 `--wait`'s CLI help says what it now does (WP03)
 
 **Sketch**: `wake.py`'s module docstring, `cli.py`'s `--wait` help text, and whichever of
 `doc/` describes the hook. The honest sentence is "holds the hub's event stream, and polls

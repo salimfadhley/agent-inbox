@@ -35,9 +35,16 @@ hosted-HTTP hub).
 - A per-project **watermark** announces each message once (Stop's exit-2 fires once per
   message and cannot loop).
 - `install-hook --rewake` installs the Stop hook as `async` + `asyncRewake`, but as a real
-  background waiter: `wake-check --wait` polls cheaply and exits 2 only when new mail
-  appears. A per-project lock prevents duplicate waiters, because Claude Code does not
-  deduplicate async hook firings.
+  background waiter: `wake-check --wait` exits 2 only when new mail appears. A per-project
+  lock prevents duplicate waiters, because Claude Code does not deduplicate async hook
+  firings.
+- **Since 2026-08-02 the waiter holds the hub's event stream, and polls underneath it**
+  (mission `wake-without-polling-01KZ23TA`). An arrival on the stream ends the sleep, so a
+  wake takes about a second rather than up to the poll interval, and a full wait costs one
+  held connection plus a bounded slow poll instead of 5,760 requests. What did **not**
+  change is the guarantee: the poll is still there, still unconditional, and a hub too old
+  to serve the stream behaves exactly as it did before. The stream can only ever shorten a
+  sleep.
 - The hook is **totally fail-silent**: hub down, unconfigured, corrupt state, or a bug →
   prints nothing and exits 0. A hook on every turn must never break, block, or slow one; the
   mailbox stays the durable record, so a missed wake only defers the agent to its next poll.
