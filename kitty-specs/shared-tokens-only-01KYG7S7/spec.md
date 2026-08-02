@@ -53,6 +53,7 @@ Each row links to the section that states it in full, below.
 | **FR-010** | "Issued to" (a label the operator typed) and "admitted" (what we observed) are separate columns. A claim must never be shown where a finding appears to be. | Specified |
 | **FR-011** | The admitted history is **last use per agent per token**, overwritten in place — bounded by the number of agents, not by traffic. | Specified |
 | **FR-012** | The interrupt gate's guarantee is restated: a shared token proves the *machine*, not the agent. The check stays; the words and `doc/interrupting-an-agent.md` stop claiming more than it gives. | Specified |
+| **FR-013** | The mint screen hands over the **token and the prompt that contains it, together**, at the one moment the secret exists. No paste box, no lookup, no second chance. | Specified |
 
 ### FR-001 — one Tokens screen, listing every token
 
@@ -256,6 +257,34 @@ machine the operator admitted". What changes is the claim made for it. `wake_fro
 to be that agent*. The reason code `identity-unverified` keeps its meaning; the documentation
 in `doc/interrupting-an-agent.md`, whose table still has a row for per-agent device tokens,
 must lose that row and say plainly what remains.
+
+### FR-013 — the token and its prompt are born together
+
+Added 2026-08-02, at the owner's suggestion, and it replaces an earlier sketch of a
+paste-box on the prompt page.
+
+**The hub cannot retrieve a token, and that is not a policy.** `DeviceToken` holds
+`token_hash` and nothing else; the raw secret exists in memory for the length of one
+response and is written nowhere. There is no retrieval path to build and none can be added
+without changing how tokens are stored.
+
+That constraint picks the design. The mint response is the *only* moment in a token's life
+when the secret and the hub's identity are both in hand, so it is the only place a
+ready-to-use prompt can be produced without a lookup. So the mint screen shows the secret
+and, beside it, the onboarding prompt with that token already in it — one copy, and the
+agent's setup has no second step.
+
+Consequences, both accepted:
+
+- **One chance.** An operator who closes that page without copying has lost the prompt as
+  surely as they have lost the token, and must mint a fresh one. That is already true of
+  the secret; this only extends the same rule to the text around it. The page must say so.
+- **It is a POST response, deliberately.** Not a URL, not a bookmark, not a `?token=`
+  parameter. A page carrying a live credential must not be re-fetchable, cacheable, or
+  linkable, and a response to a form submission is none of those things.
+
+This lands in the Tokens screen rather than in a later mission: it is the same page, and
+building it separately would mean rewriting the screen twice.
 
 ### Out of scope, on purpose
 
