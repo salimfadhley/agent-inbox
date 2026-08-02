@@ -53,6 +53,10 @@ and cannot be revoked from the console — the operator's only recourse is the d
 
 ## Subtasks
 
+**This is a rewrite, not a new screen** (analysis finding A4). `/tokens`, `/tokens/{name}`
+and a shared-mint form all exist today; the substantive half of this package is what T016
+removes.
+
 ### T013 — `/tokens` lists every token on the hub
 
 Columns: **label**, **issued**, **last used**, **agents admitted**, **Revoke**.

@@ -71,13 +71,19 @@ Say that once, without hedging between two shapes.
 Mind the 2KB instruction budget if you touch anything the MCP server serves at session
 start — it truncates at the tail.
 
-### T020 — `doctor`'s `_token_help`
+### T020 — The doctor paragraph, which is in `prompts.py` and not where you think
 
-`cli.py`. It currently walks an operator to **Agents → you → Tokens → Mint**, and two of
-those steps are pages that no longer exist. An instruction to visit a deleted page is worse
-than none: it reads as a broken hub.
+**Corrected by analysis (A2).** The obvious suspect is `cli.py`'s `_token_help`, and it is
+already right — it says "Tokens -> Mint a shared token". The stale instruction is in
+**`prompts.py:215`**, in the step-2 paragraph about what `doctor` prints: *"sign in to the
+console, **Agents → you → Tokens → Mint**, then `join` again with `--token`"*. Two of those
+steps are pages WP03 deletes.
 
-The new path is Tokens → Mint, and the token admits the machine rather than the agent.
+An instruction to visit a page that no longer exists is worse than no instruction: it reads
+as a broken hub rather than as stale text. The new path is Tokens → Mint, and the token
+admits the machine rather than the agent.
+
+Re-read `_token_help` anyway to confirm it still matches after WP03.
 
 ### T021 — The MCP tool and the README
 

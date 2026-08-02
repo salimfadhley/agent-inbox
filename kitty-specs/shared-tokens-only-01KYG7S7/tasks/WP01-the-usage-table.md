@@ -141,6 +141,10 @@ and retire it deliberately.
 New rows use `SHARED_ACTOR` or drop the column's meaning entirely; either is fine provided
 the old rows keep working.
 
+**`MintedToken` loses its `actor` field** (analysis finding A3). It is returned by the mint
+route, so this changes a published response shape — do it here, deliberately, rather than
+leaving a field that always says `*` and means nothing.
+
 ### T005 — Tests, and the order to write them in
 
 **Write the lockout test first**, before touching `mint_token`: a token row with a real

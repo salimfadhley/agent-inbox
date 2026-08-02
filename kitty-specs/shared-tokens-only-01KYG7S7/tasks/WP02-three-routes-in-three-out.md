@@ -61,7 +61,9 @@ secret **once**.
 act on, and inventing a label for an operator who gave none puts a claim in a column that
 is supposed to hold theirs. Refuse with a reason, do not invent.
 
-Nothing about minting names an agent — no `actor` in the body, no actor in the response.
+Nothing about minting names an agent — no `actor` in the body, and **no `actor` in the
+response** (analysis finding A3: `MintedToken` loses the field in WP01, and this is the route
+that published it).
 
 ### T008 — `GET /auth/tokens`
 
