@@ -74,12 +74,12 @@ rewrites one screen, and corrects six files of prose.
 **Independent test**: authenticate twice as two names with one token; both appear against
 it with sensible first and last seen, and the second minute of traffic writes once.
 
-- [ ] T001 `TokenUse` record and the `auth_token_use` table, both stores (WP01)
-- [ ] T002 Coarse recording: one write per token per minute, `last_used` folded in (WP01)
-- [ ] T003 `resolve_token` answers "is this credential good", not "who is this" (WP01)
-- [ ] T004 Minting takes a label and never an actor, and `MintedToken` loses its `actor`; legacy bound rows keep working (WP01)
-- [ ] T005 Tests, starting with the lockout: a bound token still admits its agent (WP01)
-- [ ] T006 Directive 4 — outside review before WP01 closes (WP01)
+- [x] T001 `TokenUse` record and the `auth_token_use` table, both stores (WP01)
+- [x] T002 Coarse recording: one write per token per minute, `last_used` folded in (WP01)
+- [x] T003 `resolve_token` answers "is this credential good", not "who is this" (WP01)
+- [x] T004 Minting takes a label and never an actor, and `MintedToken` loses its `actor`; legacy bound rows keep working (WP01)
+- [x] T005 Tests, starting with the lockout: a bound token still admits its agent (WP01)
+- [x] T006 Directive 4 — outside review before WP01 closes (WP01)
 
 **Risks**: this is the hot path. Every authenticated request passes through it, and the
 mission puts an upsert there. The bucket must be checked *before* the write, not the write

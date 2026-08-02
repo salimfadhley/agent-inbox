@@ -19,7 +19,8 @@ from litestar.testing import TestClient
 from agent_inbox import api as api_module
 from agent_inbox.api import IDENTITY_HEADER, SESSION_COOKIE, build_api
 from agent_inbox.auth import secrets, totp
-from agent_inbox.auth.records import SHARED_ACTOR
+from agent_inbox.auth import secrets as auth_secrets
+from agent_inbox.auth.records import SHARED_ACTOR, DeviceToken
 from agent_inbox.auth.service import AuthService
 from agent_inbox.auth.store import InMemoryAuthStore
 from agent_inbox.house import House
@@ -56,6 +57,26 @@ def enforce() -> Iterator[tuple[TestClient, AuthService]]:
         yield c, auth
 
 
+async def _legacy_bound(auth, actor: str, label: str = "bound") -> str:
+    """Write a token row bound to one agent — the shape that no longer has a mint path.
+
+    Reaching past the service is the point: FR-002 removed every supported way to create
+    one, and FR-006 says the rows that already exist keep working. A test that could
+    still mint one would be testing a hole rather than the upgrade path.
+    """
+    secret = auth_secrets.generate_token()
+    await auth._store.add_token(
+        DeviceToken(
+            id=f"legacy-{actor}",
+            actor=actor,
+            token_hash=auth_secrets.hash_token(secret),
+            label=label,
+            created="2026-01-01T00:00:00Z",
+        )
+    )
+    return secret
+
+
 class TestHubDescriptor:
     def test_off_reports_unauthenticated(self) -> None:
         client, _ = _build("off")
@@ -89,7 +110,7 @@ class TestEnforce:
         client, auth = _build("enforce")
         with client as c:
             # mint a token out of band (operator flow is exercised elsewhere)
-            minted = await auth.mint_token(ROSEMARY, label="test")
+            minted = await auth.mint_token(label="test")
             c.post(
                 "/actors",
                 json={"preferredUsername": ROSEMARY},
@@ -100,10 +121,16 @@ class TestEnforce:
                 json={"preferredUsername": TREVOR},
                 headers={"Authorization": f"Bearer {minted.secret}"},
             )
+            # The header is required now, and that is the mission rather than a
+            # regression: a token admits the machine, so every request has to say which
+            # agent on it is calling.
             sent = c.post(
                 f"/actors/{ROSEMARY}/outbox",
                 json=_note([TREVOR], "hi"),
-                headers={"Authorization": f"Bearer {minted.secret}"},
+                headers={
+                    "Authorization": f"Bearer {minted.secret}",
+                    IDENTITY_HEADER: ROSEMARY,
+                },
             )
             assert sent.status_code == 201, sent.text
             # observe now works with the credential
@@ -118,7 +145,7 @@ class TestEnforce:
     async def test_a_revoked_token_is_refused(self) -> None:
         client, auth = _build("enforce")
         with client as c:
-            minted = await auth.mint_token(ROSEMARY, label="test")
+            minted = await auth.mint_token(label="test")
             await auth.revoke_token(minted.id)
             r = c.get(
                 "/observe/stats",
@@ -307,7 +334,7 @@ class TestRemoteDoctor:
         """The positive case matters too: it is how an agent knows it is set up."""
         client, auth = _build("enforce")
         with client as c:
-            minted = await auth.mint_token(ROSEMARY, label="test")
+            minted = await auth.mint_token(label="test")
             c.post(
                 "/actors",
                 json={"preferredUsername": ROSEMARY},
@@ -321,8 +348,12 @@ class TestRemoteDoctor:
                 },
             ).json()
         assert body["you"]["token"] == "accepted"
-        assert body["you"]["verified"] == ROSEMARY
-        assert body["verdict"] == "your token was accepted"
+        # `verified` is the sentinel, not a name: every token is shared now, so what
+        # the credential proves is that the *machine* is admitted. The name beside it
+        # came from the header, and the verdict says so rather than letting an agent
+        # believe the hub checked it.
+        assert body["you"]["verified"] == SHARED_ACTOR
+        assert "admits this machine" in body["verdict"]
 
 
 class TestDirectoryIsNotPublicUnderEnforce:
@@ -373,7 +404,7 @@ class TestSharedToken:
         """
         client, auth = _build("enforce")
         with client as c:
-            minted = await auth.mint_token(SHARED_ACTOR, label="laptop")
+            minted = await auth.mint_token(label="laptop")
             bearer = {"Authorization": f"Bearer {minted.secret}"}
             for name in ("rosemary_nasrin", "trevor_mahmood"):
                 assert (
@@ -398,21 +429,69 @@ class TestSharedToken:
         """The old behaviour must survive: a bound token is not weakened by this."""
         client, auth = _build("enforce")
         with client as c:
-            minted = await auth.mint_token(ROSEMARY, label="bound")
+            secret = await _legacy_bound(auth, ROSEMARY)
             c.post(
                 "/actors",
                 json={"preferredUsername": ROSEMARY},
-                headers={"Authorization": f"Bearer {minted.secret}"},
+                headers={"Authorization": f"Bearer {secret}"},
             )
             # the header claims someone else; the token's own actor is what counts
             got = c.get(
                 f"/actors/{ROSEMARY}/inbox",
                 headers={
-                    "Authorization": f"Bearer {minted.secret}",
+                    "Authorization": f"Bearer {secret}",
                     IDENTITY_HEADER: "somebody_else",
                 },
             )
             assert got.status_code == 200
+
+
+class TestTheAdmittedRecordCannotBeSteered:
+    """The `admitted` column is what an operator revokes from. It must not be forgeable.
+
+    Found by outside review. A legacy bound token is authorised as its own actor
+    whatever the header says — so recording the *claim* would have written one name into
+    the evidence while the hub served the request as another. Evidence a sender can
+    steer is worse than no evidence, because it is acted on.
+    """
+
+    async def test_a_legacy_token_records_the_agent_it_admitted(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            secret = await _legacy_bound(auth, ROSEMARY)
+            c.post(
+                "/actors",
+                json={"preferredUsername": ROSEMARY},
+                headers={"Authorization": f"Bearer {secret}"},
+            )
+            # the header claims somebody else; the hub still serves this as Rosemary
+            c.get(
+                f"/actors/{ROSEMARY}/inbox",
+                headers={
+                    "Authorization": f"Bearer {secret}",
+                    IDENTITY_HEADER: "trevor_mahmood",
+                },
+            )
+        uses = await auth.token_uses(f"legacy-{ROSEMARY}")
+        assert [u.actor for u in uses] == [ROSEMARY]
+        assert "trevor_mahmood" not in {u.actor for u in uses}
+
+    async def test_a_shared_token_records_the_name_it_was_used_under(self) -> None:
+        """The other half: with a shared token the header *is* what was admitted."""
+        client, auth = _build("enforce")
+        with client as c:
+            minted = await auth.mint_token(label="laptop")
+            bearer = {"Authorization": f"Bearer {minted.secret}"}
+            c.post(
+                "/actors",
+                json={"preferredUsername": ROSEMARY},
+                headers=bearer | {IDENTITY_HEADER: ROSEMARY},
+            )
+            c.get(
+                f"/actors/{ROSEMARY}/inbox",
+                headers=bearer | {IDENTITY_HEADER: ROSEMARY},
+            )
+        assert {u.actor for u in await auth.token_uses(minted.id)} == {ROSEMARY}
 
 
 class TestTheAdminOverrideIsAdvertised:

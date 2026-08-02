@@ -25,6 +25,7 @@ from agent_inbox.auth.records import (
     DeviceToken,
     EnrolmentState,
     Session,
+    TokenUse,
     User,
 )
 
@@ -73,6 +74,12 @@ class AuthStore(Protocol):
     async def tokens_for(self, actor: str) -> tuple[DeviceToken, ...]: ...
     async def touch_token(self, token_id: str, when: str) -> None: ...
     async def revoke_token(self, token_id: str) -> bool: ...
+    async def all_tokens(self) -> tuple[DeviceToken, ...]: ...
+    async def record_use(self, token_id: str, actor: str, when: str) -> None:
+        """Note that ``token_id`` admitted ``actor``, setting first-seen only once."""
+        ...
+
+    async def uses_for(self, token_id: str) -> tuple[TokenUse, ...]: ...
 
     async def add_session(self, session: Session) -> None: ...
     async def get_session(self, session_id: str) -> Session | None: ...
@@ -89,6 +96,9 @@ class InMemoryAuthStore:
         self._users: dict[str, User] = {}
         self._recovery: list[tuple[str, str, bool]] = []  # (username, hash, used)
         self._tokens: dict[str, DeviceToken] = {}
+        #: Keyed by (token, actor), so it is bounded by the number of agents rather
+        #: than by traffic — the same shape the SQLite table's primary key gives.
+        self._uses: dict[tuple[str, str], TokenUse] = {}
         self._sessions: dict[str, Session] = {}
 
     async def any_users(self) -> bool:
@@ -165,6 +175,26 @@ class InMemoryAuthStore:
                 revoked=token.revoked,
             )
 
+    async def all_tokens(self) -> tuple[DeviceToken, ...]:
+        return tuple(sorted(self._tokens.values(), key=lambda t: t.created))
+
+    async def record_use(self, token_id: str, actor: str, when: str) -> None:
+        seen = self._uses.get((token_id, actor))
+        self._uses[(token_id, actor)] = TokenUse(
+            token_id=token_id,
+            actor=actor,
+            # Set once and never moved. "First seen" is the fact an operator uses to
+            # tell a credential that has always been shared from one that started
+            # leaking last week, and an upsert that rewrote it would erase exactly that.
+            first_seen=seen.first_seen if seen else when,
+            last_seen=when,
+            uses=(seen.uses if seen else 0) + 1,
+        )
+
+    async def uses_for(self, token_id: str) -> tuple[TokenUse, ...]:
+        rows = [u for (tid, _), u in self._uses.items() if tid == token_id]
+        return tuple(sorted(rows, key=lambda u: u.last_seen, reverse=True))
+
     async def revoke_token(self, token_id: str) -> bool:
         token = self._tokens.get(token_id)
         if token is None or token.revoked:
@@ -221,6 +251,18 @@ _SCHEMA = (
         created    TEXT NOT NULL DEFAULT '',
         last_used  TEXT,
         revoked    INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_token_use (
+        token_id   TEXT NOT NULL,
+        actor      TEXT NOT NULL,
+        first_seen TEXT NOT NULL,
+        last_seen  TEXT NOT NULL,
+        -- Buckets, not requests: recording is coarse, so this counts the minutes in
+        -- which the token was used rather than the calls it served.
+        uses       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (token_id, actor)
     )
     """,
     """
@@ -481,6 +523,42 @@ class SqliteAuthStore:
             "UPDATE auth_device_tokens SET last_used=? WHERE id=?", (when, token_id)
         )
         await self._db.commit()
+
+    async def all_tokens(self) -> tuple[DeviceToken, ...]:
+        cursor = await self._execute(
+            "SELECT * FROM auth_device_tokens ORDER BY created DESC"
+        )
+        return tuple(_to_token(row) for row in await cursor.fetchall())
+
+    async def record_use(self, token_id: str, actor: str, when: str) -> None:
+        # `first_seen` is written by the INSERT and never by the UPDATE. It is the fact
+        # that separates a credential which has always been shared from one that started
+        # leaking last week, and an upsert that refreshed it would erase exactly that.
+        await self._execute(
+            "INSERT INTO auth_token_use (token_id, actor, first_seen, last_seen, uses) "
+            "VALUES (?, ?, ?, ?, 1) "
+            "ON CONFLICT(token_id, actor) DO UPDATE SET "
+            "last_seen=excluded.last_seen, uses=uses+1",
+            (token_id, actor, when, when),
+        )
+        await self._db.commit()
+
+    async def uses_for(self, token_id: str) -> tuple[TokenUse, ...]:
+        cursor = await self._execute(
+            "SELECT token_id, actor, first_seen, last_seen, uses FROM auth_token_use "
+            "WHERE token_id = ? ORDER BY last_seen DESC",
+            (token_id,),
+        )
+        return tuple(
+            TokenUse(
+                token_id=row[0],
+                actor=row[1],
+                first_seen=row[2],
+                last_seen=row[3],
+                uses=int(row[4]),
+            )
+            for row in await cursor.fetchall()
+        )
 
     async def revoke_token(self, token_id: str) -> bool:
         cursor = await self._execute(

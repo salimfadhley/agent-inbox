@@ -28,9 +28,11 @@ from agent_inbox.auth.exceptions import (
 from agent_inbox.auth.records import (
     ADMIN_GROUP,
     GROUPS,
+    SHARED_ACTOR,
     DeviceToken,
     EnrolmentState,
     Session,
+    TokenUse,
     User,
 )
 from agent_inbox.auth.store import AuthStore
@@ -64,6 +66,12 @@ INSECURE_ADMIN_WARNING = "Explicitly setting an admin password is insecure"
 #: Length of a generated session / token id.
 _ID_BYTES = 16
 
+#: How much of an ISO timestamp makes a bucket. 16 characters is `YYYY-MM-DDTHH:MM` —
+#: one minute. Fine enough that "last used" reads as live while an operator is setting a
+#: machine up, which is when they actually watch the screen, and coarse enough that a
+#: busy agent collapses to one write a minute.
+_BUCKET_PRECISION = 16
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -89,11 +97,15 @@ class EnrolmentOffer:
 
 @dataclass(frozen=True, slots=True)
 class MintedToken:
-    """A freshly minted device token. ``secret`` is shown once and never stored raw."""
+    """A freshly minted token. ``secret`` is shown once and never stored raw.
+
+    It carries no actor. A token admits a *machine*; who is using it is settled per
+    request from the caller's own name, and a field here saying otherwise would be the
+    old model surviving in the one place an operator looks.
+    """
 
     id: str
     secret: str
-    actor: str
 
 
 class AuthService:
@@ -118,6 +130,10 @@ class AuthService:
         #: **A deliberate hole in the front door.** See :meth:`login`. Empty means off,
         #: which is the only safe value and the default.
         self._admin_password = admin_password.strip()
+        #: (token, actor, minute) triples already recorded. The bucket that keeps the
+        #: hot path cheap — see :meth:`admit`. Per process and deliberately not
+        #: persisted: losing it costs one redundant write.
+        self._admitted: set[tuple[str, str, str]] = set()
 
     @property
     def admin_password_set(self) -> bool:
@@ -501,34 +517,79 @@ class AuthService:
 
     # -- device tokens -----------------------------------------------------
 
-    async def mint_token(self, actor: str, label: str = "") -> MintedToken:
-        """Create a device token. The secret is returned once, then only hashed."""
+    async def mint_token(self, label: str = "") -> MintedToken:
+        """Create a token that admits a machine. The secret is returned once.
+
+        No actor. Every token is shared: it says the holder is allowed in, and the
+        holder says which agent they are, exactly as they always did.
+        """
         secret = secrets.generate_token()
         token = DeviceToken(
             id=secrets.generate_token()[:_ID_BYTES],
-            actor=actor,
+            actor=SHARED_ACTOR,
             token_hash=secrets.hash_token(secret),
             label=label,
             created=self._now(),
         )
         await self._store.add_token(token)
-        return MintedToken(id=token.id, secret=secret, actor=actor)
+        return MintedToken(id=token.id, secret=secret)
 
-    async def list_tokens(self, actor: str) -> tuple[DeviceToken, ...]:
-        return await self._store.tokens_for(actor)
+    async def list_tokens(self) -> tuple[DeviceToken, ...]:
+        """Every token on the hub. Not per agent — a token belongs to no agent."""
+        return await self._store.all_tokens()
+
+    async def token_uses(self, token_id: str) -> tuple[TokenUse, ...]:
+        """Which agents this token has admitted, most recently seen first."""
+        return await self._store.uses_for(token_id)
 
     async def revoke_token(self, token_id: str) -> bool:
         return await self._store.revoke_token(token_id)
 
-    async def resolve_token(self, secret: str) -> str | None:
-        """Resolve a bearer secret to its actor; None if unknown, raise if revoked."""
+    async def resolve_token(self, secret: str) -> DeviceToken | None:
+        """Is this credential good? ``None`` if unknown, raise if revoked.
+
+        **It does not answer "who is this"**, because a secret cannot: a token admits a
+        machine and several agents share it. The caller knows the claimed name from the
+        request and is the only place both facts are in hand, so the caller combines
+        them — see :meth:`admit`.
+
+        No write happens here. Recording belongs with the name, one layer up.
+        """
         token = await self._store.get_token_by_hash(secrets.hash_token(secret))
         if token is None:
             return None
         if token.revoked:
-            raise TokenRevoked("this device token has been revoked")
-        await self._store.touch_token(token.id, self._now())
-        return token.actor
+            # First, before anything else, and it must stay first: a revoked credential
+            # that gets as far as being recorded has been honoured for one more request
+            # than it should have been.
+            raise TokenRevoked("this token has been revoked")
+        return token
+
+    async def admit(self, token: DeviceToken, actor: str) -> None:
+        """Note that this token let this agent in — at most once per bucket.
+
+        Coarse on purpose (FR-009). Authentication is the most-called path here and it
+        **already** wrote on every call: `resolve_token` used to touch `last_used` per
+        request. Collapsing that to one write per token per minute makes the hot path
+        cheaper than it was while adding the record that makes revoking informed.
+
+        The bucket is checked *before* the write, not wrapped around one that already
+        happened. In-memory and per process: a restart writes once more than it needed
+        to, which costs nothing and needs no persistence.
+        """
+        if not actor:
+            return  # nothing to record against; an unnamed caller is not an agent
+        now = self._now()
+        bucket = (token.id, actor, now[:_BUCKET_PRECISION])
+        if bucket in self._admitted:
+            return
+        # Bounded by tokens x agents, and cleared whenever the minute moves on, so it
+        # cannot grow with traffic. A dict that only ever grows is the failure this
+        # whole mission is trying not to repeat elsewhere.
+        self._admitted = {b for b in self._admitted if b[2] == bucket[2]}
+        self._admitted.add(bucket)
+        await self._store.record_use(token.id, actor, now)
+        await self._store.touch_token(token.id, now)
 
     # -- helpers -----------------------------------------------------------
 

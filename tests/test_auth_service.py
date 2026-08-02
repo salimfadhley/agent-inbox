@@ -12,7 +12,7 @@ import pytest
 
 from agent_inbox.auth import secrets, totp
 from agent_inbox.auth.exceptions import BadCredentials, TokenRevoked
-from agent_inbox.auth.records import EnrolmentState
+from agent_inbox.auth.records import SHARED_ACTOR, DeviceToken, EnrolmentState
 from agent_inbox.auth.service import AuthService
 from agent_inbox.auth.store import InMemoryAuthStore
 
@@ -146,27 +146,136 @@ class TestAccount:
         assert user is not None and user.enrolment_state is EnrolmentState.ACTIVE
 
 
-class TestDeviceTokens:
+class TestALegacyBoundTokenStillLetsItsAgentIn:
+    """FR-006, and this is where a lockout hides.
+
+    Tokens used to be bound to one agent. That shape is gone, but the *rows* are not: a
+    hub upgraded mid-week has them in its database, and an operator whose token stops
+    working has been locked out of their own hub by an upgrade they did not ask for.
+
+    Note what these tests have to do to build one — reach past the service and write the
+    row directly. That is the proof of the other half of FR-002: there is no longer any
+    supported way to mint a token bound to an agent.
+    """
+
+    async def _legacy(self, svc: AuthService, actor: str) -> str:
+        secret = secrets.generate_token()
+        await svc._store.add_token(
+            DeviceToken(
+                id="legacy-1",
+                actor=actor,
+                token_hash=secrets.hash_token(secret),
+                label="from before the change",
+                created="2026-01-01T00:00:00Z",
+            )
+        )
+        return secret
+
+    async def test_a_token_bound_to_an_actor_still_resolves(self) -> None:
+        svc = service()
+        secret = await self._legacy(svc, "jed_smith")
+        token = await svc.resolve_token(secret)
+        assert token is not None
+        assert token.actor == "jed_smith"
+
+    async def test_and_can_still_be_revoked(self) -> None:
+        svc = service()
+        secret = await self._legacy(svc, "jed_smith")
+        assert await svc.revoke_token("legacy-1") is True
+        with pytest.raises(TokenRevoked):
+            await svc.resolve_token(secret)
+
+    async def test_it_is_listed_beside_the_shared_ones(self) -> None:
+        svc = service()
+        await self._legacy(svc, "jed_smith")
+        await svc.mint_token(label="workshop laptop")
+        listed = {t.actor for t in await svc.list_tokens()}
+        assert listed == {"jed_smith", SHARED_ACTOR}
+
+
+class TestTokens:
     async def test_mint_resolve_revoke(self) -> None:
         svc = service()
-        minted = await svc.mint_token("jed_smith", label="workshop")
-        assert minted.actor == "jed_smith"
-        # the secret resolves to the actor
-        assert await svc.resolve_token(minted.secret) == "jed_smith"
-        # an unknown secret resolves to None
+        minted = await svc.mint_token(label="workshop")
+        assert not hasattr(minted, "actor"), "a token admits a machine, not an agent"
+        token = await svc.resolve_token(minted.secret)
+        assert token is not None and token.id == minted.id
         assert await svc.resolve_token(secrets.generate_token()) is None
-        # revoke → the same secret is now refused
         assert await svc.revoke_token(minted.id) is True
         with pytest.raises(TokenRevoked):
             await svc.resolve_token(minted.secret)
 
     async def test_list_shows_metadata_not_the_secret(self) -> None:
         svc = service()
-        await svc.mint_token("jed_smith", label="a")
-        await svc.mint_token("jed_smith", label="b")
-        tokens = await svc.list_tokens("jed_smith")
+        await svc.mint_token(label="a")
+        await svc.mint_token(label="b")
+        tokens = await svc.list_tokens()
         assert {t.label for t in tokens} == {"a", "b"}
         assert all(not hasattr(t, "secret") for t in tokens)
+
+    async def test_resolving_records_nothing_on_its_own(self) -> None:
+        """A secret cannot name an agent, so resolving cannot record who used it."""
+        svc = service()
+        minted = await svc.mint_token(label="a")
+        await svc.resolve_token(minted.secret)
+        assert await svc.token_uses(minted.id) == ()
+
+
+class TestAdmittingIsRecorded:
+    """FR-005 — the record that makes revoking an informed act rather than a gamble."""
+
+    async def test_two_agents_on_one_token_are_both_named(self) -> None:
+        clock = Clock()
+        svc = service(clock)
+        minted = await svc.mint_token(label="the laptop")
+        token = await svc.resolve_token(minted.secret)
+        assert token is not None
+        await svc.admit(token, "jed_smith")
+        clock.advance(minutes=5)
+        await svc.admit(token, "rosemary_nasrin")
+        assert {u.actor for u in await svc.token_uses(minted.id)} == {
+            "jed_smith",
+            "rosemary_nasrin",
+        }
+
+    async def test_first_seen_is_set_once_and_last_seen_moves(self) -> None:
+        """First-seen separates a token that was always shared from one that started
+        leaking last week, so an upsert must never refresh it."""
+        clock = Clock()
+        svc = service(clock)
+        minted = await svc.mint_token(label="a")
+        token = await svc.resolve_token(minted.secret)
+        assert token is not None
+        await svc.admit(token, "jed_smith")
+        first = (await svc.token_uses(minted.id))[0]
+        clock.advance(hours=3)
+        await svc.admit(token, "jed_smith")
+        later = (await svc.token_uses(minted.id))[0]
+        assert later.first_seen == first.first_seen
+        assert later.last_seen > first.last_seen
+
+    async def test_a_second_call_in_the_same_minute_writes_nothing(self) -> None:
+        """FR-009. The hot path already wrote on every call; this makes it cheaper."""
+        clock = Clock()
+        svc = service(clock)
+        minted = await svc.mint_token(label="a")
+        token = await svc.resolve_token(minted.secret)
+        assert token is not None
+        await svc.admit(token, "jed_smith")
+        clock.advance(seconds=20)
+        await svc.admit(token, "jed_smith")
+        assert (await svc.token_uses(minted.id))[0].uses == 1
+        clock.advance(minutes=1)
+        await svc.admit(token, "jed_smith")
+        assert (await svc.token_uses(minted.id))[0].uses == 2
+
+    async def test_an_unnamed_caller_records_nothing(self) -> None:
+        svc = service()
+        minted = await svc.mint_token(label="a")
+        token = await svc.resolve_token(minted.secret)
+        assert token is not None
+        await svc.admit(token, "")
+        assert await svc.token_uses(minted.id) == ()
 
 
 class TestBootstrapKeepsPrinting:

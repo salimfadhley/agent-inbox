@@ -87,6 +87,30 @@ class DeviceToken:
 
 
 @dataclass(frozen=True, slots=True)
+class TokenUse:
+    """One agent's use of one token: what the hub observed, not what it was told.
+
+    This is what makes revoking an informed act rather than a gamble. A token admits a
+    machine, so "who does this let in" cannot be read off the token — it can only be
+    learned by watching, and this is the record of the watching.
+
+    **One row per agent-token pair, overwritten in place.** Bounded by the number of
+    agents no matter how much traffic flows, which is what stops it becoming a log that
+    grows for ever while presenting as working. The cost, accepted: no history. You can
+    see that an agent last used a token on Tuesday, not that it used it heavily in June.
+    """
+
+    token_id: str
+    actor: str
+    first_seen: str
+    last_seen: str
+    #: **Buckets, not requests.** Recording is coarse — at most one write per token per
+    #: minute — so this counts the minutes in which the token was used, not the calls.
+    #: A number that looks like a request count and is not would be worse than none.
+    uses: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class Session:
     """A human's authenticated session after password + second factor."""
 

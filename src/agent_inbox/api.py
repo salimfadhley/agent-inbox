@@ -1480,9 +1480,29 @@ def build_api(
             return None
         header = conn.headers.get("Authorization", "")
         if header.lower().startswith("bearer "):
-            actor = await auth.resolve_token(header[7:].strip())
-            if actor:
-                return actor
+            token = await auth.resolve_token(header[7:].strip())
+            if token is not None:
+                # Here, and only here, are both halves in hand: the credential says the
+                # holder is allowed in, and the header says which agent they are. A
+                # secret cannot answer the second — several agents share one token — so
+                # the combination happens at the one place that knows both.
+                #
+                # The header is read **softly**, not through `caller_name`, which
+                # refuses a request that lacks it. Recording is a side effect, and a
+                # side effect that can turn a request which would have succeeded into a
+                # 400 is not a record — it is a new failure mode wearing one. The hard
+                # requirement stays in `provide_caller`, where it already lived.
+                claimed = conn.headers.get(IDENTITY_HEADER, "").strip()
+                # **Record who was admitted, not who asked.** An outside review caught
+                # these coming apart: a legacy token bound to `rosemary_nasrin` is
+                # authorised as Rosemary whatever the header says, so recording the
+                # claim would have written Trevor into the evidence table for a request
+                # the hub served as Rosemary. That column is the whole point of this
+                # mission — an operator decides what to revoke from it — and evidence
+                # a sender can steer is worse than no evidence at all.
+                admitted = claimed if token.actor == SHARED_ACTOR else token.actor
+                await auth.admit(token, admitted)
+                return token.actor
         sid = conn.cookies.get(SESSION_COOKIE)
         if sid:
             session = await auth.resolve_session(sid)
@@ -2132,17 +2152,26 @@ def build_api(
     async def mint_token(
         name: str, data: dict[str, Any], operator: str
     ) -> dict[str, str]:
+        """Mint a token. **The name in the path is ignored**, and this route is going.
+
+        A stopgap for exactly one release. Every token now admits a machine rather than
+        an agent, so there is nothing for `name` to mean — but the console still calls
+        this URL, and removing it before the console is rewritten would leave the Tokens
+        page broken on a deployed hub. The replacement is `POST /auth/tokens`; this goes
+        with the console rewrite that stops calling it.
+        """
         assert auth is not None
-        minted = await auth.mint_token(name, label=str(data.get("label", "")))
-        return {"id": minted.id, "token": minted.secret, "actor": minted.actor}
+        minted = await auth.mint_token(label=str(data.get("label", "")))
+        return {"id": minted.id, "token": minted.secret, "actor": SHARED_ACTOR}
 
     @get(
         "/auth/agents/{name:str}/tokens",
         dependencies={"operator": Provide(provide_operator)},
     )
     async def list_tokens(name: str, operator: str) -> dict[str, Any]:
+        """Every token on the hub. The path name is ignored — see `mint_token`."""
         assert auth is not None
-        tokens = await auth.list_tokens(name)
+        tokens = await auth.list_tokens()
         return {
             "items": [
                 {
