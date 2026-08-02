@@ -19,14 +19,18 @@ turn.
 import json
 import os
 import sys
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_inbox.client import HubClient, load_config, project_root
+from agent_inbox.backoff import SETTLED_AFTER, reconnect_delay
+from agent_inbox.client import HubClient, SseParser, load_config, project_root
 
 #: Where the announce-once watermark lives — one file per project, beside the config.
 WATERMARK_NAME = ".agent-mailbox-seen.json"
@@ -43,6 +47,33 @@ _TIMEOUT = 3.0
 #: Defaults for the opt-in asyncRewake waiter.
 DEFAULT_POLL_INTERVAL = 5.0
 DEFAULT_WAIT_TIMEOUT = 8 * 60 * 60.0
+
+#: How long the waiter sleeps between polls **while it is holding the event stream**.
+#: Five seconds is pointless when the stream will interrupt the sleep in milliseconds,
+#: but it cannot become "however long is left" either: a stream that connected and then
+#: went silent — a buffering proxy is the ordinary cause — looks exactly like a healthy
+#: one from this side, and this poll is the only thing that catches it. A minute is two
+#: keep-alive intervals' worth of patience and 480 requests over a full wait instead of
+#: 5,760.
+STREAMING_POLL_INTERVAL = 60.0
+
+#: How long we will wait to *connect* to the stream. There is deliberately no read
+#: timeout below this: a stream is silent precisely when there is no mail, which is most
+#: of the time.
+_STREAM_CONNECT_TIMEOUT = 10.0
+
+#: The one event type that means "there is mail". Anything else is ignored rather than
+#: refused, so the hub can add an event type without waking every deployed client.
+_ARRIVAL_EVENT = "mail"
+
+#: Statuses that will never come good by being asked again during one wait. A hub too
+#: old to have the route will not grow one inside eight hours, and a credential that was
+#: refused will not become valid by repetition. The waiter stops streaming and polls.
+_FINAL_STATUSES = frozenset({401, 403, 404, 405})
+
+#: How long `close` waits for the reader thread to notice. It is a daemon thread, so
+#: exceeding this delays nothing — the process still exits.
+_CLOSE_GRACE = 2.0
 
 #: The events we serve. Stop is the exit-2 "keep going"; the others inject context.
 _INJECT_EVENTS = ("SessionStart", "UserPromptSubmit")
@@ -112,6 +143,166 @@ def wake_response(
         }
     }
     return WakeResult(exit_code=0, stdout=json.dumps(payload), seen=unread_ids)
+
+
+# -- the event stream: a held connection that can only shorten a sleep ------
+
+
+def _open_stream(url: str, headers: dict[str, str]) -> Any:
+    """Open the stream with the standard library, and nothing else.
+
+    `httpx` — which the MCP server uses for the same job — is in the `clients` extra.
+    This runs from the base CLI install, so it gets `urllib`, exactly as the rest of
+    `HubClient` does.
+    """
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310 - hub url
+    return urllib.request.urlopen(request, timeout=_STREAM_CONNECT_TIMEOUT)  # noqa: S310
+
+
+class ArrivalStream:
+    """The hub's event stream, held on a thread, exposing one bit: *something arrived*.
+
+    **It can only ever shorten a sleep.** That is the whole design. It never decides
+    what an agent is told, never reports a failure, and never blocks the loop that uses
+    it — so a hub with no event route, a proxy that will not hold a connection, or a bug
+    in here leaves the waiter polling exactly as it did before this existed.
+
+    It reads the event's *type* and nothing else. The payload is written by whoever sent
+    the message, and giving it a path into printed text would undo the one rule the wake
+    mechanism exists under: a wake carries the hub's own account of who sent what, never
+    the sender's.
+    """
+
+    def __init__(
+        self,
+        client: HubClient,
+        *,
+        connect: Callable[[str, dict[str, str]], Any] = _open_stream,
+        rand: Callable[[], float] | None = None,
+    ) -> None:
+        # Address and credential come from the client, once. Assembling them here is how
+        # a stream ends up authenticating differently from every other call, months
+        # after the change that caused it.
+        self._url = client.events_url()
+        self._headers = client.stream_headers()
+        self._connect = connect
+        self._rand = rand
+        self._arrived = threading.Event()
+        self._stopped = threading.Event()
+        self._connected = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._response: Any = None
+
+    # -- what the waiter uses ----------------------------------------------
+
+    def start(self) -> None:
+        """Begin holding the stream. Never raises, whatever happens next."""
+        if self._thread is not None:
+            return
+        thread = threading.Thread(
+            target=self._run, name="agent-inbox-wake", daemon=True
+        )
+        self._thread = thread
+        try:
+            thread.start()
+        except RuntimeError:  # a machine that will not give us a thread; poll instead
+            self._thread = None
+
+    def wait(self, seconds: float) -> None:
+        """Sleep for `seconds`, or until mail arrives. The waiter's `Sleeper`.
+
+        Signature and behaviour of `time.sleep` when nothing arrives, which is what lets
+        it be substituted for one.
+        """
+        self._arrived.wait(seconds)
+        self._arrived.clear()
+
+    @property
+    def connected(self) -> bool:
+        """Whether a connection is open *right now*.
+
+        Deliberately not "have we ever connected". The slower poll (FR-006) is only
+        justified while something is actually listening; a stream that has dropped and
+        is waiting to retry must not also slow the poll that is covering for it.
+        """
+        return self._connected.is_set()
+
+    def close(self) -> None:
+        """Stop reading and let go of the connection. Idempotent, and never raises."""
+        self._stopped.set()
+        self._shut(self._response)
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            # A bounded join: the thread may be blocked in a read that closing the
+            # response does not always interrupt. It is a daemon, so a straggler delays
+            # nothing — the process still exits — and waiting longer would turn a
+            # closing hook into a slow one.
+            thread.join(timeout=_CLOSE_GRACE)
+
+    # -- the thread --------------------------------------------------------
+
+    def _run(self) -> None:
+        """Connect, read, reconnect — until told to stop. Silent on every path."""
+        attempt = 0
+        while not self._stopped.is_set():
+            opened_at: float | None = None
+            try:
+                opened_at = self._read_one_connection()
+            except urllib.error.HTTPError as refusal:
+                if refusal.code in _FINAL_STATUSES:
+                    return  # this hub will not stream to us; the poll is the answer
+            except Exception:  # noqa: BLE001 - a lost stream is never the agent's problem
+                pass
+            finally:
+                self._connected.clear()
+            # Start over from the shortest delay only if the connection *lasted*. A hub
+            # that accepts and immediately drops — a proxy answering 200 and closing —
+            # would otherwise be retried about twice a second for the whole wait, with
+            # nothing anywhere to say so.
+            if opened_at is not None and time.monotonic() - opened_at >= SETTLED_AFTER:
+                attempt = 0
+            if self._stopped.wait(self._delay(attempt)):
+                return
+            attempt += 1
+
+    def _delay(self, attempt: int) -> float:
+        if self._rand is None:
+            return reconnect_delay(attempt)
+        return reconnect_delay(attempt, rand=self._rand)
+
+    def _read_one_connection(self) -> float:
+        """Hold one connection until it ends. Returns when it opened, for the
+        backoff to judge whether it lasted."""
+        response = self._connect(self._url, self._headers)
+        self._response = response
+        opened_at = time.monotonic()
+        self._connected.set()
+        try:
+            parser = SseParser()
+            while not self._stopped.is_set():
+                # Line at a time, because server-sent events are a line format and a
+                # buffered `read(n)` would sit on a small event waiting for n bytes that
+                # a quiet mailbox never sends. The parser still frames it; it accepts
+                # any chunking, and a line is simply one chunking that always arrives.
+                line = response.readline()
+                if not line:
+                    return opened_at  # the hub closed; reconnect
+                for event in parser.feed(line.decode("utf-8", "replace")):
+                    if event.event == _ARRIVAL_EVENT:
+                        self._arrived.set()
+        finally:
+            self._response = None
+            self._shut(response)
+        return opened_at
+
+    @staticmethod
+    def _shut(response: Any) -> None:
+        if response is None:
+            return
+        try:
+            response.close()
+        except Exception:  # noqa: BLE001 - closing is best-effort by definition
+            pass
 
 
 # -- I/O wrapper: totally fail-silent --------------------------------------

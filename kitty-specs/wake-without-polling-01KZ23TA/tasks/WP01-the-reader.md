@@ -126,6 +126,20 @@ never exist.
 If it cannot tell them apart, FR-004 still holds and the cost is a retry loop that never
 succeeds — wasteful, not wrong. Either way, write down which it is.
 
+**Answered, 2026-08-02: yes, cleanly, and for free.** `urllib` raises
+`urllib.error.HTTPError` — which carries `.code` — for a status, and a bare `URLError` or
+`ConnectionRefusedError` for a hub that is not answering at all. They are different
+exception types, so the reader does not have to guess.
+
+The reader stops streaming for the rest of the wait on `{401, 403, 404, 405}` and retries
+everything else, including a 503. That set is the same one `mcp_client._FINAL_STATUSES`
+already uses, and it is the right one for the same reason: a hub too old for the route
+will not grow one inside eight hours, and a credential that was refused will not become
+valid by repetition. A 503 is a hub restarting, and it comes back.
+
+Both halves are tested, including the paired positive — a 503 must keep being retried, or
+the rule above would be indistinguishable from "give up on everything".
+
 ## Definition of done
 
 - The reader signals on `mail`, ignores everything else, and swallows every failure.

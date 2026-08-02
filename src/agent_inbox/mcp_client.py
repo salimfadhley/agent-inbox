@@ -14,7 +14,6 @@ whereas a process on the agent's machine can interrupt the session it serves.
 import asyncio
 import json
 import logging
-import random
 import time
 import tomllib
 from collections.abc import AsyncIterator, Callable
@@ -27,7 +26,7 @@ import httpx
 from anyio.to_thread import run_sync
 from mcp.server.fastmcp import FastMCP
 
-from agent_inbox import staleness
+from agent_inbox import backoff, staleness
 from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
@@ -395,9 +394,11 @@ async def _guard(call: Any) -> Any:
 # package's. Arrivals go to `_on_arrival`, which does nothing until something fills it.
 
 #: The first backoff, and the ceiling. Small enough that an ordinary hub restart is
-#: invisible, capped so a hub down for an hour is not asked sixty times a minute.
-_RECONNECT_FIRST = 1.0
-_RECONNECT_CAP = 60.0
+#: invisible, capped so a hub down for an hour is not asked sixty times a minute. Held
+#: in `backoff` because the wake hook needs the same answer and cannot import this
+#: module — `httpx` below is a `clients` extra, and the base CLI must not carry it.
+_RECONNECT_FIRST = backoff.RECONNECT_FIRST
+_RECONNECT_CAP = backoff.RECONNECT_CAP
 
 #: How long we will wait to *connect*, and how long a held stream may be silent. The
 #: second is `None` on purpose: a stream is silent precisely when there is no mail,
@@ -409,7 +410,7 @@ _CONNECT_TIMEOUT = 10.0
 #: the backoff starts again from the shortest delay. Two keep-alive intervals: long
 #: enough that a stream which was accepted and dropped does not qualify, short enough
 #: that an ordinary hub restart is followed by a prompt reconnection.
-_SETTLED_AFTER = 30.0
+_SETTLED_AFTER = backoff.SETTLED_AFTER
 
 #: Statuses that will never come good by being asked again within this process's life.
 #: A hub too old to have the route will not grow one; a credential this process holds
@@ -440,23 +441,11 @@ _on_arrival: Callable[[dict[str, Any]], None] = _consider
 _listening: asyncio.Task[None] | None = None
 
 
-def reconnect_delay(
-    attempt: int, *, rand: Callable[[], float] = random.random
-) -> float:
-    """How long to wait before the next attempt. Exponential, capped, fully jittered.
-
-    **The jitter is the part that matters**, and it is the part usually left out. This
-    hub is redeployed several times a day, and every release drops every connected
-    client in the same instant. Without jitter they all wait one second, all reconnect
-    together, and the hub's first act on coming up is to serve a thundering herd it
-    created itself — repeatedly, since a herd that fails together retries together.
-
-    Full jitter (uniform between zero and the ceiling) rather than a small wobble around
-    it: it spreads a simultaneous disconnect across the whole window, and the cost — an
-    occasional short wait — is a client reconnecting sooner than it strictly had to.
-    """
-    ceiling = min(_RECONNECT_CAP, _RECONNECT_FIRST * (2**attempt))
-    return ceiling * rand()
+#: Re-exported, not re-implemented. It lives in `backoff` so the wake hook can have the
+#: same answer without importing this module and, with it, `httpx`. Named here because
+#: this is where it has always been imported from, and moving a name is a cost paid by
+#: everyone who ever wrote it down.
+reconnect_delay = backoff.reconnect_delay
 
 
 async def _hold_the_stream(client: HubClient) -> None:

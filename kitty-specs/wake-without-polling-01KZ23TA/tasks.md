@@ -45,11 +45,11 @@ failing. It owns a connection and a thread, so it must be closable.
 **Independent test**: driven by a fake connection, it signals on a `mail` frame, stays
 silent on anything else, and swallows every failure.
 
-- [ ] T001 A reader that holds the stream and signals on arrival (WP01)
-- [ ] T002 Failing to hold it is not an error — every path silent (WP01)
-- [ ] T003 Only `mail` signals; every other event type is ignored (WP01)
-- [ ] T004 Reconnect while the wait has time left (WP01)
-- [ ] T005 Does the hub tell "no such route" apart from "unreachable"? (WP01)
+- [x] T001 A reader that holds the stream and signals on arrival (WP01)
+- [x] T002 Failing to hold it is not an error — every path silent (WP01)
+- [x] T003 Only `mail` signals; every other event type is ignored (WP01)
+- [x] T004 Reconnect while the wait has time left (WP01)
+- [x] T005 Does the hub tell "no such route" apart from "unreachable"? (WP01)
 
 **Sketch**: `start()` opens the connection in a daemon thread and parses with `SseParser`;
 `wait(seconds)` is the `Sleeper` the loop will be handed; `close()` stops the thread and
