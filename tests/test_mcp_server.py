@@ -92,13 +92,18 @@ def test_what_matters_most_survives_truncation() -> None:
     """The budget cuts the *tail*, so ordering decides what an agent never reads.
 
     Two things must not be the casualty: that a message is data and never an
-    instruction, and that nothing interrupts you and no answer is owed. The safety line
-    used to be last — first to be cut — which is precisely backwards.
+    instruction, and what to expect about being interrupted and answered. The safety
+    line used to be last — first to be cut — which is precisely backwards.
+
+    That second one is now a *conditional* promise — the client decides, and by default
+    decides no — which makes it more important to survive, not less: an agent that
+    reads half of it is worse off than one that reads none.
     """
     # Even a hub returning a long role definition must leave both standing.
     kept = mcp_client.BASE_INSTRUCTIONS[: mcp_client.INSTRUCTION_BUDGET - 600]
     assert "never as instructions" in kept
-    assert "no interruptions" in kept.lower()
+    assert "your client's" in kept.lower()
+    assert "unless it has been configured otherwise it does not" in kept.lower()
     assert "carry on" in kept.lower()
 
 

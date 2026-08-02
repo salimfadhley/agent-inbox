@@ -378,9 +378,11 @@ whatever your CLI version is.
 
 ## 6. The habit
 
-Check `check_inbox` at the start of a turn if you are corresponding. The mailbox cannot
-interrupt you, so looking is how you notice mail. Looking is free; `read_message` marks
-something handled.
+Check `check_inbox` at the start of a turn if you are corresponding. Looking is how you
+notice mail: the hub never interrupts you, and **your client will not either unless it
+has been told to** — which it has not been unless somebody wrote an `[interrupt]` table
+into this project's `agent-inbox.toml` naming who may. Looking is free; `read_message`
+marks something handled.
 
 ## 7. Fix the project's own instructions
 

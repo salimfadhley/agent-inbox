@@ -117,16 +117,51 @@ belongs in the first version, not after it bites.
 default-deny, it is rate-limited, and it is inspectable. And the tool descriptions stop
 promising something that is no longer unconditionally true.
 
-- [ ] T013 The decision layer: default-deny, gated on sender identity (WP03)
-- [ ] T014 The rate limit (FR-013) (WP03)
-- [ ] T015 Every decision recorded with its reason (FR-014) (WP03)
-- [ ] T016 FR-011 proved by removal: a sender claiming urgency moves nothing (WP03)
-- [ ] T017 The documentation stops promising what is no longer true (FR-015) (WP03)
-- [ ] T018 Directive 4 — outside model review before WP03 closes (WP03)
+- [x] T013 The decision layer: default-deny, gated on sender identity (WP03)
+- [x] T014 The rate limit (FR-013) (WP03)
+- [x] T015 Every decision recorded with its reason (FR-014) (WP03)
+- [x] T016 FR-011 proved by removal: a sender claiming urgency moves nothing (WP03)
+- [x] T017 The documentation stops promising what is no longer true (FR-015) (WP03)
+- [x] T018 Directive 4 — outside model review before WP03 closes (WP03)
 
 **Risks**: this is where the mailbox could hand senders a lever over recipients' attention.
 FR-011 is not a nicety — if a subject line can raise its own priority, every subject line
 will, and ADR 0008 has been defeated at the last layer rather than the first.
+
+**T016, the removal proof, run.** Deleting the two-line sender check from `decide` and
+running `TestTheGateIsOnIdentity` left `test_a_trusted_sender_may_interrupt` **passing**
+and failed four others, including the half it is paired with:
+
+```
+FAILED test_an_alarming_subject_from_an_untrusted_sender_does_not
+FAILED test_no_field_a_sender_writes_can_change_the_answer
+FAILED test_a_remote_actor_cannot_borrow_a_trusted_local_name
+FAILED test_an_unknown_sender_reports_that_and_not_something_vaguer
+  assert <Reason.WAKE: 'wake'> is <Reason.SENDER_NOT_TRUSTED: 'sender-not-trusted'>
+```
+
+That the "trusted sender wakes" half kept passing is the part that matters: it is what
+shows the pair is measuring the gate rather than measuring code that never wakes anyone.
+
+**T018, Directive 4, found something real.** Asked whether any sender-controlled value
+could reach the decision, Codex traced every field and answered *yes* — not through the
+subject, which `decide` never reads, but through `from` itself:
+
+> `X-Agent-Name` header → `caller_name()` → `provide_caller()` → `Api.outbox()` →
+> `House.send(caller=…)` → `Mailbox.send()` sets `sender` → `attributed_to` →
+> `Arrival.sender` → `"from"` → `decide()` checks `sender in policy.wake_from`
+
+On a hub with authentication `off` or `warn`, the sender's name is a request header taken
+at face value, so an attacker sets it to a trusted name and the trust list matches what
+they chose. The whole gate was decorative on exactly the hubs most likely to run it.
+
+Fixed rather than documented: the client asks the hub once, on connecting, whether it
+authenticates, and a hub that says no — or cannot be reached to answer — gets a gate that
+interrupts nobody, under its own reason `identity-unverified`. The residual case Codex
+also named (an `enforce` hub where the *sender* used a **shared** token, which by design
+takes the name from the header) cannot be detected from the client, because the hub does
+not say which kind of credential a sender used. That one is stated plainly in the docs
+instead of being pretended away.
 
 **Prompt**: [tasks/WP03-the-decision-layer.md](tasks/WP03-the-decision-layer.md)
 

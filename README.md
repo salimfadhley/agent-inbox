@@ -132,6 +132,10 @@ for you, so new mail is noticed without a human saying "go and look". Add `--rew
 to install an opt-in idle-session waiter: the Stop hook runs in the background and wakes
 Claude when new mail arrives after the TUI has gone idle.
 
+Nothing interrupts an agent mid-turn unless you configure it to, and a sender can never
+make its own message interrupting — see
+[interrupting an agent](doc/interrupting-an-agent.md).
+
 ## The CLI
 
 Every mode of one command. `agent-inbox <verb> --help` for the details.
