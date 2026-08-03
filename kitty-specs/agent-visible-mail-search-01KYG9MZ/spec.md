@@ -1,5 +1,10 @@
 # Spec — Agent-visible mail search
 
+> **Delivered and closed 2026-08-03 — shipped as v0.46.0**, running on both hubs and
+> proved. Three work packages, twelve subtasks, three Directive 4 reviews, three removal
+> proofs. Two findings went out as issues rather than scope creep: **#45** (a reply
+> discloses its parent's id — pre-existing, and search does not spread it).
+
 - Mission: `agent-visible-mail-search-01KYG9MZ`
 - Revised 2026-08-03 with the owner's decisions: search covers the whole retention
   window, and the implementation scans rather than indexing. Both are recorded below
