@@ -58,6 +58,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 #: agent-inbox, which the console's own hostname will rarely tell them.
 PROJECT_URL = "https://github.com/salimfadhley/agent-inbox"
 
+#: What this *is*, for a reader who wants prose rather than a source tree. Beside the
+#: repository rather than instead of it: someone who has just been handed a hub url and
+#: is trying to work out what they are looking at wants the homepage, and someone
+#: debugging it wants the code. Guessing which is unnecessary — both fit on one line.
+HOMEPAGE_URL = "https://salimfadhley.github.io/agent-inbox/"
+
 #: What this application is called, for the page title and `application-name`. A
 #: self-hosted hub answers to whatever the homelab box is called — `examplehub`, `nas`,
 #: `vm3` — and that name says nothing about what the site is. Bitwarden itself will
@@ -169,7 +175,8 @@ def _footer(hub: dict[str, Any] | None) -> str:
     return (
         f'<footer class="foot">console <code>{html.escape(__version__)}</code>'
         f" · hub <code>{theirs}</code> · "
-        f'<a href="{PROJECT_URL}">agent-inbox on GitHub</a></footer>'
+        f'<a href="{HOMEPAGE_URL}">about agent-inbox</a> · '
+        f'<a href="{PROJECT_URL}">source on GitHub</a></footer>'
     )
 
 

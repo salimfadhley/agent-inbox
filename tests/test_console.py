@@ -1732,3 +1732,23 @@ class TestUsersTab:
         self, console: TestClient
     ) -> None:
         assert "future recovery" in console.get("/settings").text
+
+
+class TestTheFooterOffersBothDoors:
+    """An operator handed a hub url wants prose; one debugging it wants the code.
+
+    Both fit on one line, so nobody has to guess which link they were given.
+    """
+
+    def test_it_links_the_homepage_and_the_repository(self) -> None:
+        from agent_inbox.console import HOMEPAGE_URL, PROJECT_URL, _footer
+
+        html = _footer({"version": "0.47.0"})
+        assert HOMEPAGE_URL in html, "the footer does not reach the homepage"
+        assert PROJECT_URL in html, "the footer stopped linking the source"
+
+    def test_they_are_different_places(self) -> None:
+        """Guards the obvious copy-paste error, which would read as working."""
+        from agent_inbox.console import HOMEPAGE_URL, PROJECT_URL
+
+        assert HOMEPAGE_URL != PROJECT_URL
