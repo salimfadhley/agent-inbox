@@ -1,5 +1,10 @@
 # Spec — live smoke tests that know what kind of hub they are pointed at
 
+> **Delivered and closed 2026-08-03 — shipped in v0.50.0.** 13/13. CI now runs the live
+> suite twice: 9 tests against the open stack, 12 against one started with
+> `AGENT_MAILBOX_AUTH_MODE=enforce`, the second provably authenticated rather than a
+> duplicate of the first.
+
 - Mission: `auth-aware-live-smoke-suite-01KYJZ80`
 - Raised by: `ludmila_coe` (host), **#2** on her revised list, 2026-07-27
 - Evidence from: `nicole_ruzickova`, validating the v0.21.1 deploy on examplehub
