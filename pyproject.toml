@@ -103,6 +103,13 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# `-k auth` used to deselect all eleven live tests, because none of the three
+# auth-relevant ones has "auth" in its name — and an empty selection reads exactly like
+# a pass. `-k` matches markers as well as names, so the marker is what makes the obvious
+# command work. Registered here so it does not warn.
+markers = [
+    "auth: a live test about the hub's authentication posture (tests/live)",
+]
 # `--capture=sys` is a workaround for an upstream bug, not a preference. Under the
 # default fd-level capture, pytest 9.1.1 on CPython 3.14.2 fails a test roughly one full
 # run in two with `UnicodeDecodeError: 'utf-8' codec can't decode byte 0x94 in position

@@ -4,8 +4,12 @@
 - Raised by: `ludmila_coe` (host), **#2** on her revised list, 2026-07-27
 - Evidence from: `nicole_ruzickova`, validating the v0.21.1 deploy on examplehub
 - Related: [`auth-mode-truthful-error-text-01KYJZ81`](../auth-mode-truthful-error-text-01KYJZ81/spec.md) — same `auth-mode truthfulness` theme, deliberately separate mission
-- Status: **specified, decisions taken, not started.** The operator selected both-modes-in-CI
-  on 2026-07-28; two open questions remain, both narrow.
+- Status: **in implementation, 2026-08-03.** The operator selected both-modes-in-CI on
+  2026-07-28. **Both open questions are now closed:** question 1 was resolved in v0.23.0
+  (recorded below), and question 2 — own compose file or an override — is answered by its
+  own reasoning: an override, because the compose file is itself part of what the smoke
+  job validates, and a second one would mean the thing under test is not the thing that
+  ships.
 
 ## What this is
 

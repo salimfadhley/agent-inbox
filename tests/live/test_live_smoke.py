@@ -80,6 +80,21 @@ def _post_form(url: str, fields: dict[str, str]) -> int:
 # -- the hub ---------------------------------------------------------------
 
 
+def test_the_suite_knows_what_kind_of_hub_this_is(hub) -> None:
+    """The premise every other assertion rests on (FR-001).
+
+    Before this, the suite had no representation of the hub's posture at all, so the
+    answer was hardcoded — and pointing it at an enforcing hub made most of it fail for
+    reasons that had nothing to do with the deployment being broken.
+
+    Asserting the descriptor is coherent rather than that it holds any particular value:
+    the same run must pass against either kind of hub, which is the whole point.
+    """
+    assert hub.name, hub.assuming("the hub published no name")
+    assert hub.version, hub.assuming("the hub published no version")
+    assert hub.mode in ("open", "enforcing"), hub.assuming("unrecognised auth mode")
+
+
 def test_the_hub_describes_itself() -> None:
     status, body = _req("GET", f"{HUB}/")
     assert status == 200, body
@@ -186,13 +201,20 @@ def test_the_console_composes_as_itself() -> None:
 
 AUTH = os.environ.get("LIVE_AUTH")
 
+#: **Two decorators, because `-k auth` used to select nothing.** None of the three
+#: auth tests has "auth" in its name, so the obvious way to reach them deselected all
+#: eleven — and an empty selection reads exactly like a pass. `-k` matches markers as
+#: well as names, so the marker is what makes the obvious command work; it is registered
+#: in `pyproject.toml` so it does not warn.
 needs_auth = pytest.mark.skipif(
     not (HUB and AUTH),
     reason="set LIVE_AUTH=1 (and LIVE_HUB_URL) against an enforcing hub",
 )
+auth = pytest.mark.auth
 
 
 @needs_auth
+@auth
 def test_an_enforcing_hub_says_so() -> None:
     status, body = _req("GET", f"{HUB}/")
     assert status == 200 and isinstance(body, dict)
@@ -200,6 +222,7 @@ def test_an_enforcing_hub_says_so() -> None:
 
 
 @needs_auth
+@auth
 def test_anonymous_write_is_refused_when_enforced() -> None:
     """No credential, a write route → 401. The point of enforcement, over real HTTP."""
     status, _ = _req("POST", f"{HUB}/actors", {"preferredUsername": "nobody_here"})
@@ -207,6 +230,7 @@ def test_anonymous_write_is_refused_when_enforced() -> None:
 
 
 @needs_auth
+@auth
 def test_anonymous_observe_is_refused_when_enforced() -> None:
     status, _ = _req("GET", f"{HUB}/observe/stats")
     assert status == 401
