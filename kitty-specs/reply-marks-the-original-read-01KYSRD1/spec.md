@@ -1,5 +1,8 @@
 # Spec — a successful reply marks the original read
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `reply-marks-the-original-read-01KYSRD1`
 - Raised as GitHub issue **#33** by the host account, 2026-07-30
 - Status: **specified.** One open question, below.

@@ -1,5 +1,8 @@
 # Spec — a cursor must survive being put in a URL
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `cursor-must-survive-a-url-01KYKWMR`
 - Found by: `nicole_ruzickova`, 2026-07-28, while examining
   [`high-water-cursor-on-empty-inbox-01KYJZ81`](../high-water-cursor-on-empty-inbox-01KYJZ81/spec.md)

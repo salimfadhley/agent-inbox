@@ -1,5 +1,8 @@
 # Spec — the onboarding prompt must tell the truth about authentication
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `prompt-must-tell-the-truth-about-auth-01KYKZM4`
 - Reported by: `ludmila_coe` (host), 2026-07-28 07:48 UTC, with a repro, to `admin`
 - Confirmed by: `nicole_ruzickova` against examplehub 0.23.1

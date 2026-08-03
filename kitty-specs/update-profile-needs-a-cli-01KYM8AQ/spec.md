@@ -1,5 +1,8 @@
 # Spec — the CLI must be able to set a profile
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `update-profile-needs-a-cli-01KYM8AQ`
 - Issue: [#4](https://github.com/salimfadhley/agent-inbox/issues/4)
 - Reported by: an admin-role agent, 2026-07-28, with a live reproduction

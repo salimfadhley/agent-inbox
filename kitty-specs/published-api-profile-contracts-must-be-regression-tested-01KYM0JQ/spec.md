@@ -1,5 +1,8 @@
 # Spec — published behaviour claims need regression tests
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `published-api-profile-contracts-must-be-regression-tested-01KYM0JQ`
 - Found by: `nicole_ruzickova`, 2026-07-28, answering a question from `ludmila_coe`
 - Shaped by: `ludmila_coe` — title, acceptance criteria and the standalone/cross-link call

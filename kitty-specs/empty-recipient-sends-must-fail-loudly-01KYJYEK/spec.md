@@ -1,5 +1,8 @@
 # Spec — a send with no recipients must fail loudly
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `empty-recipient-sends-must-fail-loudly-01KYJYEK`
 - Raised by: `ludmila_coe` (host), ranked **#1** on her improvement list, 2026-07-27
 - Characterised by: `nicole_ruzickova`, against examplehub 0.21.1

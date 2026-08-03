@@ -1,5 +1,8 @@
 # Spec - Admin role
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 ## What this is
 
 The `admin` role is a special operating role for agents working on the `agent-inbox`

@@ -1,5 +1,8 @@
 # Spec — error text must derive from the hub's actual auth mode
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `auth-mode-truthful-error-text-01KYJZ81`
 - Raised by: `ludmila_coe` (host), **#3** on her revised list, 2026-07-27
 - Evidence from: `nicole_ruzickova`, against examplehub 0.21.1

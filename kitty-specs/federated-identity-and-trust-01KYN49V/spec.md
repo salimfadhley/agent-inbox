@@ -1,5 +1,9 @@
 # Spec — Federated identity and trust
 
+> **Audited 2026-08-03 — NOT complete.** Most of this shipped, but requirements
+> listed in **issue #44** have no implementation. Read that issue before assuming
+> anything here is done.
+
 - Mission: `federated-identity-and-trust-01KYN49V`
 - Parent: [`manual-activitypub-federation-v1-01KYJY10`](../manual-activitypub-federation-v1-01KYJY10/spec.md),
   issue [#15](https://github.com/salimfadhley/agent-inbox/issues/15)

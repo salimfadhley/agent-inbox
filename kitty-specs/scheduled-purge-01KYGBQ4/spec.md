@@ -1,5 +1,8 @@
 # Spec — retention that actually runs
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 **Kind:** bugfix · **Severity:** a documented guarantee that has never once been honoured
 **Found:** 2026-07-27, while planning the performance work on `gc-decapitates-threads-01KY9PRJ`
 

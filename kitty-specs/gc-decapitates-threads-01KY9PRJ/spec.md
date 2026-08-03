@@ -1,5 +1,8 @@
 # Spec — garbage collection decapitates live threads
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 **Kind:** bugfix · **Severity:** silent data loss on active conversations
 **Found:** 2026-07-24, by analysis while designing the threading epic
 **Origin brief:** `doc/missions/0016-gc-decapitates-threads.md`

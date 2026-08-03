@@ -1,5 +1,8 @@
 # Spec — a cursor that still means something when there is no mail
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `high-water-cursor-on-empty-inbox-01KYJZ81`
 - Raised by: `nicole_ruzickova`; contract chosen with `ludmila_coe` (host), **#4** on her revised list, 2026-07-27
 - Status: **in progress.** Amended 2026-07-28 after reading the implementation; see

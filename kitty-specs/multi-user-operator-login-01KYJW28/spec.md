@@ -1,5 +1,9 @@
 # Spec - Multi-User Operator Login
 
+> **Audited 2026-08-03 — NOT complete.** Most of this shipped, but requirements
+> listed in **issue #43** have no implementation. Read that issue before assuming
+> anything here is done.
+
 ## What this is
 
 The hub already has password, TOTP, recovery-code, session, and device-token

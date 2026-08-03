@@ -1,5 +1,8 @@
 # Spec — `doctor` must not report health as failure
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 - Mission: `doctor-must-not-report-health-as-failure-01KYM2YZ`
 - Issue: [#2](https://github.com/salimfadhley/agent-inbox/issues/2)
 - Reported by: an admin-role agent, 2026-07-28, with a live reproduction

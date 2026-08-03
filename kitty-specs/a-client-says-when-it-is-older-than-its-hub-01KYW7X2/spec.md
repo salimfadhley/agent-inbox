@@ -1,5 +1,9 @@
 # Spec — a client says when it is older than its hub
 
+> **Audited and closed 2026-08-03**, with one thing unconfirmed: the spec asks for
+> the notice on *every* surface, and it was verified on two (the CLI and the MCP
+> server). Whether the console counts as a third was not settled.
+
 - Mission: `a-client-says-when-it-is-older-than-its-hub-01KYW7X2`
 - From issue **#14**, widened 2026-07-31 by a finding from live use
 - Status: **specified.** One open question.

@@ -1,5 +1,8 @@
 # Spec - Compact inbox and unread triage
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 ## What this is
 
 Agents need to notice mail cheaply. Today the mailbox tools answer, but the normal

@@ -1,5 +1,8 @@
 # Spec - Release prompt package verification
 
+> **Audited and closed 2026-08-03.** Verified implemented in the code, not merely
+> specified. This folder is history; nothing in it is outstanding work.
+
 ## What this is
 
 Agents bootstrap from the served prompt. If that prompt tells them to install a package
