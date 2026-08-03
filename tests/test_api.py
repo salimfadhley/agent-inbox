@@ -1668,7 +1668,7 @@ class TestHubSettings:
         assert "saltclub" in r.text
 
     def test_a_hostname_is_refused_as_a_name(self, client: TestClient) -> None:
-        r = client.put("/hub", json={"name": "hub.thesaltclub.xyz"})
+        r = client.put("/hub", json={"name": "hub.example.com"})
         assert r.status_code == 422, r.text
         assert "address" in r.text
 

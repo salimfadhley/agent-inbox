@@ -133,7 +133,7 @@ class TestHubNameValidation:
     def test_a_hostname_is_refused_as_a_name(self) -> None:
         """The conflation this mission exists to remove, so it earns its own test."""
         with pytest.raises(NameUnavailable) as caught:
-            validate_hub_name("hub.thesaltclub.xyz")
+            validate_hub_name("hub.example.com")
         message = str(caught.value)
         assert "address" in message and "name" in message
 
