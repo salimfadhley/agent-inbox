@@ -256,9 +256,28 @@ def test_the_hub_does_what_it_advertises(hub) -> None:
     """
     if hub.mode != "enforcing":
         pytest.skip("only an enforcing hub can misreport enforcement")
-    status, _ = _req("GET", f"{HUB}/observe/stats")
-    assert status != 200, hub.assuming(
-        "the hub advertises authentication but served /observe/stats anonymously"
+
+    # **Several routes, and `401` specifically.** An outside review caught this probing
+    # one route and accepting any non-200: it would have passed on a route that was
+    # merely broken (500, 404) while another was genuinely open, which is the failure
+    # it exists to detect wearing a disguise.
+    served: list[str] = []
+    wrong: list[str] = []
+    for route in ("/actors", "/observe/stats", "/observe/mailbox/admin"):
+        status, _ = _req("GET", f"{HUB}{route}")
+        if status == 200:
+            served.append(route)
+        elif status != 401:
+            wrong.append(f"{route}→{status}")
+
+    assert not served, hub.assuming(
+        f"the hub advertises authentication but served {', '.join(served)} "
+        "to a caller with no credential at all"
+    )
+    assert not wrong, hub.assuming(
+        f"a protected route answered something other than 401: {', '.join(wrong)}. "
+        "Refusal is the expected behaviour; anything else is a different fault, and "
+        "accepting it here would let a broken route pass as a guarded one"
     )
 
 

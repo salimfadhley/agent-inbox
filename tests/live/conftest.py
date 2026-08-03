@@ -155,10 +155,19 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     if not HUB or exitstatus != 0:
         return
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    if reporter is None:
+    if reporter is None:  # pragma: no cover - only without the terminal plugin
+        # Refuse rather than disable silently. A guard that switches itself off when it
+        # cannot see is the same failure it was written to catch.
+        session.exitstatus = 1
         return
     passed = len(reporter.stats.get("passed", []))
     skipped = len(reporter.stats.get("skipped", []))
+    # **A known limit, stated rather than papered over.** This counts any pass, so one
+    # trivially-green test — `test_health_answers` answers on every hub — makes a run
+    # look substantive even if everything meaningful skipped. Raising the bar reliably
+    # means naming the tests that constitute a real exercise, which is a list that rots.
+    # `LIVE_REQUIRE_AUTH` is the sharper instrument and is what CI uses; this remains
+    # the floor. Found by an outside review.
     if passed:
         if skipped:
             reporter.write_line(
