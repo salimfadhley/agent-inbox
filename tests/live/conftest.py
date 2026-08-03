@@ -262,3 +262,33 @@ def _advertises_override() -> bool:
     request.add_header("Accept", "application/json")
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
         return bool(json.loads(response.read() or b"{}").get("adminPasswordSet"))
+
+
+#: Set by CI's enforcing pass. Turns "we happened to run unauthenticated" from a quiet
+#: outcome into a failure (FR-010).
+REQUIRE_AUTH = os.environ.get("LIVE_REQUIRE_AUTH", "").strip()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _the_enforcing_pass_must_actually_enforce(
+    hub: HubDescriptor, credential: str
+) -> None:
+    """FR-010. Without this the second CI pass could be a duplicate of the first.
+
+    A credential that turns out not to be needed, or a hub that quietly came up open,
+    would leave the enforcing pass asserting exactly what the open pass already proved —
+    while its name, and its green tick, claim something more.
+
+    Only when `LIVE_REQUIRE_AUTH` is set, so a human pointing the suite at whatever they
+    have to hand is not nagged.
+    """
+    if not REQUIRE_AUTH:
+        return
+    assert hub.mode is AuthMode.ENFORCING, hub.assuming(
+        "LIVE_REQUIRE_AUTH is set, but this hub does not enforce authentication — "
+        "the pass would duplicate the open one while claiming to test enforcement"
+    )
+    assert credential, hub.assuming(
+        "LIVE_REQUIRE_AUTH is set, but no credential was obtained — every "
+        "authenticated assertion would skip and the run would still report green"
+    )

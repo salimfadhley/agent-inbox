@@ -38,6 +38,12 @@ services:
       # stable across restarts; supply it from the environment, never the repo.
       AGENT_INBOX_AUTH_MODE: ${AGENT_INBOX_AUTH_MODE:-off}
       AGENT_INBOX_SECRET_KEY: ${AGENT_INBOX_SECRET_KEY:-}
+      # A standing low-security mode: set it and `admin` signs in with no second factor,
+      # at any time. Empty by default, and it should stay empty on anything real — it
+      # exists for recovering a hub whose authenticator is lost, and for a throwaway hub
+      # in CI that must obtain a credential with no stored secret. A hub running it
+      # advertises `adminPasswordSet`, so nothing has to guess.
+      AGENT_INBOX_ADMIN_PASSWORD: ${AGENT_INBOX_ADMIN_PASSWORD:-}
     volumes:
       - agent-mailbox-data:/data
 

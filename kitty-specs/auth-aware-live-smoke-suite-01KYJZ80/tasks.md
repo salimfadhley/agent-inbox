@@ -129,8 +129,8 @@ started with `AGENT_MAILBOX_AUTH_MODE=enforce`. Both must pass.
 
 **Independent test**: the workflow runs both passes and fails if either does.
 
-- [ ] T011 A second CI pass against an enforcing hub, via a compose override (WP04)
-- [ ] T012 The enforcing pass fails if it ends up running unauthenticated (WP04)
+- [x] T011 A second CI pass against an enforcing hub, via a compose override (WP04)
+- [x] T012 The enforcing pass fails if it ends up running unauthenticated (WP04)
 - [ ] T013 Directive 4 — outside model review before the mission ships (WP04)
 
 **Sketch**: a compose **override**, not a second file (question 2). The enforcing pass

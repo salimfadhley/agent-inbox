@@ -132,6 +132,64 @@ jobs:
           LIVE_CONSOLE_URL: http://localhost:8082
         run: uv run pytest tests/live -v
 
+      - name: Tear down the open stack
+        run: docker compose down -v
+
+      # ---- second pass: the same topology, enforcing authentication ----
+      #
+      # Both of our hubs enforce, so a suite only ever run against an open one is a
+      # suite that has never seen production. This is the pass that proves the shipped
+      # image enforces, that the bootstrap works, and that the suite tells the truth
+      # about either kind of hub.
+      #
+      # **The same compose file, with the environment overridden** — not a second file.
+      # The compose topology is itself part of what this job validates, and a second
+      # definition would mean the thing under test is not the thing that ships. The
+      # image is reused, so there is no second build (NFR-003).
+      - name: Launch the stack, enforcing
+        env:
+          AGENT_MAILBOX_PUBLIC_URL: http://localhost:8080
+          AGENT_INBOX_AUTH_MODE: enforce
+        run: |
+          # Generated per run and never stored. The hub is created for this job and
+          # destroyed with it, so the admin override is a throwaway credential rather
+          # than a secret — which is the whole point: no repository credential, and
+          # nothing configured in CI that could outlive the run.
+          {
+            echo "AGENT_INBOX_SECRET_KEY=$(openssl rand -base64 32)"
+            echo "AGENT_INBOX_ADMIN_PASSWORD=$(openssl rand -base64 24)"
+          } >> "$GITHUB_ENV"
+
+      - name: Bring it up
+        env:
+          AGENT_MAILBOX_PUBLIC_URL: http://localhost:8080
+          AGENT_INBOX_AUTH_MODE: enforce
+        run: docker compose up -d
+
+      - name: Wait for the enforcing hub
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "hub is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the enforcing hub did not become healthy in 60s"
+          docker compose logs
+          exit 1
+
+      - name: Run the live smoke tests against an enforcing hub
+        env:
+          LIVE_HUB_URL: http://localhost:8080
+          # LIVE_CONSOLE_URL is deliberately absent: the console sidecar has no
+          # credential of its own on an enforcing hub, which is its own mission.
+          LIVE_AUTH: "1"
+          # Fails the pass if it ends up running unauthenticated — otherwise this is a
+          # duplicate of the pass above wearing a different name (FR-010).
+          LIVE_REQUIRE_AUTH: "1"
+        run: |
+          LIVE_ADMIN_PASSWORD="$AGENT_INBOX_ADMIN_PASSWORD" uv run pytest tests/live -v
+
       - name: Stack logs (always, for debugging a failure)
         if: always()
         run: docker compose logs
