@@ -849,3 +849,54 @@ class TestProfileFromTheCli:
 
         text = CliRunner().invoke(cli, ["profile", "set", "--help"]).output
         assert "replace" in text.lower()
+
+
+def test_doctor_hub_flag_contacts_the_hub_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--hub` decides who is contacted, not merely what is printed.
+
+    It used to build the client from the configuration whenever one existed, so the
+    flag reached nothing but the display string: `doctor --hub <anything>` answered
+    `ok connectivity` and named the *configured* hub beside a url it had never opened.
+    A nonexistent address was reported healthy.
+
+    That is the worst possible failure for this command in particular. Its whole
+    purpose is telling four identical-looking faults apart, and the reason to pass
+    `--hub` at all is usually to check a hub **before** moving to it — precisely when
+    a confident answer about a different hub is most costly.
+    """
+    seen: list[str] = []
+
+    class FakeHubClient:
+        def __init__(self, config: Config) -> None:
+            self.config = config
+            seen.append(config.hub)
+
+        def hub_info(self) -> dict[str, Any]:
+            return {"name": "elsewhere", "version": "test"}
+
+        def remote_doctor(self) -> dict[str, Any]:
+            return {"you": {"token": "accepted"}, "verdict": "fine"}
+
+        def ping(self) -> dict[str, Any]:
+            return {"waiting": 0}
+
+        def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            return {"unread": 0, "items": [], "cursor": ""}
+
+    (tmp_path / CONFIG_NAME).write_text(
+        'hub = "http://configured:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
+
+    main(["--engine", "claude", "doctor", "--hub", "http://asked-about:9999"])
+
+    assert seen, "doctor built no client at all"
+    assert seen[0] == "http://asked-about:9999", (
+        f"--hub was ignored: doctor contacted {seen[0]!r}"
+    )
+    assert "http://configured:8081" not in seen, (
+        "doctor contacted the configured hub despite being asked about another"
+    )

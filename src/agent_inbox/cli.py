@@ -24,6 +24,7 @@ import json
 import os
 import sys
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -888,7 +889,20 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
         token = os.environ.get("AGENT_MAILBOX_TOKEN", "").strip()
     if not token:
         token = str(load_global().get("token", "")).strip()
-    diagnostic = config or Config(hub=hub_url, name=UNNAMED, token=token or None)
+    # **`--hub` decides who is contacted, not merely what is printed.** This read
+    # `config or Config(hub=hub_url, …)`, so whenever a configuration existed the
+    # client was built from it and `--hub` reached nothing but the display string:
+    # `doctor --hub https://does-not-exist.invalid` answered `ok connectivity` and
+    # named the configured hub beside a url it had never opened. The one command
+    # whose job is to tell four identical-looking faults apart was confidently
+    # reporting on a different hub than the one it was asked about — most damagingly
+    # to somebody checking a hub *before* moving to it, which is the reason to pass
+    # the flag at all.
+    diagnostic = (
+        replace(config, hub=hub_url)
+        if config is not None
+        else Config(hub=hub_url, name=UNNAMED, token=token or None)
+    )
     # NFR-002: with no engine we still reach the hub and its remote doctor, carrying
     # whatever shared credential exists. A machine token authenticates the machine; it
     # does not need an identity to be checked.
