@@ -425,3 +425,113 @@ class TestTheRenameKeepsOldEnvironmentsWorking:
         """`config list` answers "where did this come from" — so do not lie about it."""
         found = effective_settings(env={"AGENT_MAILBOX_HUB": "http://old"})
         assert found["hub"] == ("http://old", "AGENT_MAILBOX_HUB")
+
+
+class TestJoinDoesNotEvictWhoeverWasHereFirst:
+    """Issue #47. `join` merged into the canonical filename rather than the file in use.
+
+    A project still on the supported back-compat `agent-mailbox.toml` therefore got a
+    **brand new** `agent-inbox.toml` holding only the joining engine — and because the
+    new name takes precedence, every other identity vanished at once.
+
+    That is exactly the eviction `write_config`'s docstring says merging exists to
+    prevent — *"the eviction would be invisible until their mail stopped arriving"* —
+    arriving by a different route. The merge was careful; it read the wrong file.
+    """
+
+    def test_a_legacy_named_project_keeps_its_other_engines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_inbox.client import write_config
+
+        (tmp_path / LEGACY_CONFIG_NAME).write_text(
+            'hub = "http://hub:8081"\n\n'
+            '[agents.claude]\nname = "nicole_ruzickova"\nrole = "admin"\n\n'
+            '[agents.codex]\nname = "pablo_fantomas"\nrole = "admin"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+        write_config("http://hub:8081", "nicole_ruzickova", engine="claude", force=True)
+
+        text = (tmp_path / LEGACY_CONFIG_NAME).read_text()
+        assert "pablo_fantomas" in text, "codex's identity was evicted by claude's join"
+        assert not (tmp_path / CONFIG_NAME).exists(), (
+            "join created a second config file, which then shadows the real one"
+        )
+
+    def test_a_fresh_project_still_gets_the_canonical_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The paired positive: new projects still get the canonical name."""
+        from agent_inbox.client import write_config
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        write_config("http://hub:8081", "jed_smith", engine="claude")
+        assert (tmp_path / CONFIG_NAME).exists()
+        assert not (tmp_path / LEGACY_CONFIG_NAME).exists()
+
+
+class TestJoinLeavesTheHubMachineWide:
+    """Issue #47, second half. `join` wrote `hub` into the project file.
+
+    That re-created the very shadowing the machine-wide default (v0.48.0) exists to
+    remove: every project joined against a hub was pinned to it for ever, and a later
+    `config set hub` appeared to do nothing at all.
+    """
+
+    def test_it_writes_the_hub_machine_wide(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_inbox.client import write_config
+
+        xdg = tmp_path / "xdg"
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+
+        write_config("http://hub:8081", "jed_smith", engine="claude")
+
+        assert "http://hub:8081" in (xdg / "agent-inbox" / "config.toml").read_text()
+        assert "hub" not in (tmp_path / CONFIG_NAME).read_text(), (
+            "join pinned this project to a hub, which config set then cannot change"
+        )
+
+    def test_a_project_that_already_pins_one_keeps_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pinned hub is somebody's deliberate choice — a staging deployment, a
+        second mailbox. Joining must not quietly undo it either."""
+        from agent_inbox.client import write_config
+
+        (tmp_path / CONFIG_NAME).write_text('hub = "http://staging:8081"\n')
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+        write_config("http://other:8081", "jed_smith", engine="claude")
+        assert "http://staging:8081" in (tmp_path / CONFIG_NAME).read_text()
+
+    def test_a_per_engine_token_keeps_its_hub_beside_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Found by outside review, and it is the rule `config set` already enforces.
+
+        Sending the hub machine-wide while a per-engine token stays in the project
+        leaves that engine loading the new hub with the old hub's credential — and the
+        hub answers `token rejected`, which points at the one thing that is not wrong.
+        """
+        from agent_inbox.client import write_config
+
+        (tmp_path / CONFIG_NAME).write_text(
+            '[agents.codex]\nname = "pablo_fantomas"\ntoken = "for-the-old-hub"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+        write_config("http://new:8081", "pablo_fantomas", engine="codex", force=True)
+
+        text = (tmp_path / CONFIG_NAME).read_text()
+        assert "for-the-old-hub" in text, "the token was dropped"
+        assert "http://new:8081" in text, (
+            "the hub went machine-wide while its token stayed here — they must match"
+        )

@@ -535,7 +535,18 @@ def write_config(
     name or token with an awkward character cannot corrupt the file or lose the
     entries below it.
     """
-    target = project_root(start) / CONFIG_NAME
+    # **Merge into the file that is actually in force, whichever name it wears.** This
+    # was `project_root(start) / CONFIG_NAME` — always the canonical name — so a project
+    # still using the supported back-compat `agent-mailbox.toml` got a *brand new*
+    # `agent-inbox.toml` containing only the joining engine. The new file then takes
+    # precedence, and every other engine's identity disappears at once.
+    #
+    # That is precisely the eviction the docstring above says merging exists to prevent,
+    # arriving by a different route: the merge was careful, it simply read a different
+    # file than the one being used. Observed on this repository — a project holding
+    # `claude` and `codex` was joined as `claude` and came back holding `claude` alone,
+    # with the other identity still on disk and no longer read.
+    target = find_config(start) or (project_root(start) / CONFIG_NAME)
     existing: dict[str, Any] = {}
     if target.exists():
         existing = tomllib.loads(target.read_text())
@@ -558,7 +569,25 @@ def write_config(
         entry["token"] = kept_token
     agents[engine] = entry
 
-    return _render_project(target, str(existing.get("hub") or hub), agents)
+    # **The hub is machine-wide unless this project already pins one** (v0.48.0).
+    # Writing it here unconditionally is what `join` used to do, and it re-created
+    # the shadowing the machine-wide default exists to remove: every project joined
+    # against
+    # a hub was silently pinned to it for ever, and a later `config set hub` appeared to
+    # do nothing. A project that *has* its own hub keeps it — that is a deliberate
+    # choice somebody made, and `doctor` reports it so it cannot be forgotten.
+    pinned = str(existing.get("hub") or "").strip()
+    # **A credential keeps its hub beside it.** If this engine carries its own token,
+    # the address it was minted against belongs in the same file — otherwise the hub
+    # goes machine-wide while the token stays here, and the engine loads the new hub
+    # with the old hub's key. The hub then answers `token rejected`, which points at
+    # the one thing that is not wrong. Found by an outside review, and it is the same
+    # rule `config set` enforces: hub and token live together.
+    if not pinned and hub and not kept_token:
+        write_global({"hub": hub})
+    elif not pinned and hub:
+        pinned = hub
+    return _render_project(target, pinned, agents)
 
 
 def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
@@ -569,8 +598,10 @@ def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
         "# commit it: it names a deployment and may carry a token. Do not",
         "# hand-edit it either — `configure` knows where every setting belongs.",
         "",
-        f"hub = {_toml_str(hub)}",
-        "",
+        # Omitted entirely when there is none, rather than written as `hub = ""`. An
+        # empty value is not a setting, and a file that states one invites a reader to
+        # fill it in — quietly re-pinning the project to whatever they type.
+        *([f"hub = {_toml_str(hub)}", ""] if hub else []),
         "# One identity per engine: several agents work in this repository and they",
         "# are different correspondents. Names are permanent and deliberately",
         "# meaningless — do not encode the project or the model into them. What an",
