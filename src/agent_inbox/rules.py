@@ -258,7 +258,13 @@ def search(
     ]
     visible.sort(key=lambda obj: (obj.published, obj.id), reverse=True)
 
-    capped = max(1, min(limit, SEARCH_MAX_LIMIT))
+    # `limit <= 0` means "you did not say", not "give me none" — nobody asks for zero
+    # results. It has to mean the default rather than be clamped to one, because the
+    # clients omit an unset limit from the query string entirely and so already get the
+    # default; clamping here would make `limit=0` behave differently depending on
+    # whether it travelled through `HubClient` or straight to the route. An outside
+    # review caught exactly that divergence.
+    capped = SEARCH_DEFAULT_LIMIT if limit <= 0 else min(limit, SEARCH_MAX_LIMIT)
     return (
         tuple(Match(obj, snippet(obj, needle)) for obj in visible[:capped]),
         len(visible) > capped,

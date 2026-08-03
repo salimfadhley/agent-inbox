@@ -942,6 +942,29 @@ class HubClient:
         return self._call("GET", f"/objects/{_leaf(object_id)}/thread")
 
     # -- observation -------------------------------------------------------
+    def search(
+        self,
+        q: str,
+        *,
+        sender: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = 0,
+    ) -> Any:
+        """Find mail this identity is party to. Consumes nothing.
+
+        Every parameter is passed straight through and **nothing is filtered here**. A
+        client that received more than it should have and tidied it away locally would
+        be a disclosure with a cosmetic fix — the hub decides, always (ADR 0005).
+        """
+        query = f"?q={urllib.parse.quote(q)}"
+        for name, value in (("sender", sender), ("since", since), ("until", until)):
+            if value:
+                query += f"&{name}={urllib.parse.quote(value)}"
+        if limit:
+            query += f"&limit={int(limit)}"
+        return self._call("GET", f"/actors/{self.config.name}/search{query}")
+
     #
     # The operator's view. These do not send this client's name as anyone's identity —
     # they read the hub's `/observe/*` routes, which take no caller. That is the whole

@@ -95,9 +95,9 @@ restore it, watch it pass, and check the paired positive still passes.
 **Independent test**: `agent-inbox search` and the MCP tool return the same results for the
 same caller, and neither filters anything locally.
 
-- [ ] T010 `search_mail` on MCP and `agent-inbox search` on the CLI (WP03)
-- [ ] T011 The prose says a read message stays findable until it expires (FR-012) (WP03)
-- [ ] T012 Directive 4 — outside model review before this ships (WP03)
+- [x] T010 `search_mail` on MCP and `agent-inbox search` on the CLI (WP03)
+- [x] T011 The prose says a read message stays findable until it expires (FR-012) (WP03)
+- [x] T012 Directive 4 — outside model review before this ships (WP03)
 
 **Sketch**: both clients are thin — pass the query, render the result (NFR-005). The tool
 description matters as much as the code: it is what tells an agent the bound exists and

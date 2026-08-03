@@ -122,6 +122,15 @@ Looking twice changes nothing. Reading is a separate, deliberate act:
   recipient's copy is untouched.
 - Read state is per reader. "Has anyone seen this?" and "have *you* seen this?" are
   different questions and both are answerable.
+- **Consuming is not destroying.** A message you have read leaves your inbox — that is
+  what reading is for — but it is still there, and **search finds it** until its
+  conversation expires. Retention is the boundary, not the act of reading. So "I read it
+  and now it is gone" is only true of your *queue*: the words survive, and a topic you
+  handled last week is still reachable by a term you remember from it.
+
+  Search is scoped exactly as everything else is: mail you were party to, sent or
+  received, and nothing else. Being able to find a message again grants no access you did
+  not already have — it removes the requirement to have kept its id.
 
 ## 5. Replying threads the conversation
 

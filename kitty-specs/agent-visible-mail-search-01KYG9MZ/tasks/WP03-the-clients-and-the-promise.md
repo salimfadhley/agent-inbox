@@ -90,6 +90,31 @@ actor can see, consume, or influence a message it should not?"*
 - Nothing in the docs implies a read message is gone.
 - Four gates green, then Directive 4, then ship.
 
+## Directive 4 — done, 2026-08-03
+
+Asked whether any of the three client surfaces filters, reshapes, or decides anything the
+hub should have decided — anything that could make the client's answer differ from the
+hub's, or mask a disclosure rather than prevent it.
+
+**Clean on the substance.** The CLI does not filter, re-sort or cap; it iterates
+`page["results"]` in hub order and projects fields for display only. The MCP tool returns
+the client response directly — `_guard` may attach a staleness notice but touches neither
+`results` nor `truncated`. Every docstring claim was traced to the code that delivers it:
+"read mail stays findable" to `Mailbox.search`, "only party-to mail" to the `is_party_to`
+filter, the result fields to `Api._result`.
+
+**It found one real divergence, and it was the exact smell this package warns about.**
+`HubClient.search` omits `limit` when falsy, so `limit=0` reached the hub as "unspecified"
+and got the route default of ten — while `limit=0` sent straight to the route was clamped
+by `max(1, …)` to a single result. The same call, two answers, depending on which door it
+came through. That is a client deciding something.
+
+Fixed at the hub rather than the client: `limit <= 0` now means *the default*, because
+nobody asks for zero results and the clients already express "unspecified" by omitting the
+parameter. Three tests pin it, including the paired positive that `limit=1` still means
+one — otherwise "0 means default" would be indistinguishable from "small limits are
+ignored".
+
 ## Reviewer guidance
 
 Read the tool description as an agent seeing it for the first time. Does it tell you that

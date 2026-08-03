@@ -236,3 +236,30 @@ class TestTheQuery:
             "s-1", LUDMILA, (JED,), "nothing here", summary="deployment"
         )
         assert ids(find(JED, "deployment", objects=(only_subject,))[0]) == ["s-1"]
+
+
+class TestUnspecifiedLimit:
+    """`limit=0` means "you did not say", and must mean it everywhere.
+
+    The clients omit an unset limit from the query string, so they already get the
+    route's default. If this clamped `0` to one result instead, the same call would
+    return ten rows through `HubClient` and one row straight to the route — a client
+    quietly deciding something. Found by an outside review.
+    """
+
+    def test_zero_means_the_default(self) -> None:
+        objects = TestBounds._many(40)
+        assert len(find(JED, "widget", objects=objects, limit=0)[0]) == (
+            rules.SEARCH_DEFAULT_LIMIT
+        )
+
+    def test_negative_means_the_default_too(self) -> None:
+        objects = TestBounds._many(40)
+        assert len(find(JED, "widget", objects=objects, limit=-5)[0]) == (
+            rules.SEARCH_DEFAULT_LIMIT
+        )
+
+    def test_one_still_means_one(self) -> None:
+        """The paired positive: a real small limit is still honoured."""
+        objects = TestBounds._many(40)
+        assert len(find(JED, "widget", objects=objects, limit=1)[0]) == 1

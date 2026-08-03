@@ -1140,6 +1140,49 @@ def inbox(
 
 
 @cli.command()
+@click.argument("query")
+@click.option("--from", "sender", metavar="NAME", help="Only mail from this sender.")
+@click.option("--since", metavar="TIME", help="Only mail at or after this timestamp.")
+@click.option("--until", metavar="TIME", help="Only mail at or before this timestamp.")
+@click.option("-n", "--limit", type=int, default=0, help="How many results (capped).")
+@click.pass_context
+def search(
+    ctx: click.Context,
+    query: str,
+    sender: str | None,
+    since: str | None,
+    until: str | None,
+    limit: int,
+) -> int:
+    """Find mail about a topic, including mail you have already read.
+
+    Consumes nothing. Searches only mail you are party to — sent by you or addressed
+    to you — for as long as its conversation is retained.
+    """
+    page = _client(ctx).search(
+        query,
+        sender=sender or "",
+        since=since or "",
+        until=until or "",
+        limit=limit,
+    )
+    results = page.get("results", [])
+    if not results:
+        click.echo("nothing found")
+        return 0
+    for row in results:
+        ident = (row.get("id") or "").rsplit("/", 1)[-1]
+        who = (row.get("attributedTo") or "").rsplit("/", 1)[-1] or "?"
+        click.echo(f"{ident}  {who:20} {row.get('summary')}")
+        click.echo(f"    {row.get('snippet')}\n")
+    if page.get("truncated"):
+        # Said plainly, because a capped answer that looks complete is worse than a
+        # short one: the reader stops looking for what was cut.
+        click.echo("more matched than are shown — narrow with --from or --since")
+    return 0
+
+
+@cli.command()
 @click.argument("to")
 @click.argument("body")
 @click.option("-s", "--subject")
