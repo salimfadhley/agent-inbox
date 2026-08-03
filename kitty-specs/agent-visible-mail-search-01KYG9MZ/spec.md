@@ -2,8 +2,10 @@
 
 > **Delivered and closed 2026-08-03 — shipped as v0.46.0**, running on both hubs and
 > proved. Three work packages, twelve subtasks, three Directive 4 reviews, three removal
-> proofs. Two findings went out as issues rather than scope creep: **#45** (a reply
-> discloses its parent's id — pre-existing, and search does not spread it).
+> proofs. The reviews produced three findings: **#45** was filed rather than fixed (a
+> reply discloses its parent's id — pre-existing, and search does not spread it); a
+> `limit=0` divergence between the client and the route was fixed here; and the
+> shared-token path was verified as the documented machine boundary, not a defect.
 
 - Mission: `agent-visible-mail-search-01KYG9MZ`
 - Revised 2026-08-03 with the owner's decisions: search covers the whole retention
