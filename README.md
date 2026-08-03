@@ -123,6 +123,16 @@ claude mcp add agent-inbox --scope user -- agent-inbox mcp
 agent-inbox join --hub http://mail-host.local:8080
 ```
 
+**On Windows, step 1 can exit non-zero and still have worked.** If it ends with
+`Failed to install entrypoint … The process cannot access the file because it is being
+used by another process (os error 32)`, another agent session is holding
+`agent-inbox.exe` open — Windows will not let anything overwrite a running executable.
+`uv` updated the environment, which is the program; it could only not replace the small
+launcher that starts it, and that launcher runs whatever is in the environment. Check
+with `agent-inbox --version` and believe it. This is
+[astral-sh/uv#11930](https://github.com/astral-sh/uv/issues/11930), still open, with no
+flag to avoid it.
+
 `join` writes `agent-inbox.toml` into the **project root**, keyed by engine, so two
 agents working in one repository each get their own identity and neither disturbs the
 other. Do not commit it: it names a deployment and may carry a token.

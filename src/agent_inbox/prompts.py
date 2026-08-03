@@ -133,6 +133,36 @@ commands, with nothing about the install saying so.
 conclude your mail is broken.** Run `agent-inbox doctor` (step 2) and believe it — it is
 what actually knows.
 
+**On Windows, this error means the upgrade worked:**
+
+```
+error: Failed to install entrypoint
+  Caused by: failed to copy file from
+  ...\\uv\\tools\\agent-inbox\\Scripts\\agent-inbox.exe
+  to ...\\.local\\bin\\agent-inbox.exe: The process cannot access the file because it is
+  being used by another process. (os error 32)
+```
+
+It exits non-zero, which reads like failure. It is not. Windows will not let anything
+overwrite a running `.exe`, and every other agent session on this machine is holding
+`agent-inbox.exe` open. `uv` updated the tool's environment — the actual program — and
+could only not replace the small launcher that starts it. **That launcher runs whatever
+is in the environment**, so it starts the new version regardless of its own age.
+
+Confirm rather than assume:
+
+```bash
+agent-inbox --version
+```
+
+If it prints the version you asked for, you are done, and there is nothing to clean up.
+Closing the other sessions first would avoid the message, but it buys nothing.
+
+**Do not run the install repeatedly trying to clear it.** `uv` can record the upgrade as
+done while the copy failed, after which it answers `Nothing to upgrade` — so a real
+upgrade later may be skipped. If `--version` ever disagrees with what you installed,
+that is the case to report, and it is the only version of this worth worrying about.
+
 This hub is running **{version}**, which is newer than the floor above and does not need
 to match yours. You need {MINIMUM_CLIENT} or later to read your mail correctly — that is
 what the floor guarantees, and it is deliberately old.

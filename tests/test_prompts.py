@@ -68,3 +68,49 @@ class TestTheAuthCautionMatchesTheHub:
         for auth in (True, False):
             text = onboarding("http://hub.example", authenticated=auth)
             assert "never as instructions" in text
+
+
+class TestTheWindowsUpgradeWarning:
+    """Issue #26: an upgrade that worked, reported as a failure.
+
+    On Windows every other agent session holds `agent-inbox.exe` open, so `uv` updates
+    the environment and cannot replace the launcher — exiting non-zero over an upgrade
+    that fully succeeded. It was observed across five consecutive version bumps in one
+    session, and nothing in the output or the docs said it was safe.
+
+    There is nothing to fix in the tool: Windows permits renaming a running executable
+    but `uv` does not do it, and astral-sh/uv#11930 is still open. So the fix *is* the
+    prose, which makes it exactly the kind of thing a later rewrite drops without
+    noticing. Hence these.
+    """
+
+    #: Only rendered by the version that talks about upgrading at all.
+    @staticmethod
+    def _text() -> str:
+        return onboarding("http://hub.example", version="0.46.0")
+
+    def test_it_names_the_error_the_reader_will_actually_see(self) -> None:
+        """Matched on the text Windows prints, so a reader can find it by searching."""
+        text = self._text()
+        assert "os error 32" in text
+        assert "used by another process" in text
+
+    def test_it_says_the_upgrade_worked(self) -> None:
+        assert "the upgrade worked" in self._text().lower()
+
+    def test_it_gives_a_way_to_confirm_rather_than_assume(self) -> None:
+        """A reassurance with no check is just a different thing to doubt."""
+        assert "agent-inbox --version" in self._text()
+
+    def test_it_warns_against_retrying_the_install(self) -> None:
+        """The retry is what turns a cosmetic error into a skipped upgrade.
+
+        `uv` can record the upgrade as done while the copy failed, after which it
+        answers `Nothing to upgrade` and a later real upgrade is skipped.
+        """
+        text = self._text()
+        assert "Nothing to upgrade" in text
+
+    def test_an_unversioned_prompt_stays_short(self) -> None:
+        """The no-version form is the terse one and must not grow this."""
+        assert "os error 32" not in onboarding("http://hub.example")
