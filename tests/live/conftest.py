@@ -113,3 +113,60 @@ def hub(pytestconfig: pytest.Config) -> HubDescriptor:
 def mode(hub: HubDescriptor) -> AuthMode:
     """Shorthand, because most tests want the mode rather than the whole descriptor."""
     return hub.mode
+
+
+#: What an *anonymous* request to a protected route should get, per mode.
+#:
+#: This is the table the suite lacked. Every assertion that used to hardcode a success
+#: code was asserting "this hub is open" without saying so, and inherited that belief
+#: from nowhere in particular.
+def anonymous_status(mode: AuthMode, when_open: int) -> int:
+    """The status an uncredentialled caller should see on a protected route.
+
+    On an enforcing hub a `401` is the hub **working**, not failing — which is the whole
+    confusion this mission exists to remove.
+    """
+    return 401 if mode is AuthMode.ENFORCING else when_open
+
+
+#: A credential for the enforcing case, when one has been supplied (WP03 provides it).
+#: Absent is a legitimate state: the suite then asserts refusals rather than the loop.
+TOKEN = os.environ.get("LIVE_TOKEN", "").strip()
+
+
+def auth_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """A run where nothing ran must not report a pass (FR-006).
+
+    This is the shape this project keeps paying for: a check that passed because it had
+    nothing to look at. A smoke job whose credentials were missing, whose console url
+    was unset, or which was pointed at a hub it could not use, reports green in the same
+    words as one that proved the deployment works — and green is what a human reads.
+
+    Only when `LIVE_HUB_URL` was set. Without it the suite is *meant* to skip, and an
+    ordinary `pytest` run must stay silent.
+    """
+    if not HUB or exitstatus != 0:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        return
+    passed = len(reporter.stats.get("passed", []))
+    skipped = len(reporter.stats.get("skipped", []))
+    if passed:
+        if skipped:
+            reporter.write_line(
+                f"live: {passed} ran, {skipped} skipped — set LIVE_CONSOLE_URL / "
+                "LIVE_AUTH / LIVE_TOKEN to cover the rest",
+                yellow=True,
+            )
+        return
+    reporter.write_line(
+        f"live: nothing ran against {HUB} — {skipped} skipped. Not a pass: "
+        "the deployment was not exercised at all.",
+        red=True,
+    )
+    session.exitstatus = 1

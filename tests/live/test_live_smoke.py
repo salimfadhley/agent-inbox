@@ -108,19 +108,43 @@ def test_health_answers() -> None:
     assert status == 200
 
 
-def test_standing_residents_exist_before_anyone_joins() -> None:
-    """admin and host are the whole point of the policy layer — they must be there."""
-    status, body = _req("GET", f"{HUB}/actors")
-    assert status == 200 and isinstance(body, dict)
+def test_standing_residents_exist_before_anyone_joins(hub) -> None:
+    """admin and host are the whole point of the policy layer — they must be there.
+
+    On an enforcing hub an anonymous read is refused, and that refusal *is* the correct
+    behaviour. Asserting 200 unconditionally is what made this fail against production.
+    """
+    from conftest import anonymous_status, auth_headers
+
+    status, body = _req("GET", f"{HUB}/actors", headers=auth_headers())
+    expected = anonymous_status(hub.mode, 200) if not auth_headers() else 200
+    assert status == expected, hub.assuming(f"GET /actors gave {status}")
+    if status != 200:
+        return  # refused, as this mode requires; there is nothing further to check
+    assert isinstance(body, dict)
     names = {a.get("preferredUsername") for a in body["items"]}
-    assert {"admin", "host"} <= names
+    assert {"admin", "host"} <= names, hub.assuming("a standing resident is missing")
 
 
-def test_join_send_and_observe_end_to_end() -> None:
+def test_join_send_and_observe_end_to_end(hub) -> None:
     """The core loop over real HTTP: join, send to a standing resident, see it via the
-    operator view — which takes no caller and must not consume it."""
-    status, _ = _req("POST", f"{HUB}/actors", {"preferredUsername": "smoke_tester"})
-    assert status in (201, 409), "join should create, or 409 if a prior run left it"
+    operator view — which takes no caller and must not consume it.
+
+    Needs a credential on an enforcing hub. Without one the loop is not merely expected
+    to fail, it is *required* to — so the refusal is asserted rather than skipped.
+    """
+    from conftest import auth_headers
+
+    head = auth_headers()
+    status, _ = _req(
+        "POST", f"{HUB}/actors", {"preferredUsername": "smoke_tester"}, head
+    )
+    if hub.mode == "enforcing" and not head:
+        assert status == 401, hub.assuming(
+            f"an anonymous join gave {status}; an enforcing hub must refuse it"
+        )
+        return
+    assert status in (201, 409), hub.assuming("join should create, or 409 if it exists")
 
     note = {
         "@context": "https://www.w3.org/ns/activitystreams",
@@ -136,26 +160,32 @@ def test_join_send_and_observe_end_to_end() -> None:
         "POST",
         f"{HUB}/actors/smoke_tester/outbox",
         note,
-        {"X-Agent-Name": "smoke_tester"},
+        {"X-Agent-Name": "smoke_tester", **head},
     )
     assert status == 201, sent
 
-    status, mbox = _req("GET", f"{HUB}/observe/mailbox/admin")
+    status, mbox = _req("GET", f"{HUB}/observe/mailbox/admin", headers=head)
     assert status == 200 and isinstance(mbox, dict)
     assert any(n.get("summary") == "smoke" for n in mbox["items"]), (
         "the message admin was sent is not visible in the operator view"
     )
 
-    status, stats = _req("GET", f"{HUB}/observe/stats")
+    status, stats = _req("GET", f"{HUB}/observe/stats", headers=head)
     assert status == 200 and isinstance(stats, dict)
     assert stats["messages"] >= 1
 
 
-def test_observing_does_not_consume() -> None:
+def test_observing_does_not_consume(hub) -> None:
     """The operator view must never mark an agent's mail read. Observe twice; the count
     of what is waiting for admin must not drop just because we looked."""
-    _, first = _req("GET", f"{HUB}/observe/mailbox/admin")
-    _, second = _req("GET", f"{HUB}/observe/mailbox/admin")
+    from conftest import auth_headers
+
+    head = auth_headers()
+    code, first = _req("GET", f"{HUB}/observe/mailbox/admin", headers=head)
+    if hub.mode == "enforcing" and not head:
+        assert code == 401, hub.assuming(f"anonymous observe gave {code}")
+        return
+    _, second = _req("GET", f"{HUB}/observe/mailbox/admin", headers=head)
     assert isinstance(first, dict) and isinstance(second, dict)
     assert len(second["items"]) >= len(first["items"])
 
@@ -211,6 +241,26 @@ needs_auth = pytest.mark.skipif(
     reason="set LIVE_AUTH=1 (and LIVE_HUB_URL) against an enforcing hub",
 )
 auth = pytest.mark.auth
+
+
+@auth
+def test_the_hub_does_what_it_advertises(hub) -> None:
+    """FR-003, and **only one direction is a failure.**
+
+    A hub that says `authenticated: true` while a protected route serves an anonymous
+    caller is broken, and dangerously so — every operator reading the descriptor
+    believes something untrue of it. The reverse is a hub merely stricter than it
+    admits, which is safe, and asserting it would fail honest deployments.
+
+    Needs no credential and no `LIVE_AUTH`: it is a question about the hub's honesty,
+    which is worth asking of every hub the suite is ever pointed at.
+    """
+    if hub.mode != "enforcing":
+        pytest.skip("only an enforcing hub can misreport enforcement")
+    status, _ = _req("GET", f"{HUB}/observe/stats")
+    assert status != 200, hub.assuming(
+        "the hub advertises authentication but served /observe/stats anonymously"
+    )
 
 
 @needs_auth

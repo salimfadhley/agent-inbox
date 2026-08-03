@@ -78,10 +78,10 @@ an open question in another mission, and modelling it now encodes a guess.
 **Independent test**: the same suite passes against an open hub and an enforcing one,
 with no test edited between the two runs.
 
-- [ ] T004 Expected status codes derive from the mode, not from an assumption (WP02)
-- [ ] T005 Console copy assertions derive from the mode too (WP02)
-- [ ] T006 The honesty check: advertised `authenticated` vs what a route actually does (WP02)
-- [ ] T007 A run where everything skipped must not read as a pass (WP02)
+- [x] T004 Expected status codes derive from the mode, not from an assumption (WP02)
+- [x] T005 Console copy assertions derive from the mode too (WP02)
+- [x] T006 The honesty check: advertised `authenticated` vs what a route actually does (WP02)
+- [x] T007 A run where everything skipped must not read as a pass (WP02)
 
 **Sketch**: replace hardcoded expectations with lookups keyed on the mode.
 
