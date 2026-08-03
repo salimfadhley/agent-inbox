@@ -26,6 +26,10 @@ import urllib.request
 
 import pytest
 
+# The fixtures' own module: one place decides what a credential is and what an
+# anonymous caller should expect, so a test cannot quietly disagree with the probe.
+from conftest import ADMIN_PASSWORD, anonymous_status, bearer
+
 HUB = os.environ.get("LIVE_HUB_URL")
 CONSOLE = os.environ.get("LIVE_CONSOLE_URL")
 
@@ -108,16 +112,15 @@ def test_health_answers() -> None:
     assert status == 200
 
 
-def test_standing_residents_exist_before_anyone_joins(hub) -> None:
+def test_standing_residents_exist_before_anyone_joins(hub, credential) -> None:
     """admin and host are the whole point of the policy layer — they must be there.
 
     On an enforcing hub an anonymous read is refused, and that refusal *is* the correct
     behaviour. Asserting 200 unconditionally is what made this fail against production.
     """
-    from conftest import anonymous_status, auth_headers
-
-    status, body = _req("GET", f"{HUB}/actors", headers=auth_headers())
-    expected = anonymous_status(hub.mode, 200) if not auth_headers() else 200
+    head = bearer(credential)
+    status, body = _req("GET", f"{HUB}/actors", headers=head)
+    expected = 200 if head else anonymous_status(hub.mode, 200)
     assert status == expected, hub.assuming(f"GET /actors gave {status}")
     if status != 200:
         return  # refused, as this mode requires; there is nothing further to check
@@ -126,16 +129,14 @@ def test_standing_residents_exist_before_anyone_joins(hub) -> None:
     assert {"admin", "host"} <= names, hub.assuming("a standing resident is missing")
 
 
-def test_join_send_and_observe_end_to_end(hub) -> None:
+def test_join_send_and_observe_end_to_end(hub, credential) -> None:
     """The core loop over real HTTP: join, send to a standing resident, see it via the
     operator view — which takes no caller and must not consume it.
 
     Needs a credential on an enforcing hub. Without one the loop is not merely expected
     to fail, it is *required* to — so the refusal is asserted rather than skipped.
     """
-    from conftest import auth_headers
-
-    head = auth_headers()
+    head = bearer(credential)
     status, _ = _req(
         "POST", f"{HUB}/actors", {"preferredUsername": "smoke_tester"}, head
     )
@@ -175,12 +176,10 @@ def test_join_send_and_observe_end_to_end(hub) -> None:
     assert stats["messages"] >= 1
 
 
-def test_observing_does_not_consume(hub) -> None:
+def test_observing_does_not_consume(hub, credential) -> None:
     """The operator view must never mark an agent's mail read. Observe twice; the count
     of what is waiting for admin must not drop just because we looked."""
-    from conftest import auth_headers
-
-    head = auth_headers()
+    head = bearer(credential)
     code, first = _req("GET", f"{HUB}/observe/mailbox/admin", headers=head)
     if hub.mode == "enforcing" and not head:
         assert code == 401, hub.assuming(f"anonymous observe gave {code}")
@@ -260,6 +259,49 @@ def test_the_hub_does_what_it_advertises(hub) -> None:
     status, _ = _req("GET", f"{HUB}/observe/stats")
     assert status != 200, hub.assuming(
         "the hub advertises authentication but served /observe/stats anonymously"
+    )
+
+
+@auth
+def test_the_bootstrap_is_asserted_not_merely_used(hub, credential) -> None:
+    """FR-009. If first-run sign-in or token minting breaks, this says so.
+
+    Without it, a broken bootstrap presents as every authenticated assertion failing at
+    once — which reads as "the hub is broken" and sends the reader to the wrong place.
+    The chain is what CI depends on to test anything at all, so it is worth one test of
+    its own that names it.
+    """
+    if hub.mode != "enforcing":
+        pytest.skip("nothing to bootstrap against an open hub")
+    if not credential:
+        pytest.skip("no LIVE_TOKEN and no LIVE_ADMIN_PASSWORD — nothing to assert")
+    status, body = _req(
+        "GET", f"{HUB}/doctor", headers={"Authorization": f"Bearer {credential}"}
+    )
+    assert status == 200 and isinstance(body, dict), hub.assuming(
+        f"the bootstrapped credential was not usable: {status}"
+    )
+    assert body.get("you", {}).get("token") == "accepted", hub.assuming(
+        f"the hub did not accept the credential we just obtained: {body}"
+    )
+
+
+@auth
+def test_the_override_is_declared_when_it_is_used(hub) -> None:
+    """FR-011, FR-012 — the honesty clause on the shortcut.
+
+    `AGENT_MAILBOX_ADMIN_PASSWORD` lets `admin` in with no second factor, at any time.
+    A hub running it is **not** fully secured, and a suite that used it while reporting
+    the hub as enforcing would be making exactly the false claim this mission exists to
+    stop. So if we relied on it, the hub must admit to it.
+    """
+    if not ADMIN_PASSWORD or hub.mode != "enforcing":
+        pytest.skip("the override was not used")
+    status, body = _req("GET", f"{HUB}/")
+    assert status == 200 and isinstance(body, dict)
+    assert body.get("adminPasswordSet") is True, hub.assuming(
+        "we signed in with the admin override, but the hub does not advertise it — "
+        "CI would be validating a hub weaker than the one it claims to test"
     )
 
 

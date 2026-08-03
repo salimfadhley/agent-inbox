@@ -105,9 +105,9 @@ the repository and none typed by a human.
 **Independent test**: against a throwaway enforcing hub, the suite obtains a credential
 and runs its authenticated assertions.
 
-- [ ] T008 Unattended credential on an enforcing hub, from the environment only (WP03)
-- [ ] T009 The bootstrap is asserted, not merely used (WP03)
-- [ ] T010 `adminPasswordSet` means *not fully secured*, and is asserted when relied on (WP03)
+- [x] T008 Unattended credential on an enforcing hub, from the environment only (WP03)
+- [x] T009 The bootstrap is asserted, not merely used (WP03)
+- [x] T010 `adminPasswordSet` means *not fully secured*, and is asserted when relied on (WP03)
 
 **Sketch**: `AGENT_MAILBOX_ADMIN_PASSWORD` on the throwaway hub, sign in, mint a token.
 The log-scraping chain remains valid and is now contract-backed, so either route works —

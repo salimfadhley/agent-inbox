@@ -134,8 +134,11 @@ def anonymous_status(mode: AuthMode, when_open: int) -> int:
 TOKEN = os.environ.get("LIVE_TOKEN", "").strip()
 
 
-def auth_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
+def bearer(credential: str) -> dict[str, str]:
+    """Headers for a credential, or nothing at all. One source, so a token that was
+    obtained cannot fail to be used — which is how an enforcing pass silently becomes a
+    duplicate of the open one."""
+    return {"Authorization": f"Bearer {credential}"} if credential else {}
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
@@ -170,3 +173,92 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         red=True,
     )
     session.exitstatus = 1
+
+
+# -- WP03: a credential, obtained without a stored secret -------------------
+
+#: The low-security override. Set on a *throwaway* hub, `admin` signs in with it and no
+#: second factor, so CI needs neither a repository credential nor a configured secret.
+ADMIN_PASSWORD = os.environ.get("LIVE_ADMIN_PASSWORD", "").strip()
+
+
+def _form_post(path: str, fields: dict[str, str]) -> tuple[int, str, str]:
+    """POST JSON and return (status, body, session-cookie)."""
+    request = urllib.request.Request(  # noqa: S310 - configured hub url
+        f"{HUB}{path}", data=json.dumps(fields).encode(), method="POST"
+    )
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
+            cookie = response.headers.get("Set-Cookie", "") or ""
+            return response.status, response.read().decode(errors="replace"), cookie
+    except urllib.error.HTTPError as refused:
+        return refused.code, refused.read().decode(errors="replace"), ""
+
+
+@pytest.fixture(scope="session")
+def credential(hub: HubDescriptor) -> str:
+    """A bearer token for an enforcing hub, or `""` when none is available.
+
+    Three sources, in order of preference:
+
+    1. **`LIVE_TOKEN`** — somebody already minted one. Used as given.
+    2. **`LIVE_ADMIN_PASSWORD`** — the v0.23.0 override. Sign in as `admin` with no
+       second factor and mint a token. This replaced a six-step chain (scrape the
+       password from the container log, fetch a TOTP secret, compute a code, enrol,
+       open a session, mint) and with it the whole class of risk that made this the
+       mission's most dangerous package.
+    3. **Nothing** — a legitimate state. The suite then asserts refusals rather than
+       the loop, and says what it did not run.
+
+    **Never a secret from the repository** (FR-005, FR-008). Both inputs are
+    environment-only, and the hub CI uses them against is created for the run and
+    destroyed with it.
+    """
+    if TOKEN:
+        return TOKEN
+    if hub.mode is not AuthMode.ENFORCING or not ADMIN_PASSWORD:
+        return ""
+
+    # FR-012: a hub running the override is **not** fully secured, and using it while
+    # reporting the hub as enforcing would be exactly the false claim this mission
+    # exists to stop. Assert the hub admits it before relying on it.
+    assert _advertises_override(), (
+        "LIVE_ADMIN_PASSWORD was supplied but the hub does not advertise "
+        "adminPasswordSet. Either it is not the hub you think, or it is more secure "
+        "than the credential assumes — and CI would be validating a different hub "
+        "than the one it claims to test."
+    )
+
+    status, body, cookie = _form_post(
+        "/auth/login", {"username": "admin", "password": ADMIN_PASSWORD}
+    )
+    assert status == 200, hub.assuming(f"admin sign-in gave {status}: {body[:200]}")
+
+    session = cookie.split(";")[0] if cookie else ""
+    assert session, hub.assuming("sign-in returned no session cookie")
+
+    minted = urllib.request.Request(  # noqa: S310 - configured hub url
+        f"{HUB}/auth/tokens",
+        data=json.dumps({"label": "live smoke suite"}).encode(),
+        method="POST",
+    )
+    minted.add_header("Content-Type", "application/json")
+    minted.add_header("Cookie", session)
+    try:
+        with urllib.request.urlopen(minted, timeout=TIMEOUT) as response:  # noqa: S310
+            token = str(json.loads(response.read()).get("token", ""))
+    except urllib.error.HTTPError as refused:
+        raise AssertionError(
+            hub.assuming(f"minting a token gave {refused.code}: {refused.read()[:200]}")
+        ) from refused
+
+    assert token, hub.assuming("the mint route returned no token")
+    return token
+
+
+def _advertises_override() -> bool:
+    request = urllib.request.Request(f"{HUB}/", method="GET")  # noqa: S310
+    request.add_header("Accept", "application/json")
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
+        return bool(json.loads(response.read() or b"{}").get("adminPasswordSet"))
