@@ -64,13 +64,31 @@ KNOWN_SETTINGS = ("hub", "name", "role", "token")
 #: correspondents, and one machine-wide name would quietly merge them into one inbox.
 PROJECT_ONLY = ("name", "role")
 
+#: Written machine-wide unless `--project` says otherwise (owner, 2026-08-03).
+#:
+#: **The rule is now one sentence: identity is per project, everything else is per
+#: machine.** A person has one mailbox and one credential for it; they have as many
+#: identities as they have repositories. Defaulting the address to the project made
+#: every new repository re-answer a question already settled, and made moving hubs a
+#: chore proportional to how many projects you had rather than to how many hubs.
+#:
+#: `token` joins `hub` here for the same reason and because it was already the
+#: assumption: a shared token admits the *machine*, and the epilog has always told
+#: people to set it globally. It simply did not default that way, so the file it landed
+#: in depended on whether the reader had noticed the flag.
+GLOBAL_BY_DEFAULT = ("hub", "token")
+
 EPILOG = """\
 WHERE YOU RUN IT MATTERS. Identity is per project, so anything acting as an agent —
 join, config, doctor, ping, inbox, send, read, reply, agents, whoami, role, hub — reads
 agent-inbox.toml from the directory you are in, searching upwards and stopping at the
-repository root. Run those inside the project. A shared token may live machine-wide
-(`config set --global token <token>`), because a credential admits the machine rather
-than naming an agent.
+repository root. Run those inside the project.
+
+`hub` and `token` are **machine-wide by default**: you have one mailbox and one
+credential for it, and as many identities as you have repositories. `config set hub
+<url>` therefore moves every project at once. Use `--project` for the exception — a
+staging deployment, a second mailbox — and note that a project value still wins locally,
+which `config set` says out loud when it would.
 
 `mcp` needs no particular directory: it asks the client that launched it for the
 workspace, falls back to this one, and takes which engine it serves from the client's
@@ -434,6 +452,21 @@ def _scope_option(fn: Any) -> Any:
     )(click.pass_context(fn))
 
 
+def _project_scope_option(fn: Any) -> Any:
+    """`--project`: keep a machine-wide setting in this repository instead.
+
+    Needed since `hub` and `token` began defaulting machine-wide: one project pointing
+    at a different hub is a real case — a second mailbox, a staging deployment — and it
+    was reachable before this change simply by not passing a flag.
+    """
+    return click.option(
+        "--project",
+        "project_scoped",
+        is_flag=True,
+        help="this project's file, even for a setting that is machine-wide by default",
+    )(fn)
+
+
 def _machine_wide(ctx: click.Context, is_global: bool) -> bool:
     """True if either the group or the verb was given ``--global``."""
     return is_global or bool((ctx.obj or {}).get("global"))
@@ -441,8 +474,14 @@ def _machine_wide(ctx: click.Context, is_global: bool) -> bool:
 
 @config.command("set")
 @_scope_option
+@_project_scope_option
 @click.argument("pairs", nargs=-1, required=True, metavar="NAME VALUE [NAME VALUE ...]")
-def config_set(ctx: click.Context, is_global: bool, pairs: tuple[str, ...]) -> int:
+def config_set(
+    ctx: click.Context,
+    is_global: bool,
+    project_scoped: bool,
+    pairs: tuple[str, ...],
+) -> int:
     """Set one or more settings: `config set name jed_smith`.
 
     `NAME=VALUE` is accepted too, because that is what anyone who has used a config
@@ -497,15 +536,51 @@ def config_set(ctx: click.Context, is_global: bool, pairs: tuple[str, ...]) -> i
             return 1
         settings["name"] = str(granted.get("preferredUsername", name))
 
-    if is_global:
-        path = write_global(settings)
-    else:
+    # Each setting goes where it belongs rather than where the flag pointed. `--global`
+    # can still push a project-scoped setting nowhere — that is refused above — but a
+    # machine-wide setting no longer needs the flag to reach the machine-wide file.
+    machine = {k: v for k, v in settings.items() if k in GLOBAL_BY_DEFAULT}
+    project = {k: v for k, v in settings.items() if k not in GLOBAL_BY_DEFAULT}
+    if not is_global and project_scoped:
+        # `--project` asked for the old behaviour explicitly.
+        project, machine = settings, {}
+
+    written: list[str] = []
+    if machine:
+        written.append(str(write_global(machine)))
+    if project:
         # A project write lands in one engine's entry. Getting that wrong writes into
         # another agent's identity, which is why this refuses rather than defaults.
-        path = write_project(settings, engine=_resolve_engine(ctx))
+        written.append(str(write_project(project, engine=_resolve_engine(ctx))))
+
+    # A machine-wide value that a project file already overrides is set and inert, and
+    # the reader would reasonably conclude the command did nothing. `load_hub` reads the
+    # project first by design — a repository may legitimately point somewhere else — so
+    # say which file is winning rather than let them discover it through behaviour.
+    for key in machine:
+        local = _project_value(key)
+        if local and local != machine[key]:
+            _err(
+                f"note: this project sets {key} to {local!r}, which still wins here. "
+                f"The machine-wide value applies everywhere else.\n"
+                f"      To use the new value here too: agent-inbox config unset {key}"
+            )
+
     shown = {k: ("…" if k == "token" else v) for k, v in settings.items()}
-    _print({"wrote": str(path), "set": shown})
+    _print({"wrote": written, "set": shown})
     return 0
+
+
+def _project_value(key: str) -> str:
+    """What this project's own file says for *key*, ignoring every other source."""
+    path = find_config()
+    if path is None:
+        return ""
+    with suppress(Exception):
+        import tomllib
+
+        return str(tomllib.loads(path.read_text()).get(key, "")).strip()
+    return ""
 
 
 @config.command("get")

@@ -900,3 +900,138 @@ def test_doctor_hub_flag_contacts_the_hub_it_names(
     assert "http://configured:8081" not in seen, (
         "doctor contacted the configured hub despite being asked about another"
     )
+
+
+class TestHubAndTokenAreMachineWideByDefault:
+    """Owner, 2026-08-03: the default location for `hub` should be global.
+
+    The rule is now one sentence — **identity is per project, everything else is per
+    machine**. A person has one mailbox and one credential for it; they have as many
+    identities as they have repositories.
+
+    `token` moves with `hub` because it was already the assumption: the epilog has
+    always told people to set it machine-wide, it simply did not default that way, so
+    which file it landed in depended on whether the reader noticed the flag.
+    """
+
+    @staticmethod
+    def _project(tmp_path: Path) -> Path:
+        return tmp_path / CONFIG_NAME
+
+    def test_hub_goes_to_the_machine_file_without_a_flag(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+
+        assert main(["config", "set", "hub", "http://elsewhere:8081"]) == 0
+
+        machine = (xdg / "agent-inbox" / "config.toml").read_text()
+        assert "http://elsewhere:8081" in machine, "hub did not reach the machine file"
+        assert not self._project(tmp_path).exists() or (
+            "elsewhere" not in self._project(tmp_path).read_text()
+        ), "hub was still written into the project"
+
+    def test_token_goes_there_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+
+        assert main(["config", "set", "token", "a-shared-token"]) == 0
+        assert "a-shared-token" in (xdg / "agent-inbox" / "config.toml").read_text()
+
+    def test_project_flag_still_puts_it_in_the_repository(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One project pointing at a different hub is a real case, not an error.
+
+        A staging deployment, or a second mailbox. It was reachable before this change
+        by passing no flag at all, so it needed somewhere to go.
+        """
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        self._project(tmp_path).write_text(
+            'hub = "http://old:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+
+        assert (
+            main(
+                [
+                    "--engine",
+                    "claude",
+                    "config",
+                    "set",
+                    "--project",
+                    "hub",
+                    "http://staging:8081",
+                ]
+            )
+            == 0
+        )
+        assert "http://staging:8081" in self._project(tmp_path).read_text()
+
+    def test_it_says_when_the_project_still_wins(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Set machine-wide, shadowed locally, and nothing appears to happen.
+
+        `load_hub` reads the project first by design — a repository may legitimately
+        point elsewhere — so a machine-wide write can be correct and inert at once.
+        Discovering that through behaviour rather than a sentence is the failure.
+        """
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        self._project(tmp_path).write_text(
+            'hub = "http://local:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+
+        main(["--engine", "claude", "config", "set", "hub", "http://machine:8081"])
+
+        err = capsys.readouterr().err
+        assert "http://local:8081" in err and "still wins" in err, (
+            "a shadowed machine-wide write said nothing about being shadowed"
+        )
+        assert "config unset hub" in err, "it did not say how to resolve it"
+
+    def test_the_advice_it_gives_is_a_command_that_exists(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Advice that does not run is worse than none — it costs a second attempt.
+
+        The first draft of this message said `config unset --project hub`, and `unset`
+        has no such flag. Caught by trying it rather than by reading it.
+        """
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        self._project(tmp_path).write_text(
+            'hub = "http://local:8081"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+        main(["--engine", "claude", "config", "set", "hub", "http://machine:8081"])
+        suggested = [
+            line.strip().split(": ", 1)[-1]
+            for line in capsys.readouterr().err.splitlines()
+            if "agent-inbox config unset" in line
+        ]
+        assert suggested, "no suggestion to check"
+        argv = suggested[0].removeprefix("agent-inbox ").split()
+        assert main(["--engine", "claude", *argv]) == 0, (
+            f"the suggested command does not run: {suggested[0]!r}"
+        )
+        assert "http://local:8081" not in self._project(tmp_path).read_text()
