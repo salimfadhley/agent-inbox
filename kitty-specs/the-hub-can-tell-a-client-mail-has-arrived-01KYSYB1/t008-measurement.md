@@ -27,7 +27,40 @@ regression rather than on a slow afternoon.
 Four minutes idle is past every proxy timeout in the ordinary range, so the fifteen-second
 keep-alive is doing its job here.
 
-## The stodge node — **not measured**, and this is a blocker, not an omission
+## The stodge node — **measured 2026-08-03**, and it holds
+
+The operator minted a device token, which is what had been missing. Run against
+**v0.47.0**, through fly-proxy and its TLS termination — the path that mattered,
+since a request from inside the machine would have answered the wrong question.
+
+| Question | Answer |
+|---|---|
+| Does the stream open? | Yes. `200`, `content-type: text/event-stream; charset=utf-8`, `via: 1.1 fly.io` |
+| **Latency, send to event** | **0.079 s** |
+| Does the event identify the message? | Yes — the id returned by the send is the id on the wire |
+| Does it carry the body? | **No** |
+| Does an idle connection survive? | **Yes — still open after 300 s**, with only keep-alive frames crossing |
+
+**Both open questions are closed, and both the way we hoped.**
+
+1. *Does an idle SSE connection survive fly-proxy?* **Yes**, for five minutes of
+   silence. Immediacy is not conditional on where a hub is hosted, and WP02's
+   reconnect carries exactly the weight it was given rather than more.
+2. *Does a held connection prevent the machine suspending?* It stayed up throughout,
+   which is the already-accepted consequence — *"a hub with any client connected is a
+   hub that is always on"* — now observed rather than assumed.
+
+**The spec's number is safe on both hubs.** 0.079 s through a proxy and a CDN-facing
+TLS terminator, against a stated ceiling of one second. Four times the house hub's
+0.020 s, which is what a real network costs and is still an order of magnitude
+under the criterion.
+
+The probe is `scratchpad/t008_stodge.py` in the session that ran it — deliberately
+not committed, since it reads a device token from the environment and belongs to
+nobody's repository.
+
+### What the blocker was, kept because it explains the delay
+
 
 That hub ran `v0.39.0` at the time and enforces authentication. Holding a stream needs an
 identity on *that* hub, and there is none available:

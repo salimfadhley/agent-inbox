@@ -1,5 +1,10 @@
 # Spec — the hub can tell a client mail has arrived
 
+> **Complete and closed 2026-08-03 — 18/18.** The last task, T008, was blocked for two
+> days on a device token for the stodge node; measured once the operator minted one.
+> Latency 0.020 s on the house hub and 0.079 s through fly-proxy, against a stated
+> ceiling of one second, and an idle stream survived 300 s on both.
+
 - Mission: `the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1`
 - Raised by: the operator, 2026-07-30
 - Status: **specified.** Open questions at the end.
