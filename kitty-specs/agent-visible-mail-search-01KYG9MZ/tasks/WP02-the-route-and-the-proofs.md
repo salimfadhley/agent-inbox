@@ -116,6 +116,32 @@ inside an ordinary response. Record the number.
 - `check_inbox` is unchanged by searching.
 - Four gates green.
 
+## Directive 4 — done, 2026-08-03
+
+Asked whether any caller can obtain a result, count, field, fragment or error difference
+revealing a message they are not party to, naming three routes in: the `owns` guard, the
+fields `_result` inherits from `_summary`, and error differences from invalid parameters.
+
+**(b) and (c) clean, with reasons.** `_summary` emits `id`, `attributedTo`, `summary`,
+`published`, `broadcast` and `chars` — never the actual `to`/`cc` — and every one of them
+describes the *matched visible* message rather than anything hidden. Search never looks up
+a caller-supplied object id, so there is no "no such message" versus "not yours" oracle to
+have; an invalid `limit` is a framework 400 decided by the type annotation, independent of
+any message.
+
+**(a) is the shared-token boundary, and it is not new.** A shared token resolves to
+`SHARED_ACTOR`, after which `provide_caller` takes `X-Agent-Name` at face value — so a
+token holder can search as any actor on that machine. Verified against the existing route
+before accepting it: `/actors/{name}/inbox` (api.py:1848) and `/actors/{name}/search`
+(api.py:1857) declare the *same* dependency and pass through the same `owns`. Search is
+neither weaker nor stronger than reading the inbox.
+
+This is the boundary `shared-tokens-only-01KYG7S7` established and
+`doc/interrupting-an-agent.md:90` states plainly: a token proves the caller is on an
+admitted machine, and it cannot tell two agents on that machine apart, because they share
+a config file and a credential by design. Nothing to fix here; a fix would be a different
+mission about binding identity to something other than a machine.
+
 ## Reviewer guidance
 
 Check that T006's two assertions genuinely share a fixture. That is the difference between

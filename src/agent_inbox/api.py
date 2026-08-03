@@ -39,7 +39,7 @@ from litestar.handlers.base import BaseRouteHandler
 from litestar.openapi import OpenAPIConfig
 from litestar.response import ServerSentEvent, ServerSentEventMessage
 
-from agent_inbox import __version__, addressing
+from agent_inbox import __version__, addressing, rules
 from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
 from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
@@ -931,6 +931,61 @@ class Api:
             page["items"] = [self._summary(m) for m in waiting]
         return page
 
+    async def search(
+        self,
+        name: str,
+        caller: str,
+        q: str = "",
+        sender: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = rules.SEARCH_DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        """Find mail this caller is party to. Consumes nothing, marks nothing.
+
+        **On `/actors/{name}/search` rather than a bare `/search`**, which the plan
+        proposed. Search is inherently "my mail", so it belongs on the same shape as
+        `/actors/{name}/inbox` and behind the same `owns` guard — the one that exists
+        because asking for `alice`'s inbox with a header of `bob` once returned Bob's.
+        A bare path would have needed its own answer to the same question, and a second
+        answer to a settled question is how the two drift apart.
+
+        **`truncated` is part of the contract.** An agent that cannot tell a complete
+        answer from a capped one either searches again for nothing or concludes that
+        nothing else exists, and the second is worse: it looks like knowledge.
+        """
+        owns(name, caller, self.wire)
+        matches, truncated = await self.house.search(
+            caller, q, sender=sender, since=since, until=until, limit=limit
+        )
+        return {
+            "query": q,
+            "results": [self._result(m) for m in matches],
+            "truncated": truncated,
+        }
+
+    def _result(self, match: rules.Match) -> dict[str, Any]:
+        """One hit: enough to decide whether to open it, and nothing more.
+
+        Shaped as `_summary` is, with a snippet added — a search result is a summary of
+        a message that happens to have been found rather than delivered, and inventing a
+        second dialect for the same thing is what `_summary`'s docstring already warns
+        about.
+
+        **`inReplyTo` is dropped, not nulled**, unlike `_summary`. A caller party to a
+        reply but not to its parent would learn that the parent exists, which is the one
+        place "real but not yours" is still distinguishable from "no such thing"
+        (issue #45). That leak predates this route and is not this route's to fix — but
+        it is very much this route's not to spread.
+
+        Dropped rather than set to `null` because a field that is null *exactly when a
+        thread is private* discloses the same fact in a quieter voice: every result
+        would carry a reply marker, and only the sensitive ones would be empty.
+        """
+        result = {**self._summary(match.record), "snippet": match.snippet}
+        result.pop("inReplyTo", None)
+        return result
+
     def events(self, name: str, caller: str) -> ServerSentEvent:
         """A held connection that says when mail arrives. Says nothing else, ever.
 
@@ -1799,6 +1854,20 @@ def build_api(
     ) -> Collection | dict[str, Any]:
         return await api.inbox(name, caller, view=view, since=since)
 
+    @get("/actors/{name:str}/search", dependencies={"caller": Provide(provide_caller)})
+    async def search(
+        name: str,
+        caller: str,
+        q: str = "",
+        sender: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = rules.SEARCH_DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        return await api.search(
+            name, caller, q=q, sender=sender, since=since, until=until, limit=limit
+        )
+
     @get(
         "/actors/{name:str}/events",
         dependencies={"caller": Provide(provide_caller)},
@@ -2254,6 +2323,7 @@ def build_api(
         actor,
         update_profile,
         inbox,
+        search,
         events,
         federation_inbox,
         outbox,

@@ -67,11 +67,11 @@ asserted.
 **Independent test**: a bystander searching a private thread's text gets nothing, proved
 against the same fixture that proves the party finds it.
 
-- [ ] T005 `GET /search`, and `truncated` so a cap is not mistaken for an answer (WP02)
-- [ ] T006 Disclosure tests: bystander, partial thread, and the same fixture proving both (WP02)
-- [ ] T007 Removal proof for SC-006 — delete the filter, a disclosure test must fail (WP02)
-- [ ] T008 Searching consumes nothing: `check_inbox` byte-identical before and after (WP02)
-- [ ] T009 Read mail is findable, expired mail is not, sent mail is findable (WP02)
+- [x] T005 `GET /search`, and `truncated` so a cap is not mistaken for an answer (WP02)
+- [x] T006 Disclosure tests: bystander, partial thread, and the same fixture proving both (WP02)
+- [x] T007 Removal proof for SC-006 — delete the filter, a disclosure test must fail (WP02)
+- [x] T008 Searching consumes nothing: `check_inbox` byte-identical before and after (WP02)
+- [x] T009 Read mail is findable, expired mail is not, sent mail is findable (WP02)
 
 **Sketch**: the route reads query parameters, calls through `House` to the WP01 filter, and
 renders. Thread context is **omitted** where the caller is not party to the opener — not

@@ -419,6 +419,20 @@ class House:
     async def unread_count(self, caller: str) -> int:
         return await self._mailbox.unread_count(caller)
 
+    async def search(
+        self,
+        caller: str,
+        query: str,
+        *,
+        sender: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = rules.SEARCH_DEFAULT_LIMIT,
+    ) -> tuple[tuple[rules.Match, ...], bool]:
+        return await self._mailbox.search(
+            caller, query, sender=sender, since=since, until=until, limit=limit
+        )
+
     async def thread(self, caller: str, root_id: str) -> tuple[ObjectRecord, ...]:
         return await self._mailbox.thread(caller, root_id)
 
