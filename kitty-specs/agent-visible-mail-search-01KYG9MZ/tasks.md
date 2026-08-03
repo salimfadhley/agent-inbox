@@ -40,10 +40,10 @@ allowed to see — bounded, attributed, and pure.
 **Independent test**: unit-level, no I/O. A caller party to one turn of a thread gets that
 turn and not the private replies.
 
-- [ ] T001 The filter: party-to, then match, then bound (WP01)
-- [ ] T002 Snippets — attributed, capped, never spanning an invisible turn (WP01)
-- [ ] T003 Sender, time-window and limit filters (WP01)
-- [ ] T004 An empty query is refused, not answered with the mailbox (WP01)
+- [x] T001 The filter: party-to, then match, then bound (WP01)
+- [x] T002 Snippets — attributed, capped, never spanning an invisible turn (WP01)
+- [x] T003 Sender, time-window and limit filters (WP01)
+- [x] T004 An empty query is refused, not answered with the mailbox (WP01)
 
 **Sketch**: presumed to live in `rules.py` beside `unread` and `visible_turns`, which is
 how those are already factored. Confirm or overturn that in code and say which in a

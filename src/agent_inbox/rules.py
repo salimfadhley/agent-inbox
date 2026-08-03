@@ -141,6 +141,130 @@ def unread(
     )
 
 
+# --------------------------------------------------------------------- search
+
+#: What a search returns when the caller does not say, and the most it will ever return.
+#: These are a **contract, not a tuning parameter**: attention is the scarce resource
+#: here, and an agent pays a whole turn for whatever arrives. A caller asking for five
+#: hundred gets twenty-five, because the alternative — refusing — teaches it to ask for
+#: exactly twenty-five and learn nothing.
+SEARCH_DEFAULT_LIMIT = 10
+SEARCH_MAX_LIMIT = 25
+
+#: How much of a message a snippet may carry.
+SNIPPET_CHARS = 200
+
+
+class Match(NamedTuple):
+    """One search hit: the message, and the fragment that matched.
+
+    The record travels with the snippet deliberately. Whoever renders this needs the
+    sender to attribute the fragment to, and a snippet that has been separated from its
+    attribution is the thing :func:`snippet` exists to prevent.
+    """
+
+    record: ObjectRecord
+    snippet: str
+
+
+def _matches(obj: ObjectRecord, needle: str) -> bool:
+    """Whether ``obj`` contains ``needle``, case-insensitively, in subject or body."""
+    return needle in (obj.summary or "").lower() or needle in obj.content.lower()
+
+
+def snippet(obj: ObjectRecord, needle: str, *, width: int = SNIPPET_CHARS) -> str:
+    """A bounded fragment of ``obj`` around the first occurrence of ``needle``.
+
+    **Built from one message and never from its neighbours.** That is the whole
+    disclosure surface of search: a snippet is message text, and one assembled from
+    surrounding context — a thread summary, the reply above, anything — would leak
+    precisely the turns :func:`visible_turns` exists to withhold, while looking in
+    review like a formatting choice.
+
+    Taking `obj` rather than a string is what enforces it: there is no parameter here
+    through which another message's text could arrive.
+    """
+    body = obj.content or obj.summary or ""
+    if not body:
+        return ""
+    found = body.lower().find(needle)
+    if found < 0:
+        # Matched on the subject alone. The opening of the body is the useful fragment.
+        return _clip(body, 0, width)
+    # Centre the window on the hit, so the reader sees why it matched.
+    start = max(0, found - (width - len(needle)) // 2)
+    return _clip(body, start, width)
+
+
+def _clip(body: str, start: int, width: int) -> str:
+    fragment = body[start : start + width]
+    if start > 0:
+        fragment = f"…{fragment}"
+    if start + width < len(body):
+        fragment = f"{fragment}…"
+    return fragment
+
+
+def search(
+    objects: Iterable[ObjectRecord],
+    caller: str,
+    query: str,
+    all_actors: Iterable[str],
+    memberships: Mapping[str, frozenset[str]],
+    *,
+    sender: str = "",
+    since: str = "",
+    until: str = "",
+    limit: int = SEARCH_DEFAULT_LIMIT,
+) -> tuple[tuple[Match, ...], bool]:
+    """Messages ``caller`` is party to that contain ``query``. Newest first, bounded.
+
+    Returns the matches and whether more existed than were returned, because an agent
+    that cannot tell a complete answer from a capped one either re-searches pointlessly
+    or concludes that nothing else exists.
+
+    **Visibility first, text second, and the order is the requirement.** Matching before
+    filtering would decide how long the work takes — and, if any count ever escaped, how
+    many hidden messages matched — from mail the caller may not see. Filtering first
+    means every later step operates on the caller's own mail and can leak nothing,
+    whatever it does.
+
+    **Visibility is exactly** :func:`is_party_to` **— one call.** Not a re-derivation,
+    not an equivalent condition, not a SQL predicate somewhere else that means the same
+    thing today. Two implementations of one rule agree until the day they do not, and
+    that day is a disclosure; the leak that produced :func:`visible_turns` was this
+    shape.
+
+    Unlike :func:`unread`, this uses *party to* rather than *delivered to*, so a caller
+    finds their own outgoing mail. That is not a widening of what they may see — they
+    wrote it — and "what did I tell them about this" is as common a question as its
+    reverse.
+    """
+    needle = query.strip().lower()
+    if not needle:
+        # An empty query means "everything", and everything is a context dump with a
+        # polite name. The caller asked nothing, so nothing comes back.
+        return (), False
+
+    wanted = sender.strip().lower()
+    visible = [
+        obj
+        for obj in objects
+        if is_party_to(obj, caller, all_actors, memberships)
+        and (not wanted or obj.attributed_to.lower() == wanted)
+        and (not since or obj.published >= since)
+        and (not until or obj.published <= until)
+        and _matches(obj, needle)
+    ]
+    visible.sort(key=lambda obj: (obj.published, obj.id), reverse=True)
+
+    capped = max(1, min(limit, SEARCH_MAX_LIMIT))
+    return (
+        tuple(Match(obj, snippet(obj, needle)) for obj in visible[:capped]),
+        len(visible) > capped,
+    )
+
+
 # ------------------------------------------------------------------ threading
 
 

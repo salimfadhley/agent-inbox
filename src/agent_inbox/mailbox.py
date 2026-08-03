@@ -396,6 +396,44 @@ class Mailbox:
         """How much is waiting. Cheap enough for an agent to ask every turn."""
         return len(await self.peek(caller))
 
+    async def search(
+        self,
+        caller: str,
+        query: str,
+        *,
+        sender: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = rules.SEARCH_DEFAULT_LIMIT,
+    ) -> tuple[tuple[rules.Match, ...], bool]:
+        """Find mail ``caller`` is party to. Consumes nothing, marks nothing.
+
+        Deliberately the same five lines as :meth:`peek` with a different rule, because
+        it is the same question asked differently: *peek* is "what is waiting", this is
+        "what did anyone say about this". Sharing the shape is what makes it obvious
+        that they share a visibility model, and that neither invented one.
+
+        **It reaches back over everything retained, read or not.** Reading consumes a
+        message — it leaves your inbox — but it does not destroy it, and until its
+        conversation expires it stays findable. That distinction is new here, and the
+        documentation states it rather than leaving an agent to discover it by meeting
+        an old message in a result.
+        """
+        me = (await self._require_actor(caller)).name
+        all_actors, memberships = await self._context()
+        objects = tuple(await self._store.objects())
+        return rules.search(
+            objects,
+            me,
+            query,
+            all_actors,
+            memberships,
+            sender=sender,
+            since=since,
+            until=until,
+            limit=limit,
+        )
+
     async def read(self, caller: str, object_id: str) -> ObjectRecord:
         """Consume one message.
 

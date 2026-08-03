@@ -118,6 +118,32 @@ silently means "everything" is a context dump with a polite name.
 - Four gates green: `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`,
   `uv run pyright`.
 
+## Directive 4 — done, 2026-08-03
+
+Asked one question with four named failure modes: can a caller learn anything about a
+message they are not party to — existence, count, text, or fragment — through `search` or
+`snippet`?
+
+All four came back clean, with reasons rather than assurances. `truncated` counts only
+`visible`, which is built after `is_party_to`. `snippet` reads `obj.content`/`obj.summary`
+and `_clip` slices that same string — it has no access to `objects` and cannot switch
+messages. `sender`/`since`/`until` are `and` conditions after the visibility filter, so
+they can only narrow. The empty query returns before anything is scanned.
+
+**It found a fifth that the four questions missed**, which is the argument for asking
+somebody else: `Match.record` is the whole `ObjectRecord`, and `ObjectRecord` carries
+`in_reply_to` — so a caller party to a reply learns the id of a parent they cannot read.
+
+Reproduced independently before acting, per the directive, and the reproduction changed
+the conclusion: **`wire.note()` emits `inReplyTo` unconditionally (`wire.py:216`) and
+`check_inbox` already renders through it (`api.py:917`).** The disclosure is pre-existing
+and search neither introduces nor worsens it. Filed as **issue #45**; not fixed here,
+because deciding what `inReplyTo` should say when the parent is invisible belongs to the
+wire format, not to a search filter.
+
+WP02's T005 must still not propagate it — thread context omitted, not nulled, where the
+caller is not party to the opener.
+
 ## Reviewer guidance
 
 Count the lines between "here are the objects" and "here are the visible ones". It should
