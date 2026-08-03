@@ -64,6 +64,11 @@ def test_doctor_says_what_to_do_when_there_is_no_configuration(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AGENT_MAILBOX_HUB", raising=False)
     monkeypatch.delenv("AGENT_MAILBOX_NAME", raising=False)
+    # The machine-wide file is configuration too, and this asserts there is none.
+    # Without isolating it the test reads the developer's own ~/.config — which was
+    # harmless while `hub` lived in project files and stopped being so the day it
+    # became machine-wide by default.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     assert main(["doctor"]) == 2
     err = capsys.readouterr().err
     assert "configuration" in err
@@ -570,7 +575,7 @@ class TestDoctorExitCodes:
         def ping(self) -> dict[str, Any]:
             return {"you": "rosemary_nasrin"}
 
-    def _patch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _patch(self, monkeypatch: pytest.MonkeyPatch, home: Path | None = None) -> None:
         monkeypatch.setattr("agent_inbox.cli.HubClient", self._Hub)
         for var in (
             "AGENT_MAILBOX_HUB",
@@ -579,6 +584,15 @@ class TestDoctorExitCodes:
             "AGENT_INBOX_NAME",
         ):
             monkeypatch.delenv(var, raising=False)
+        # **The machine-wide file counts as configuration too.** This cleared the
+        # environment and the project and stopped there, so `load_global` read the
+        # developer's real ~/.config — and "no hub url" meant "no hub url unless the
+        # person running the tests happens to have one". It passed for years because
+        # `hub` lived in project files; the day it became machine-wide by default, a
+        # developer with a hub configured started failing tests they had not touched.
+        monkeypatch.setenv(
+            "XDG_CONFIG_HOME", str((home or Path("/nonexistent")) / "xdg")
+        )
 
     def test_healthy_but_not_joined_exits_zero(
         self,
@@ -603,7 +617,7 @@ class TestDoctorExitCodes:
     ) -> None:
         """A genuine blocker keeps its code. This mission changes one case, not four."""
         monkeypatch.chdir(tmp_path)
-        self._patch(monkeypatch)
+        self._patch(monkeypatch, tmp_path)
         assert main(["doctor"]) == 2
 
     def test_an_ambiguous_engine_still_exits_two(
@@ -1035,3 +1049,197 @@ class TestHubAndTokenAreMachineWideByDefault:
             f"the suggested command does not run: {suggested[0]!r}"
         )
         assert "http://local:8081" not in self._project(tmp_path).read_text()
+
+
+class TestDoctorReportsAProjectPinnedHub:
+    """Owner, 2026-08-03: doctor should notice a hub still in the project file.
+
+    Not a fault — a staging deployment or a second mailbox is a real thing to want —
+    but usually left over, and while it is there the machine-wide setting silently does
+    not apply. Its only symptom is a `config set hub` that appears to do nothing, which
+    is the kind of thing an agent should be able to see and fix itself.
+    """
+
+    @staticmethod
+    def _setup(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        project_hub: str,
+        machine_hub: str = "",
+    ) -> None:
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        if machine_hub:
+            (xdg / "agent-inbox" / "config.toml").write_text(f'hub = "{machine_hub}"\n')
+        body = '[agents.claude]\nname = "nicole_ruzickova"\n'
+        if project_hub:
+            body = f'hub = "{project_hub}"\n\n{body}'
+        (tmp_path / CONFIG_NAME).write_text(body)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+        monkeypatch.setattr("agent_inbox.cli.HubClient", _QuietHub)
+
+    def test_it_says_so_when_the_project_shadows_the_machine(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        self._setup(tmp_path, monkeypatch, "http://local:8081", "http://machine:8081")
+        main(["--engine", "claude", "doctor"])
+        err = capsys.readouterr().err
+        assert "hub setting" in err
+        assert "does not apply here" in err
+        assert "config unset hub" in err, "it did not say how to fix it"
+
+    def test_it_is_a_note_and_not_a_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A project may point elsewhere on purpose; that is not broken."""
+        self._setup(tmp_path, monkeypatch, "http://local:8081", "http://machine:8081")
+        code = main(["--engine", "claude", "doctor"])
+        err = capsys.readouterr().err
+        assert code == 0, "a pinned hub was treated as a fault"
+        assert "FAIL hub setting" not in err
+        assert "deliberately uses a different hub" in err, (
+            "it did not allow for the legitimate case"
+        )
+
+    def test_it_stays_quiet_when_the_hub_is_machine_wide(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The paired negative. Without it, the tests above pass on a note that
+        always fires — which would be noise on every correctly configured project."""
+        self._setup(tmp_path, monkeypatch, "", "http://machine:8081")
+        main(["--engine", "claude", "doctor"])
+        assert "hub setting" not in capsys.readouterr().err
+
+    def test_an_empty_project_hub_is_not_a_pin(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """`config unset hub` leaves `hub = ""`, which must not read as a setting."""
+        self._setup(tmp_path, monkeypatch, "", "http://machine:8081")
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = ""\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+        )
+        main(["--engine", "claude", "doctor"])
+        assert "hub setting" not in capsys.readouterr().err
+
+
+class _QuietHub:
+    """A hub that answers everything doctor asks, so the walk reaches the end."""
+
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    def hub_info(self) -> dict[str, Any]:
+        return {"name": "somewhere", "version": "test"}
+
+    def remote_doctor(self) -> dict[str, Any]:
+        return {"you": {"token": "accepted"}, "verdict": "fine"}
+
+    def ping(self) -> dict[str, Any]:
+        return {"waiting": 0}
+
+    def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+        return {"unread": 0, "items": [], "cursor": ""}
+
+
+class TestHubAndTokenBelongTogether:
+    """Owner, 2026-08-03: hub and token should always be in the same location.
+
+    A credential is only meaningful against the hub that minted it. A project that
+    overrides the address while inheriting the machine's token is pointed at one hub
+    holding a key to another — and the hub answers `token rejected`, which sends the
+    reader to inspect the one thing that is not wrong. That is not hypothetical: it
+    happened while moving this repository between hubs.
+
+    **Reported, never repaired.** Moving the partner would edit a file the caller did
+    not name, and one of the two is a credential.
+    """
+
+    @staticmethod
+    def _at(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        project: str = "",
+        machine: str = "",
+    ) -> Path:
+        xdg = tmp_path / "xdg"
+        (xdg / "agent-inbox").mkdir(parents=True)
+        if machine:
+            (xdg / "agent-inbox" / "config.toml").write_text(machine)
+        (tmp_path / CONFIG_NAME).write_text(
+            f'{project}\n[agents.claude]\nname = "nicole_ruzickova"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+        return tmp_path / CONFIG_NAME
+
+    def test_it_warns_when_the_hub_moves_away_from_its_token(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        self._at(tmp_path, monkeypatch, project='token = "for-the-old-hub"\n')
+        main(["--engine", "claude", "config", "set", "hub", "http://new:8081"])
+        err = capsys.readouterr().err
+        assert "belong together" in err
+        assert "only works against" in err, "it did not say why they must match"
+
+    def test_it_warns_when_a_project_hub_inherits_the_machine_token(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The case that actually bit: address overridden, credential inherited."""
+        self._at(tmp_path, monkeypatch, machine='token = "for-the-machine-hub"\n')
+        main(
+            [
+                "--engine",
+                "claude",
+                "config",
+                "set",
+                "--project",
+                "hub",
+                "http://mine:8081",
+            ]
+        )
+        err = capsys.readouterr().err
+        assert "belong together" in err
+        assert "--project token" in err, "the fix must keep them in the same file"
+
+    def test_it_changes_no_file_it_was_not_asked_to(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """One of the pair is a credential. A command that silently relocates secrets
+        is worse than one that points at the problem."""
+        project = self._at(tmp_path, monkeypatch, project='token = "for-the-old-hub"\n')
+        before = project.read_text()
+        main(["--engine", "claude", "config", "set", "hub", "http://new:8081"])
+        assert project.read_text() == before, "it moved the token without being asked"
+
+    def test_it_stays_quiet_when_they_are_together(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The paired negative: otherwise this fires on every correct setup."""
+        self._at(tmp_path, monkeypatch, machine='token = "machine-token"\n')
+        main(["--engine", "claude", "config", "set", "hub", "http://new:8081"])
+        assert "belong together" not in capsys.readouterr().err

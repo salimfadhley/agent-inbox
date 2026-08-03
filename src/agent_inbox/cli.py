@@ -66,17 +66,29 @@ PROJECT_ONLY = ("name", "role")
 
 #: Written machine-wide unless `--project` says otherwise (owner, 2026-08-03).
 #:
-#: **The rule is now one sentence: identity is per project, everything else is per
-#: machine.** A person has one mailbox and one credential for it; they have as many
+#: **Identity is per project; the hub and the credential for it are per machine —
+#: by default.** A person has one mailbox and one credential for it, and as many
 #: identities as they have repositories. Defaulting the address to the project made
-#: every new repository re-answer a question already settled, and made moving hubs a
-#: chore proportional to how many projects you had rather than to how many hubs.
+#: every new repository re-answer a settled question, and made moving hubs a chore
+#: proportional to how many projects you had rather than how many hubs.
 #:
-#: `token` joins `hub` here for the same reason and because it was already the
-#: assumption: a shared token admits the *machine*, and the epilog has always told
-#: people to set it globally. It simply did not default that way, so the file it landed
-#: in depended on whether the reader had noticed the flag.
+#: A project *may* still use its own hub — a staging deployment, a second mailbox — and
+#: `--project` is how. What it may not do is use its own hub with somebody else's
+#: credential.
 GLOBAL_BY_DEFAULT = ("hub", "token")
+
+#: **`hub` and `token` live together, always** (owner, 2026-08-03). They are one
+#: setting wearing two names: a credential is only meaningful against the hub it was
+#: minted by, so a project that overrides the address and inherits the machine's token
+#: is pointed at hub A holding a key to hub B. The hub answers `token rejected`, which
+#: sends the reader to look at the credential — the one thing that is not wrong.
+#:
+#: Not a hypothesis. It happened while moving this very repository between hubs: the
+#: address moved, the token did not, and the failure named the token.
+#:
+#: So writing either to a scope moves both, and `doctor` reports a split pair rather
+#: than waiting for the hub to produce a misleading refusal.
+PAIRED_SETTINGS = ("hub", "token")
 
 EPILOG = """\
 WHERE YOU RUN IT MATTERS. Identity is per project, so anything acting as an agent —
@@ -545,6 +557,34 @@ def config_set(
         # `--project` asked for the old behaviour explicitly.
         project, machine = settings, {}
 
+    # **`hub` and `token` belong in the same file** (owner, 2026-08-03). A credential
+    # is only meaningful against the hub that minted it, so a project that overrides the
+    # address while inheriting the machine's token is pointed at one hub holding a key
+    # to another. The hub answers `token rejected`, which sends the reader to inspect
+    # the one thing that is not wrong — it happened while moving this repository.
+    #
+    # **Said, not done.** Moving the partner would edit a file the caller did not name,
+    # and one of these is a credential; a command that quietly relocates secrets is
+    # worse than one that points at the problem. `doctor` repeats this, which is where
+    # somebody already suspicious will look.
+    for setting, partner in (PAIRED_SETTINGS, PAIRED_SETTINGS[::-1]):
+        if setting not in settings or partner in settings:
+            continue
+        here, machine_wide = _project_value(partner), load_global().get(partner, "")
+        split = (here and setting in machine) or (
+            str(machine_wide).strip() and setting in project
+        )
+        if split:
+            where_partner = "this project" if here else "machine-wide"
+            where_this = "machine-wide" if setting in machine else "this project"
+            _err(
+                f"note: {setting} is now {where_this} while {partner} is "
+                f"{where_partner}. They belong together — a token only works against "
+                f"the hub that minted it.\n"
+                f"      Put {partner} beside it:  agent-inbox config set "
+                f"{'--project ' if setting in project else ''}{partner} <value>"
+            )
+
     written: list[str] = []
     if machine:
         written.append(str(write_global(machine)))
@@ -930,6 +970,42 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
         click.echo(
             f"{ok} identity        {config.name} "
             f"({config.role}, engine {config.engine or chosen} — {how})"
+        )
+
+    # `hub` became machine-wide by default on 2026-08-03: you have one mailbox and as
+    # many identities as you have repositories. A project that still sets its own is not
+    # broken — a staging deployment or a second mailbox is a real thing to want — but it
+    # is usually left over, and while it is there the machine-wide setting silently does
+    # not apply here. That is the shape worth reporting: not a fault, but a thing whose
+    # only symptom is a `config set hub` that appears to do nothing.
+    #
+    # `note` rather than `--`: this asks the reader to do something, and the version
+    # line already established that `note` is where doctor says so.
+    pinned = _project_value("hub")
+    if pinned:
+        machine_wide = str(load_global().get("hub", "")).strip()
+        if machine_wide and machine_wide != pinned:
+            _err(
+                f"{warn} hub setting     this project pins {pinned} in {where}, so the "
+                f"machine-wide {machine_wide} does not apply here."
+            )
+        elif machine_wide:
+            _err(
+                f"{warn} hub setting     this project repeats the machine-wide hub "
+                f"({pinned}) in {where}. Harmless, and no longer needed."
+            )
+        else:
+            _err(
+                f"{warn} hub setting     the hub lives in {where}, per project. "
+                "It is machine-wide by default now, so every other project has to be "
+                "told again."
+            )
+        _err(
+            "     Unless this project deliberately uses a different hub, move it:\n\n"
+            "       agent-inbox config unset hub\n"
+            f"       agent-inbox config set hub {pinned or '<url>'}\n\n"
+            "     The second writes machine-wide, so this project and every other one\n"
+            "     follow it from then on."
         )
 
     # Two engines sharing a name share an *inbox*, and the symptom is mail that quietly
