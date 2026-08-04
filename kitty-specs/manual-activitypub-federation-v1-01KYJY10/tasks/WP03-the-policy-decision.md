@@ -50,6 +50,19 @@ tags: []
 task_type: implement
 ---
 
+> **SUPERSEDED — do not implement from this file.** (2026-08-04)
+>
+> This package's work is planned and decomposed in
+> [`federated-identity-and-trust-01KYN49V`](../../federated-identity-and-trust-01KYN49V/tasks.md),
+> which was carved out of this mission and describes the same requirements with
+> parent ids carried for traceability.
+>
+> Building it from both would put the policy decision in two places — which this
+> package's own objective warns is *"a disagreement, and a disagreement here is a
+> disclosure"*. Twelve of this mission's fourteen packages shipped; this is one of
+> the two that did not, and the child mission is where it lands.
+
+
 # Work Package Prompt: WP03 – The policy decision, in one place
 
 ## ⚡ Do This First: Load Agent Profile
