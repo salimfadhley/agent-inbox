@@ -14,6 +14,7 @@ comes back as a sentence saying what to do.
 """
 
 import json
+import logging
 import os
 import tomllib
 import urllib.error
@@ -33,6 +34,8 @@ LEGACY_CONFIG_NAME = "agent-mailbox.toml"
 
 #: Both names, in the order they are preferred when a project somehow has each.
 CONFIG_NAMES = (CONFIG_NAME, LEGACY_CONFIG_NAME)
+
+logger = logging.getLogger(__name__)
 
 IDENTITY_HEADER = "X-Agent-Name"
 
@@ -584,10 +587,43 @@ def write_config(
     # the one thing that is not wrong. Found by an outside review, and it is the same
     # rule `config set` enforces: hub and token live together.
     if not pinned and hub and not kept_token:
-        write_global({"hub": hub})
+        _set_machine_hub(hub)
     elif not pinned and hub:
         pinned = hub
     return _render_project(target, pinned, agents)
+
+
+def _set_machine_hub(hub: str, env: dict[str, str] | None = None) -> None:
+    """Record the machine-wide hub — but never *change* one that is already set.
+
+    Writing it when nothing is there is the whole point of the machine-wide file, and
+    stays. **Overwriting a different value is a different act**, and it was silently
+    undoing deliberate operator settings: on 2026-08-04 a correct hub was set three
+    times by hand and reverted three times to an address that does not resolve, because
+    a long-lived process still holding the old value called `join` in the background and
+    won each time. Mail then failed, in another project, minutes later, with nothing
+    anywhere connecting the two.
+
+    An empty project hub is **not** the fault, despite appearances: it is what this
+    module writes when the hub is machine-wide, so every well-behaved project has one.
+    The fault is that a background write outranked a human.
+
+    So: absent, or the same — write. Different — keep what is there and say so. That is
+    the safe direction, because the value already in the file is the one somebody chose,
+    and a config tool that loses an operator's decision is worse than one that declines
+    to make it.
+    """
+    current = str(load_global(env).get("hub") or "").strip()
+    if current and current != hub:
+        logger.warning(
+            "event=config.hub.kept existing=%s offered=%s — the machine-wide hub was "
+            "already set; keeping it. Change it deliberately with "
+            "`agent-inbox config --global set hub <url>`.",
+            current,
+            hub,
+        )
+        return
+    write_global({"hub": hub}, env)
 
 
 def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
