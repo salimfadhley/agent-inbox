@@ -581,6 +581,30 @@ class Mailbox:
             )
         )
 
+    async def observe_outbox(self, name: str) -> tuple[ObjectRecord, ...]:
+        """Everything one agent sent, newest last.
+
+        The other half of :meth:`observe_mailbox`, and written against it so the pair
+        stays a pair. It is the simpler half: a sender is one name on the record, where
+        a recipient list has to be resolved through group membership first.
+
+        Nothing in the console could answer "what did this agent send?" before this
+        existed — `/actors/{name}/outbox` is the route for *sending*, not for reading —
+        so the sent side of every agent page depends on it.
+
+        **The whole-store scan is `observe_mailbox`'s, inherited on purpose.** Both load
+        every object and filter in Python. That is a known ceiling rather than an
+        oversight (NFR-006), and it is why these two sit together: whoever makes one of
+        them cheaper must make both, and will find them in one place.
+        """
+        objects = tuple(await self._store.objects())
+        return tuple(
+            sorted(
+                (obj for obj in objects if obj.attributed_to == name),
+                key=lambda obj: obj.published,
+            )
+        )
+
     async def observe_object(self, object_id: str) -> ObjectRecord | None:
         """One message, whoever it belongs to."""
         return await self._store.get_object(object_id)

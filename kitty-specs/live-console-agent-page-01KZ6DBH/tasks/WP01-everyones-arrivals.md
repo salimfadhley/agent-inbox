@@ -1,7 +1,8 @@
 ---
 work_package_id: WP01
 title: Everyone's arrivals, not just one agent's
-dependencies: []
+dependencies:
+- WP02
 requirement_refs:
 - FR-001
 - FR-002
@@ -15,6 +16,7 @@ subtasks:
 - T003
 - T004
 - T005
+- T007
 agent: python-pedro
 history:
 - at: '2026-08-04T13:25:00Z'
@@ -27,6 +29,7 @@ create_intent:
 execution_mode: code_change
 owned_files:
 - src/agent_inbox/notify.py
+- src/agent_inbox/house.py
 - tests/test_notify_hubwide.py
 role: implementer
 tags: []
@@ -64,7 +67,8 @@ the actor namespace that is not an actor, so `count_for`, `by_actor` and `listen
 each report it as one — and every future reader of those methods inherits a special case
 nobody documented. Plan §1 rejects it explicitly.
 
-Use a distinct collection for hub-wide queues, fed from the same `announce` call.
+Use a distinct collection for hub-wide queues, fed by its own `announce_all` — see T002
+for why it must not be fed from `announce`.
 
 ## Subtasks
 
@@ -73,11 +77,30 @@ Use a distinct collection for hub-wide queues, fed from the same `announce` call
 Add a container for hub-wide subscribers. It holds queues, not actors: there is no name
 to key on, which is the whole point.
 
-### T002 — `announce()` feeds both kinds from one call
+### T002 — Hub-wide delivery happens **once per message**, not once per recipient
 
-An arrival is put on the addressed actor's queues **and** on every hub-wide queue. One
-call site, so the two cannot drift apart — a hub-wide feed that misses arrivals the
-per-actor feed sees would be the worst outcome here and the hardest to notice.
+**Read this before writing anything, because the obvious implementation is wrong.**
+
+`House._announce` (`house.py:297`) calls `announce(who, arrival)` **once for each local
+recipient**:
+
+```python
+arrival = Arrival.of(sent.record)
+for who in sent.local_recipients:
+    self._listeners.announce(who, arrival)
+```
+
+So feeding hub-wide subscribers from inside `announce` puts the same arrival on a
+hub-wide queue once per recipient. A message to three agents appears three times in the
+Realtime tab. That was this package's original instruction and it was a planning defect,
+found by reading the call site during implementation.
+
+**Instead**: add a separate `announce_all(arrival)` on `Listeners`, and call it **once**
+from `House._announce`, outside the recipient loop. Per-actor delivery stays exactly as
+it is.
+
+Both calls must stay inside `_announce`'s existing `try` — the send is the product and
+notification is a convenience on top of it, so neither may raise into a send.
 
 ### T003 — Open and close, with the same capacity accounting
 
@@ -90,11 +113,20 @@ ones do. A hub-wide listener is a held connection and costs the same.
 subscriber must not appear in any of them, because it is not listening as anybody. If a
 total is wanted, `count` is the method that means "all held connections".
 
+### T007 — `House.observe_outbox` delegate
+
+One line, matching the other four `observe_*` methods, delegating to WP02's
+`Mailbox.observe_outbox`. It lives here rather than in WP02 because `house.py` is owned
+by this package — two packages cannot own one file.
+
 ### T005 — Tests, including the removal proof
 
 In `tests/test_notify_hubwide.py`:
 
 - Two actors receive mail; a hub-wide subscriber sees **both** arrivals.
+- **A message addressed to three recipients appears exactly once** on a hub-wide queue.
+  This is the regression that prompted the redesign; without it the duplicate-delivery
+  bug returns the first time somebody "simplifies" the two calls into one.
 - Each per-actor subscriber still sees only its own — the paired positive, without which
   the first test would pass on an implementation that broadcast everything to everyone.
 - A hub-wide subscriber does not appear in `by_actor()` or in any `count_for()`.

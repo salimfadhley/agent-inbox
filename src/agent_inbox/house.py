@@ -296,6 +296,12 @@ class House:
             arrival = Arrival.of(sent.record)
             for who in sent.local_recipients:
                 self._listeners.announce(who, arrival)
+            # **Once per message, outside the loop.** Watchers of the whole hub want the
+            # message, not one copy per person it reached: announcing inside the loop
+            # would show a note to three agents as three notes, in the one view whose
+            # job is to say what happened. `Listeners.announce_all` exists separately
+            # for exactly this reason and says so.
+            self._listeners.announce_all(arrival)
         except Exception:  # noqa: BLE001 - a send must survive anything that happens here
             # Suppressed, because the handler is the last place a guarantee can be lost.
             # Logging is synchronous and a handler can raise — a full disk, a broken
@@ -467,6 +473,10 @@ class House:
 
     async def observe_mailbox(self, name: str) -> tuple[ObjectRecord, ...]:
         return await self._mailbox.observe_mailbox(name)
+
+    async def observe_outbox(self, name: str) -> tuple[ObjectRecord, ...]:
+        """Everything one agent sent. The other half of :meth:`observe_mailbox`."""
+        return await self._mailbox.observe_outbox(name)
 
     async def observe_object(self, object_id: str) -> ObjectRecord | None:
         return await self._mailbox.observe_object(object_id)

@@ -10,7 +10,6 @@ merge_target_branch: main
 branch_strategy: Planning artifacts for this mission were generated on main. During /spec-kitty.implement this WP may branch from a dependency-specific base, but completed changes must merge back into main unless the human explicitly redirects the landing branch.
 subtasks:
 - T006
-- T007
 - T008
 agent: python-pedro
 history:
@@ -24,7 +23,6 @@ create_intent:
 execution_mode: code_change
 owned_files:
 - src/agent_inbox/mailbox.py
-- src/agent_inbox/house.py
 - tests/test_observe_outbox.py
 role: implementer
 tags: []
@@ -70,10 +68,6 @@ scan is visible in one place rather than discovered twice.
 
 Do not resolve groups or expand recipients — the sender is a single name, which makes
 this the simpler half of the pair.
-
-### T007 — `House.observe_outbox`
-
-The delegate, matching the other four `observe_*` methods exactly.
 
 ### T008 — Tests
 

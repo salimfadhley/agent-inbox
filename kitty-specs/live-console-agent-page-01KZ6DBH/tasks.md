@@ -23,12 +23,12 @@ right shape anyway: the relay is not a page, and the feed is mounted twice.
 | ID | Description | WP | Parallel |
 |---|---|---|---|
 | T001 | Hub-wide queue set on `Listeners`, beside the per-actor map | WP01 | |
-| T002 | `announce()` feeds per-actor and hub-wide subscribers from one call | WP01 | |
+| T002 | `announce_all()` — hub-wide delivery once per message, not once per recipient | WP01 | |
 | T003 | Open/close for hub-wide subscribers, with the same capacity accounting | WP01 | |
 | T004 | `count_for` / `by_actor` / `listening` must not report a hub-wide subscriber as an actor | WP01 | |
 | T005 | Tests, including the removal proof for the fan-out | WP01 | |
 | T006 | `Mailbox.observe_outbox`, beside `observe_mailbox`, filtering on `attributed_to` | WP02 | [P] |
-| T007 | `House.observe_outbox` delegate | WP02 | [P] |
+| T007 | `House.observe_outbox` delegate | WP01 | |
 | T008 | Tests: only what the agent sent, consumes nothing, paired against `observe_mailbox` | WP02 | [P] |
 | T009 | `GET /observe/events` — hub-wide SSE, registered inside the generator | WP03 | |
 | T010 | `GET /observe/recent` — snapshot, bounded at the API | WP03 | |
@@ -69,11 +69,12 @@ arrival. **Priority**: first — WP03's stream route has nothing to serve withou
 **Independent test**: two actors receive mail; a hub-wide subscriber sees both, and each
 per-actor subscriber still sees only its own.
 
-- [ ] T001 Hub-wide queue set on `Listeners`, beside the per-actor map (WP01)
-- [ ] T002 `announce()` feeds per-actor and hub-wide subscribers from one call (WP01)
-- [ ] T003 Open/close for hub-wide subscribers, with the same capacity accounting (WP01)
-- [ ] T004 `count_for` / `by_actor` / `listening` must not report a hub-wide subscriber as an actor (WP01)
-- [ ] T005 Tests, including the removal proof for the fan-out (WP01)
+- [x] T001 Hub-wide queue set on `Listeners`, beside the per-actor map (WP01)
+- [x] T002 `announce_all()` — hub-wide delivery once per message, not once per recipient (WP01)
+- [x] T003 Open/close for hub-wide subscribers, with the same capacity accounting (WP01)
+- [x] T004 `count_for` / `by_actor` / `listening` must not report a hub-wide subscriber as an actor (WP01)
+- [x] T005 Tests, including the removal proof for the fan-out (WP01)
+- [x] T007 `House.observe_outbox` delegate (WP01)
 
 **Risks**: the pseudo-actor shortcut is genuinely tempting and is rejected in plan §1 —
 review should check no reserved name crept into the actor namespace.
@@ -84,9 +85,8 @@ review should check no reserved name crept into the actor namespace.
 **Dependencies**: none — parallel with WP01. **Independent test**: an agent that sent two
 and received three yields exactly the two.
 
-- [ ] T006 `Mailbox.observe_outbox`, beside `observe_mailbox`, filtering on `attributed_to` (WP02)
-- [ ] T007 `House.observe_outbox` delegate (WP02)
-- [ ] T008 Tests: only what the agent sent, consumes nothing, paired against `observe_mailbox` (WP02)
+- [x] T006 `Mailbox.observe_outbox`, beside `observe_mailbox`, filtering on `attributed_to` (WP02)
+- [x] T008 Tests: only what the agent sent, consumes nothing, paired against `observe_mailbox` (WP02)
 
 **Risks**: NFR-006 — it inherits the whole-store scan and must not add a second one.
 

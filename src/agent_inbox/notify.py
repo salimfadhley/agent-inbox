@@ -133,6 +133,12 @@ class Listeners:
         queue_depth: int = DEFAULT_QUEUE_DEPTH,
     ) -> None:
         self._by_actor: dict[str, set[asyncio.Queue[Arrival]]] = {}
+        #: Connections that want **every** arrival, whoever it was addressed to. Held
+        #: separately rather than under a reserved actor name like `"*"`: a name that is
+        #: not a name would be reported as an actor by :meth:`count_for`,
+        #: :meth:`by_actor` and :meth:`listening`, and every later reader of those would
+        #: inherit a special case nobody wrote down.
+        self._everything: set[asyncio.Queue[Arrival]] = set()
         self._max_listeners = max_listeners
         self._queue_depth = queue_depth
 
@@ -141,15 +147,33 @@ class Listeners:
         return self._max_listeners
 
     def count(self) -> int:
-        """Connections held by this process, across every actor."""
-        return sum(len(queues) for queues in self._by_actor.values())
+        """Every connection held by this process, per-actor and hub-wide alike.
+
+        This is the number the cap is enforced against, because a hub-wide connection is
+        a held connection and costs exactly what any other does.
+        """
+        return sum(len(queues) for queues in self._by_actor.values()) + len(
+            self._everything
+        )
+
+    def count_everything(self) -> int:
+        """Connections watching the whole hub."""
+        return len(self._everything)
 
     def count_for(self, actor: str) -> int:
-        """Connections held for one actor. Sessions, not people."""
+        """Connections held for one actor. Sessions, not people.
+
+        Hub-wide watchers are **not** counted here. They are not listening *as* anybody,
+        and adding them to an actor's total would misreport that actor as having a
+        session open. :meth:`count` is the method that means "everything".
+        """
         return len(self._by_actor.get(actor, ()))
 
     def by_actor(self) -> dict[str, int]:
-        """A count per actor, omitting actors with nothing open."""
+        """A count per actor, omitting actors with nothing open.
+
+        Hub-wide watchers do not appear, for the reason given on :meth:`count_for`.
+        """
         return {
             actor: len(queues) for actor, queues in self._by_actor.items() if queues
         }
@@ -220,6 +244,71 @@ class Listeners:
             yield queue
         finally:
             self.close(actor, queue)
+
+    def open_everything(self) -> asyncio.Queue[Arrival]:
+        """Register a connection that wants every arrival on the hub.
+
+        The same cap, the same refusal, and the same pairing obligation as :meth:`open`
+        — see it for why registration is separate from streaming. Use :meth:`watching`
+        rather than calling this directly.
+        """
+        if self.at_capacity():
+            raise TooManyListeners(self.full_message())
+        queue: asyncio.Queue[Arrival] = asyncio.Queue(maxsize=self._queue_depth)
+        self._everything.add(queue)
+        logger.info(
+            "event=mailbox.listen.opened scope=everything open=%d", self.count()
+        )
+        return queue
+
+    def close_everything(self, queue: asyncio.Queue[Arrival]) -> None:
+        """Unregister a hub-wide connection.
+
+        Idempotent, because every caller closes from a `finally`.
+        """
+        self._everything.discard(queue)
+        logger.info(
+            "event=mailbox.listen.closed scope=everything open=%d", self.count()
+        )
+
+    @contextmanager
+    def watching(self) -> Iterator[asyncio.Queue[Arrival]]:
+        """:meth:`open_everything` and :meth:`close_everything`, inseparably."""
+        queue = self.open_everything()
+        try:
+            yield queue
+        finally:
+            self.close_everything(queue)
+
+    def announce_all(self, arrival: Arrival) -> int:
+        """Tell everyone watching the whole hub. Once per message.
+
+        **Deliberately not folded into :meth:`announce`, and this is the whole point.**
+        `House._announce` calls `announce` once for *each local recipient*, because
+        per-actor delivery is per actor. A hub-wide leg inside that call would therefore
+        put one message on a watcher's queue once per recipient, and a message to three
+        agents would appear three times in a view whose entire purpose is to show what
+        happened. It would look like three messages, and nothing would say otherwise.
+
+        So the two are separate calls with different arities: `announce` is per
+        recipient, this is per message, and the caller makes exactly one of each kind.
+
+        Never blocks, never raises, and drops what it cannot deliver — for the reasons
+        set out on :meth:`announce`.
+        """
+        reached = 0
+        for queue in tuple(self._everything):
+            try:
+                queue.put_nowait(arrival)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "event=mailbox.listen.dropped scope=everything message=%s "
+                    "reason=behind",
+                    arrival.id,
+                )
+            else:
+                reached += 1
+        return reached
 
     def announce(self, actor: str, arrival: Arrival) -> int:
         """Tell everyone listening as `actor`. Never blocks, never raises.
