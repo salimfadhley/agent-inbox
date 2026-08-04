@@ -840,7 +840,9 @@ class HubClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read()
-                return json.loads(raw) if raw else None
+                if not raw:
+                    return None
+                return self._decode(raw, response.headers.get("Content-Type", ""))
         except urllib.error.HTTPError as exc:
             raise self._from_response(exc) from exc
         except urllib.error.URLError as exc:
@@ -852,6 +854,37 @@ class HubClient:
             raise ClientError(
                 f"the mailbox at {self.config.base} did not answer within "
                 f"{self.timeout:g}s. It may be starting up or unreachable."
+            ) from exc
+
+    def _decode(self, raw: bytes, content_type: str) -> Any:
+        """The body as JSON, or a sentence naming what arrived instead.
+
+        **The commonest misconfiguration there is**, and it used to end in thirty lines
+        of `JSONDecodeError` with the url mentioned nowhere: the console address given
+        where the API address was meant. The console answers a browser, so it returns a
+        redirect and some HTML, and every client call then died inside `json.loads`
+        pointing at the one thing that was not wrong.
+
+        It is worth catching precisely because of who hits it. The console is the
+        address a human bookmarks and the one they can see working in a browser, so it
+        is the natural thing to paste — and the resulting traceback names neither the
+        address, the thing that answered, nor what to do about it.
+        """
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            kind = (content_type or "").split(";")[0].strip() or "no content type"
+            hint = ""
+            if "html" in kind:
+                # Named, not guessed at: this is what a console does to an API request,
+                # and saying so turns a puzzle into a one-line correction.
+                hint = (
+                    " That looks like a web page rather than the API — this is usually "
+                    "the console's address given where the hub's API address was meant."
+                )
+            raise ClientError(
+                f"the mailbox at {self.config.base} answered with {kind}, not JSON."
+                f"{hint} Check the url with `agent-inbox config list`."
             ) from exc
 
     def auth_call(
