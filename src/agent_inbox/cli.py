@@ -798,6 +798,48 @@ def profile_set(ctx: click.Context, json_text: str) -> int:
     return 0
 
 
+@profile.command("edit")
+@click.argument("pairs", metavar="KEY=VALUE...", nargs=-1, required=True)
+@click.pass_context
+def profile_edit(ctx: click.Context, pairs: tuple[str, ...]) -> int:
+    """Change or clear individual fields, leaving the rest alone.
+
+    `profile set` replaces everything, which is the honest primitive — it is what the
+    hub does. But it means correcting one field requires restating every other, and
+    **that friction is why profiles go stale**: an agent with an answered question
+    advertised under `needs` leaves it there rather than re-sending five fields it did
+    not intend to touch, and other agents then spend real work answering something
+    resolved hours ago (`parisa_murthy`, 2026-08-04, issues #55 and #56).
+
+    Read, amend, write — a thin path over the same replace, deliberately. A second
+    server-side merge would be a second place the rules live, and the two would differ.
+
+        agent-inbox profile edit needs=              # clear one field
+        agent-inbox profile edit project=billing model=claude-opus
+
+    An empty value clears the key. A value that parses as JSON is stored as JSON, so
+    lists and numbers survive; anything else is stored as text.
+    """
+    client = _client(ctx)
+    current = dict((client.whois(client.config.name) or {}).get("profile") or {})
+    for pair in pairs:
+        key, sep, raw = pair.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            _err(f"{pair!r} is not KEY=VALUE. Use `needs=` to clear a field.")
+            return 1
+        if raw == "":
+            current.pop(key, None)
+            continue
+        try:
+            current[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            # Plain text is the common case and must not need quoting at a shell.
+            current[key] = raw
+    _print(client.update_profile(current))
+    return 0
+
+
 @cli.command("update-profile", hidden=True)
 @click.argument("json_text", metavar="JSON")
 @click.pass_context
@@ -826,7 +868,18 @@ def config_path(ctx: click.Context, is_global: bool) -> int:
 @click.option("--role-definition", is_flag=True, help="also fetch what the role means")
 @click.pass_context
 def whoami(ctx: click.Context, role_definition: bool) -> int:
-    """Who this engine is here."""
+    """Who this engine is here, and what the hub holds about it.
+
+    **Both halves, because they can disagree.** The local half comes from this project's
+    config; the profile comes from the hub, and is what other agents and the console
+    actually see. Reporting only the local half is what left an agent unable to check
+    whether the `host` and `root` that `join` recorded were right — asked to verify
+    something the CLI would not show (`parisa_murthy`, 2026-08-04, issue #56).
+
+    The profile is best-effort: an unreachable hub still answers the local question, and
+    saying nothing about the remote half is better than failing the whole command over
+    it.
+    """
     config = load_config(engine=_resolve_engine(ctx, must_exist=True))
     out: dict[str, Any] = {
         "name": config.name,
@@ -834,8 +887,15 @@ def whoami(ctx: click.Context, role_definition: bool) -> int:
         "engine": config.engine,
         "hub": config.hub,
     }
+    client = HubClient(config)
+    try:
+        out["profile"] = (client.whois(config.name) or {}).get("profile") or {}
+    except ClientError as exc:
+        # Not fatal: who this engine is locally is still worth printing, and a hub that
+        # cannot be reached is a separate problem `doctor` exists to diagnose.
+        out["profile"] = f"unavailable — {exc}"
     if role_definition:
-        out["role_definition"] = HubClient(config).role_definition(config.role)
+        out["role_definition"] = client.role_definition(config.role)
     _print(out)
     return 0
 

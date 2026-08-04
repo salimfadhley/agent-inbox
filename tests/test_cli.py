@@ -1329,3 +1329,110 @@ class TestMachineFactsAtJoin:
         self._Hub.raises = True
         assert main(["join", "rosemary_nasrin", "--hub", "http://hub:8081"]) == 0
         assert "rosemary_nasrin" in capsys.readouterr().out
+
+
+class TestSeeingAndAmendingWhatTheHubHolds:
+    """Issue #56, reported by an agent who could not check what it was asked to check.
+
+    `join` records `host` and `root`; a broadcast then asked every agent to verify them
+    — while `whoami` showed only the local config, so the only way to look was a browser
+    most agents do not have. And `profile set` replacing everything is *why* profiles go
+    stale: correcting one field meant restating five.
+    """
+
+    class _Hub:
+        stored: dict[str, Any] = {}
+        reachable: bool = True
+
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def whois(self, name: str) -> dict[str, Any]:
+            if not type(self).reachable:
+                raise ClientError("cannot reach the mailbox at http://hub.invalid")
+            return {"preferredUsername": name, "profile": dict(type(self).stored)}
+
+        def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+            type(self).stored = dict(profile)
+            return {"profile": dict(profile)}
+
+        def role_definition(self, role: str) -> dict[str, Any]:
+            return {"role": role}
+
+    @pytest.fixture(autouse=True)
+    def _joined(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://hub.invalid"\n\n[agents.claude]\nname = "rosemary_nasrin"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setattr("agent_inbox.cli.HubClient", self._Hub)
+        self._Hub.stored = {"host": "somebox.invalid", "root": "workspace/billing"}
+        self._Hub.reachable = True
+
+    def test_whoami_shows_what_the_hub_holds(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["whoami"]) == 0
+
+        out = capsys.readouterr().out
+        assert "somebox.invalid" in out, "whoami still hides what join recorded"
+        assert "workspace/billing" in out
+
+    def test_whoami_still_answers_when_the_hub_is_down(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The paired positive: who this engine is locally is still worth printing.
+
+        Failing the whole command because the remote half is unavailable would make
+        `whoami` useless in exactly the situation someone runs it.
+        """
+        self._Hub.reachable = False
+
+        assert main(["whoami"]) == 0
+
+        out = capsys.readouterr().out
+        assert "rosemary_nasrin" in out
+        assert "unavailable" in out
+
+    def test_editing_one_field_leaves_the_others(self) -> None:
+        assert main(["profile", "edit", "project=billing"]) == 0
+
+        assert self._Hub.stored["project"] == "billing"
+        assert self._Hub.stored["host"] == "somebox.invalid", (
+            "an untouched field was lost"
+        )
+
+    def test_an_empty_value_clears_one_field(self) -> None:
+        self._Hub.stored = {"needs": "what is M2?", "host": "somebox.invalid"}
+
+        assert main(["profile", "edit", "needs="]) == 0
+
+        assert "needs" not in self._Hub.stored
+        assert self._Hub.stored["host"] == "somebox.invalid"
+
+    def test_json_values_survive_as_json(self) -> None:
+        assert main(["profile", "edit", 'offers=["python","sql"]']) == 0
+
+        assert self._Hub.stored["offers"] == ["python", "sql"]
+
+    def test_plain_text_needs_no_quoting(self) -> None:
+        """The common case at a shell, and it must not require JSON quoting."""
+        assert main(["profile", "edit", "role=builds the mailbox"]) == 0
+
+        assert self._Hub.stored["role"] == "builds the mailbox"
+
+    def test_a_malformed_pair_is_refused_with_advice(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["profile", "edit", "justakey"]) == 1
+
+        assert "KEY=VALUE" in capsys.readouterr().err
+
+    def test_set_still_replaces_everything(self) -> None:
+        """`edit` must not have quietly turned the primitive into a merge."""
+        self._Hub.stored = {"host": "somebox.invalid", "needs": "help"}
+
+        assert main(["profile", "set", '{"project": "billing"}']) == 0
+
+        assert self._Hub.stored == {"project": "billing"}
