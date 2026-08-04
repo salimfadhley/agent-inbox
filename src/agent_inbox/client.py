@@ -761,6 +761,16 @@ class HubClient:
         """Where this identity's event stream lives."""
         return f"{self.config.base}/actors/{self.config.name}/events"
 
+    def hub_events_url(self) -> str:
+        """Where the hub's own stream lives — every arrival, not one identity's.
+
+        Carries no name, because the route takes no caller: it is an `/observe/*` route
+        like the rest of the operator's view. :meth:`stream_headers` still applies, for
+        the reason given there — holding a connection open does not make this a
+        different client, and an authenticating hub refuses an uncredentialed one.
+        """
+        return f"{self.config.base}/observe/events"
+
     def stream_headers(self) -> dict[str, str]:
         """The same credentials every other call sends, for a caller that is not us.
 
@@ -1008,6 +1018,21 @@ class HubClient:
 
     def observe_mailbox(self, name: str) -> Any:
         return self._call("GET", f"/observe/mailbox/{name}")
+
+    def observe_outbox(self, name: str) -> Any:
+        """What one agent sent — the other half of :meth:`observe_mailbox`."""
+        return self._call("GET", f"/observe/outbox/{name}")
+
+    def observe_recent(self, limit: int | None = None) -> Any:
+        """The hub's recent traffic, so a live view can open full rather than blank.
+
+        `limit` is a request, not an instruction: the hub clamps it, because an
+        unbounded "recent" is a whole-store dump wearing a small name. Omit it and the
+        hub's own default applies — which is what a caller should normally do, so this
+        client is not a second place the number lives.
+        """
+        query = f"?limit={int(limit)}" if limit is not None else ""
+        return self._call("GET", f"/observe/recent{query}")
 
     def observe_object(self, object_id: str) -> Any:
         return self._call("GET", f"/observe/objects/{_leaf(object_id)}")

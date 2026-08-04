@@ -478,6 +478,10 @@ class House:
         """Everything one agent sent. The other half of :meth:`observe_mailbox`."""
         return await self._mailbox.observe_outbox(name)
 
+    async def observe_recent(self, limit: int) -> tuple[ObjectRecord, ...]:
+        """The hub's own recent traffic, so a live view opens full rather than blank."""
+        return await self._mailbox.observe_recent(limit)
+
     async def observe_object(self, object_id: str) -> ObjectRecord | None:
         return await self._mailbox.observe_object(object_id)
 

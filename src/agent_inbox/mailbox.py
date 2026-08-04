@@ -605,6 +605,22 @@ class Mailbox:
             )
         )
 
+    async def observe_recent(self, limit: int) -> tuple[ObjectRecord, ...]:
+        """The last *limit* messages to cross the hub, oldest first within the window.
+
+        Not per agent: this is the hub's own recent activity, which is what a live view
+        needs in order to open full rather than blank. A view that started empty and
+        filled only from the stream would look broken until somebody sent something, and
+        "looks broken" and "is broken" are the two states this project most wants to
+        keep apart.
+
+        The caller supplies the bound and :mod:`agent_inbox.api` clamps it; nothing here
+        decides policy.
+        """
+        objects = tuple(await self._store.objects())
+        newest = sorted(objects, key=lambda obj: obj.published)[-limit:]
+        return tuple(newest)
+
     async def observe_object(self, object_id: str) -> ObjectRecord | None:
         """One message, whoever it belongs to."""
         return await self._store.get_object(object_id)

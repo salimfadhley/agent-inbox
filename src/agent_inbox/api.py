@@ -143,6 +143,17 @@ PAGE = 50
 #: not a hub doing constant work.
 STREAM_KEEPALIVE_SECONDS = 15.0
 
+#: How much recent activity `/observe/recent` returns when the caller does not say, and
+#: the most it will return however loudly they ask.
+#:
+#: The maximum is the point. "Recent" with no ceiling is a whole-store dump wearing a
+#: small name, and the route is open to any signed-in operator, so the limit belongs to
+#: the hub rather than to whoever remembers to pass one. The default is a screenful:
+#: this exists so a live view opens full instead of blank, not so it can be read as an
+#: archive.
+DEFAULT_RECENT = 50
+MAX_RECENT = 200
+
 
 def _cursor_key(record: Any) -> tuple[str, str]:
     """A message's place in the order a cursor walks: when it was sent, then its id."""
@@ -1239,6 +1250,80 @@ class Api:
         items = await self.house.observe_mailbox(self.wire.name_from(name))
         return self.wire.collection([self.wire.note(m) for m in items])
 
+    async def observe_outbox(self, name: str) -> Collection:
+        """What one agent sent. The other half of :meth:`observe_mailbox`.
+
+        Nothing could answer this before: `/actors/{name}/outbox` is the route an agent
+        *posts* to, and no read of the sent side existed at any layer.
+        """
+        items = await self.house.observe_outbox(self.wire.name_from(name))
+        return self.wire.collection([self.wire.note(m) for m in items])
+
+    async def observe_recent(self, limit: int = DEFAULT_RECENT) -> Collection:
+        """The last few messages to cross the hub, so a live view can start full.
+
+        A page holding the event stream learns about arrivals *from now on*; without
+        this it would open blank and stay blank until somebody happened to send
+        something, which looks broken and is indistinguishable from being broken.
+
+        **The bound is the hub's, not the caller's.** `limit` is clamped to
+        :data:`MAX_RECENT` because an unbounded "recent" is a whole-store dump wearing a
+        small name — and this route is reachable by any signed-in operator, so the cost
+        of one careless query is the hub's to refuse rather than the caller's to
+        remember. A caller wanting history has `/observe/mailbox/{name}`.
+        """
+        wanted = max(1, min(limit, MAX_RECENT))
+        items = await self.house.observe_recent(wanted)
+        return self.wire.collection([self.wire.note(m) for m in items])
+
+    def observe_events(self) -> ServerSentEvent:
+        """Every arrival on the hub, held open. Subjects and senders, never bodies.
+
+        The operator's counterpart to :meth:`events`: that one is *an agent's* mail and
+        needs the agent's own credential, this one is *the hub working* and needs only
+        what every other `/observe/*` route needs. It discloses nothing new — a
+        signed-in
+        operator can already read any mailbox through `/observe/mailbox/{name}` — it
+        shows the same authority as motion rather than as a series of lookups.
+
+        Deliberately the same shape as :meth:`events`, differing only in which
+        subscription it opens. If the two ever need to differ in any other way, that
+        is a change both should get.
+        """
+        listeners = self.house.listeners
+        # Asked before streaming, for the reason given in full on `events`: a refusal
+        # decided inside the generator can only close an already-started stream, which a
+        # client cannot tell apart from a network fault.
+        if listeners.at_capacity():
+            raise HTTPException(status_code=503, detail=listeners.full_message())
+
+        async def stream() -> AsyncIterator[ServerSentEventMessage]:
+            # Registered *inside* the generator. See `events` for why: registering
+            # beside the capacity check above reads better, and permanently leaks a
+            # slot whenever the response is never iterated.
+            try:
+                queue = listeners.open_everything()
+            except TooManyListeners:
+                return
+            try:
+                while True:
+                    try:
+                        arrival = await asyncio.wait_for(
+                            queue.get(), timeout=STREAM_KEEPALIVE_SECONDS
+                        )
+                    except TimeoutError:
+                        yield ServerSentEventMessage(comment="keep-alive")
+                        continue
+                    yield ServerSentEventMessage(
+                        event="mail",
+                        id=arrival.id,
+                        data=json.dumps(arrival.as_event()),
+                    )
+            finally:
+                listeners.close_everything(queue)
+
+        return ServerSentEvent(stream())
+
     async def observe_object(self, object_id: str) -> dict[str, Any]:
         got = await self.house.observe_object(self.wire.object_id_from(object_id))
         if got is None:
@@ -2077,6 +2162,21 @@ def build_api(
     async def observe_mailbox(name: str) -> Collection:
         return await api.observe_mailbox(name)
 
+    @get("/observe/outbox/{name:str}", guards=[guard_enforce])
+    async def observe_outbox(name: str) -> Collection:
+        return await api.observe_outbox(name)
+
+    @get("/observe/recent", guards=[guard_enforce])
+    async def observe_recent(limit: int = DEFAULT_RECENT) -> Collection:
+        return await api.observe_recent(limit)
+
+    @get("/observe/events", guards=[guard_enforce])
+    async def observe_events() -> ServerSentEvent:
+        # Takes no caller, like every other `/observe/*` route: this is the hub working,
+        # not one agent's mail. `/actors/{name}/events` is the per-agent stream and
+        # keeps requiring that agent's own credential.
+        return api.observe_events()
+
     @get("/observe/objects/{object_id:str}", guards=[guard_enforce])
     async def observe_object(object_id: str) -> dict[str, Any]:
         return await api.observe_object(object_id)
@@ -2330,6 +2430,9 @@ def build_api(
         view_object,
         observe_stats,
         observe_mailbox,
+        observe_outbox,
+        observe_recent,
+        observe_events,
         observe_object,
         observe_thread,
         read_object,

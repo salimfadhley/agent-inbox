@@ -96,11 +96,11 @@ and received three yields exactly the two.
 **Dependencies**: WP01, WP02. **Independent test**: each route refuses without a
 credential under enforce, and none of them changes an unread count.
 
-- [ ] T009 `GET /observe/events` — hub-wide SSE, registered inside the generator (WP03)
-- [ ] T010 `GET /observe/recent` — snapshot, bounded at the API (WP03)
-- [ ] T011 `GET /observe/outbox/{name}` (WP03)
-- [ ] T012 Route registration, keep-alives, capacity refusal (WP03)
-- [ ] T013 Tests: guards, consumes-nothing, the bound is the API's, unknown events (WP03)
+- [x] T009 `GET /observe/events` — hub-wide SSE, registered inside the generator (WP03)
+- [x] T010 `GET /observe/recent` — snapshot, bounded at the API (WP03)
+- [x] T011 `GET /observe/outbox/{name}` (WP03)
+- [x] T012 Route registration, keep-alives, capacity refusal (WP03)
+- [x] T013 Tests: guards, consumes-nothing, the bound is the API's, unknown events (WP03)
 
 **Risks**: the register-inside-the-generator fix at `api.py:989` leaked a listener slot
 when it was written the other way round. Copy the current shape, not the older one.
@@ -111,10 +111,10 @@ when it was written the other way round. Copy the current shape, not the older o
 core. **Dependencies**: WP03. **Independent test**: each reader round-trips against a
 test hub.
 
-- [ ] T014 `HubClient.observe_recent()` (WP04)
-- [ ] T015 `HubClient.observe_outbox(name)` (WP04)
-- [ ] T016 Hub-wide events URL, reusing the existing stream headers (WP04)
-- [ ] T017 Client tests (WP04)
+- [x] T014 `HubClient.observe_recent()` (WP04)
+- [x] T015 `HubClient.observe_outbox(name)` (WP04)
+- [x] T016 Hub-wide events URL, reusing the existing stream headers (WP04)
+- [x] T017 Client tests (WP04)
 
 **► Ship 1 releases and deploys here, before WP05 starts.**
 
