@@ -129,11 +129,11 @@ subscribers, with its connection state exposed rather than inferred.
 **Dependencies**: WP04. **Independent test**: ten subscribers, one upstream connection;
 kill it and every subscriber learns.
 
-- [ ] T018 One held upstream SSE connection (WP05)
-- [ ] T019 Fan-out to console subscribers (WP05)
-- [ ] T020 The three-state machine: open / reconnecting / lost (WP05)
-- [ ] T021 Reconnect with backoff (WP05)
-- [ ] T022 Tests on a driven fake stream — no socket, no wall clock (WP05)
+- [x] T018 One held upstream SSE connection (WP05)
+- [x] T019 Fan-out to console subscribers (WP05)
+- [x] T020 The three-state machine: open / reconnecting / lost (WP05)
+- [x] T021 Reconnect with backoff (WP05)
+- [x] T022 Tests on a driven fake stream — no socket, no wall clock (WP05)
 
 **Risks**: this is where FR-016 is either honoured or quietly lost. State must be
 published, never deduced from quiet.
