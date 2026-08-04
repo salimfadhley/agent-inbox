@@ -160,13 +160,13 @@ reduced-motion user cannot escape.
 agent link repointed. **Dependencies**: WP05, WP06. **Independent test**: every link that
 worked before still works, and an agent with no profile renders as *nothing declared*.
 
-- [ ] T029 `/events` on the console origin, fed by the relay (WP07)
-- [ ] T030 `/realtime` (WP07)
-- [ ] T031 `/agent/{name}` — identity and the two panels (WP07)
-- [ ] T032 Which token admitted this agent, from `auth_token_use` (WP07)
-- [ ] T033 Both directions on one feed, direction computed per viewer (WP07)
-- [ ] T034 Repoint `_mbox_link`; keep `/mailbox/{name}` and link to it (WP07)
-- [ ] T035 Tests against the rendered page, plus the nothing-declared case (WP07)
+- [x] T029 `/events` on the console origin, fed by the relay (WP07)
+- [x] T030 `/realtime` (WP07)
+- [x] T031 `/agent/{name}` — identity and the two panels (WP07)
+- [x] T032 Which token admitted this agent, from `auth_token_use` (WP07)
+- [x] T033 Both directions on one feed, direction computed per viewer (WP07)
+- [x] T034 Repoint `_mbox_link`; keep `/mailbox/{name}` and link to it (WP07)
+- [x] T035 Tests against the rendered page, plus the nothing-declared case (WP07)
 
 **Risks**: assert against the **rendered page**, not a helper. A console test that
 exercised a helper could not tell a working guard from a missing call, and that has

@@ -21,10 +21,12 @@ Deliberately plain. An operator wants to see what is happening at a glance; a st
 and a handful of tables do that, and there is nothing to build or install.
 """
 
+import asyncio
 import html
 import json
 import os
 import re
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -34,7 +36,8 @@ from litestar.datastructures import Cookie
 from litestar.enums import RequestEncodingType
 from litestar.exceptions import NotFoundException
 from litestar.params import Body
-from litestar.response import Redirect, Response
+from litestar.response import Redirect, Response, ServerSentEvent
+from litestar.response.sse import ServerSentEventMessage
 
 from agent_inbox import __version__
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING
@@ -42,6 +45,7 @@ from agent_inbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_inbox.exceptions import MailboxError
 from agent_inbox.peers import identify
 from agent_inbox.prompts import bootstrap, onboarding, role_note
+from agent_inbox.relay import Relay
 
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
 #: three POST handlers from each repeating the annotation.
@@ -157,6 +161,35 @@ button:hover { border-color: currentColor; }
 .msg .h { font-size: .82rem; opacity: .7; margin-bottom: .4rem; }
 .msg .b { white-space: pre-wrap; }
 .mine { border-left: 3px solid var(--accent); }
+/* The two panels on an agent's page. The dashed edge and the muted label are the
+   only thing standing between "this agent runs on that host" and "this agent says
+   so" — nothing in a profile is verified, and one flat list would let hearsay
+   borrow the credibility of record. */
+.panel { border: 1px solid var(--line); border-radius: 6px; margin: 1rem 0;
+         overflow: hidden; }
+.panel.claimed { border-style: dashed; }
+.panel header { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap;
+                padding: .5rem .9rem; border-bottom: 1px solid var(--line); }
+.panel-title { font-weight: 600; font-size: .85rem; }
+.panel-note { margin-left: auto; font-size: .66rem; letter-spacing: .08em;
+              text-transform: uppercase; opacity: .65; }
+.panel.claimed .panel-note { opacity: 1; color: #A8710F; }
+@media (prefers-color-scheme: dark) { .panel.claimed .panel-note { color: #DFAA46; } }
+.panel dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; }
+.panel dt { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+            opacity: .6; padding: .5rem .9rem; border-bottom: 1px solid var(--line); }
+.panel dd { margin: 0; padding: .5rem .9rem; font-size: .9rem;
+            border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.panel dl > :nth-last-child(-n+2) { border-bottom: 0; }
+.panel p { margin: 0; padding: .75rem .9rem; }
+/* Direction in words, beside the colour and never instead of it. */
+.dir { font-size: .64rem; letter-spacing: .08em; text-transform: uppercase;
+       opacity: .7; margin-right: .35rem; }
+.dir.in { color: #2F6F9E; }
+.dir.out { color: #A8710F; }
+@media (prefers-color-scheme: dark) {
+  .dir.in { color: #74B4E6; } .dir.out { color: #DFAA46; }
+}
 """
 
 
@@ -211,6 +244,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
 
     nav = (
         link("/", "Overview")
+        + link("/realtime", "Realtime")
         + link("/agents", "Agents")
         + link("/graph", "Graph")
         + link("/tokens", "Tokens")
@@ -226,6 +260,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="application-name" content="{APP_NAME}">
 <link rel="icon" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/feed.css">
 <title>{html.escape(title)} — {APP_NAME} ({name})</title>
 <style>{STYLE}</style></head>
 <body>
@@ -236,6 +271,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
 {body}
 {_footer(hub)}
 <script src="/static/console.js" defer></script>
+<script src="/static/feed.js" defer></script>
 </body></html>"""
 
 
@@ -278,9 +314,113 @@ def _leaf(value: Any) -> str:
 
 
 def _mbox_link(name: Any) -> str:
-    """A link to an agent's mailbox, rendered as code. Used all over the tables."""
+    """A link to an agent's own page, rendered as code. Used all over the tables.
+
+    Points at `/agent/{name}` rather than `/mailbox/{name}`: a name should lead to the
+    agent, not to one view of its mail. The mailbox is still served and is linked from
+    that page — deleting it would break every bookmark and every link already written
+    down, for no gain (issue #51, absorbing #22).
+
+    Still called `_mbox_link` because every caller in every table uses it, and renaming
+    it would be a diff across the whole file for no change in behaviour.
+    """
     safe = html.escape(str(name or ""))
-    return f'<a href="/mailbox/{safe}"><code>{safe}</code></a>'
+    return f'<a href="/agent/{safe}"><code>{safe}</code></a>'
+
+
+def _panel(
+    title: str,
+    note: str,
+    facts: list[tuple[str, str]],
+    *,
+    empty: str = "",
+    claimed_panel: bool = False,
+) -> str:
+    """One block of facts, labelled with where they came from.
+
+    The `claimed` variant is drawn differently on purpose. Nothing in a profile is
+    verified — the hub stores what an agent says and checks none of it — so putting a
+    self-declared hostname beside a recorded join date, in one undifferentiated list,
+    would let hearsay borrow the credibility of record.
+    """
+    kind = " claimed" if claimed_panel else ""
+    rows = "".join(
+        f"<dt>{html.escape(label)}</dt><dd>{value}</dd>" for label, value in facts
+    )
+    inner = f"<dl>{rows}</dl>" if facts else f'<p class="dim">{html.escape(empty)}</p>'
+    return (
+        f'<section class="panel{kind}">'
+        f'<header><span class="panel-title">{html.escape(title)}</span>'
+        f'<span class="panel-note">{html.escape(note)}</span></header>'
+        f"{inner}</section>"
+    )
+
+
+def _claim_value(value: Any) -> str:
+    """A profile value as text. Lists are joined; nothing is trusted as markup."""
+    if isinstance(value, list):
+        return ", ".join(html.escape(str(item)) for item in value)
+    if isinstance(value, dict):
+        return html.escape(json.dumps(value, sort_keys=True))
+    return html.escape(str(value))
+
+
+def _last_seen_phrase(info: dict[str, Any]) -> str:
+    """When the hub last heard from an agent — and that this is not liveness.
+
+    There is no heartbeat. The console has said so beside the freshness dot since it
+    was written, and a page that puts a timestamp under a heading like "status" is
+    exactly where somebody would start reading it as "online".
+    """
+    last = str(info.get("lastSeen") or "")
+    if not last:
+        return '<span class="dim">never</span>'
+    return (
+        f"{html.escape(_shortdate(last))} "
+        '<span class="dim">— recency, not presence</span>'
+    )
+
+
+def _listening_count(looking: HubClient, name: str) -> int:
+    """Whether this agent is holding a stream, per `/observe/stats`.
+
+    The one honest liveness signal there is: a held connection is a fact the hub
+    observes. Best-effort — a hub that will not answer leaves the page saying "no",
+    which understates rather than overstates.
+    """
+    try:
+        return int((looking.survey().get("listeningBy") or {}).get(name, 0))
+    except ClientError, ValueError, TypeError, AttributeError:
+        return 0
+
+
+def _direction_cell(note: dict[str, Any], subject: str) -> str:
+    """Who *else* was involved, and which way it went — in words as well as colour.
+
+    On an agent's own page the agent is a given, so repeating their name in every row is
+    noise. Received rows name the sender; sent rows name the recipients.
+    """
+    sender = _leaf(note.get("attributedTo"))
+    if sender == subject:
+        to = note.get("to") or []
+        others = ", ".join(_leaf(x) for x in to) if isinstance(to, list) else _leaf(to)
+        return f'<span class="dir out">to</span> {_mbox_link(others or "—")}'
+    return f'<span class="dir in">from</span> {_mbox_link(sender)}'
+
+
+def _newest_first(
+    received: list[dict[str, Any]], sent: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Both directions in one list, newest first, without duplicating a self-send."""
+    seen: set[str] = set()
+    both: list[dict[str, Any]] = []
+    for note in [*received, *sent]:
+        key = str(note.get("id") or "")
+        if key and key in seen:
+            continue
+        seen.add(key)
+        both.append(note)
+    return sorted(both, key=lambda n: str(n.get("published") or ""), reverse=True)
 
 
 def _when(note: dict[str, Any]) -> str:
@@ -464,6 +604,11 @@ def _err(
 
 def build_console(client: HubClient) -> Litestar:
     """A window onto one hub: watch anyone, act as yourself."""
+
+    # One relay per console process, however many browsers are watching. Started
+    # lazily on the first `/events` request rather than at import, so building a
+    # console for a test — which the suite does constantly — opens no socket.
+    relay = Relay(client)
 
     def _signed_in(request: Request) -> bool:
         """Does this browser carry a session at all? Not whether it is a valid one —
@@ -727,6 +872,196 @@ def build_console(client: HubClient) -> Litestar:
             + _table(["Subject", "From", "When"], rows, "Nothing has been sent here.")
         )
         return Response(_page(f"{name}", body, hub, ""), media_type=MediaType.HTML)
+
+    def _feed(subject: str = "", *, pills: bool = False) -> str:
+        """The live feed's markup. One component, mounted by both pages.
+
+        `data-subject` is how direction is decided: the script compares each event's
+        sender against it. The hub-wide tab passes nothing and every row renders plain,
+        because on a hub-wide view there is no "us" for a message to be to or from.
+
+        The head row is rendered `reconnecting` and says so. It is **not** rendered
+        optimistically as `open`: until the relay has actually said otherwise, "we are
+        connected" would be a guess, and a page that opens by guessing right is a page
+        that will one day open by guessing wrong.
+        """
+        filters = (
+            '<div class="feed-pills" role="group" aria-label="Filter by direction">'
+            '<button type="button" data-f="all" aria-pressed="true">All</button>'
+            '<button type="button" class="in" data-f="in" aria-pressed="false">'
+            "Received</button>"
+            '<button type="button" class="out" data-f="out" aria-pressed="false">'
+            "Sent</button></div>"
+            if pills
+            else ""
+        )
+        return (
+            f'<div class="feed" data-live data-state="reconnecting" '
+            f'data-subject="{html.escape(subject)}">'
+            '<div class="feed-head">'
+            '<span class="feed-lamp" aria-hidden="true"></span>'
+            '<span class="feed-state">Reconnecting</span>'
+            f"{filters}"
+            '<span class="feed-clock"></span>'
+            "</div>"
+            '<ul class="feed-rows"></ul>'
+            '<p class="feed-empty">Nothing yet. New mail appears here '
+            "as it arrives.</p>"
+            "</div>"
+        )
+
+    @get("/events")
+    async def events(request: Request) -> ServerSentEvent:
+        """The relay's re-emission, on the console's own origin.
+
+        This is what the browser subscribes to, and the reason it never talks to the hub
+        directly: same-origin keeps `connect-src 'self'` standing, and one upstream
+        connection serves however many people are watching.
+
+        Two event names, and they are separate deliberately. `mail` carries the hub's
+        payload verbatim. `line` carries the relay's connection state — which the page
+        renders and never infers, because from a browser a quiet hub and a dead
+        connection are the same silence.
+        """
+        relay.start(asyncio.get_running_loop())
+
+        async def stream() -> AsyncIterator[ServerSentEventMessage]:
+            # Subscribed *inside* the generator, so a response that is never iterated
+            # cannot leave a subscriber behind. The hub's own stream routes carry the
+            # same comment, and for the same reason: the `finally` of a generator that
+            # never started does not run.
+            with relay.subscribe() as queue:
+                while True:
+                    try:
+                        update = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except TimeoutError:
+                        yield ServerSentEventMessage(comment="keep-alive")
+                        continue
+                    if update.kind == "mail":
+                        yield ServerSentEventMessage(event="mail", data=update.data)
+                    elif update.state is not None:
+                        yield ServerSentEventMessage(
+                            event="line", data=str(update.state)
+                        )
+
+        return ServerSentEvent(stream())
+
+    @get("/realtime", media_type=MediaType.HTML, sync_to_thread=True)
+    def realtime(request: Request) -> Response:
+        """The hub working, as it happens.
+
+        Filled server-side from `/observe/recent` before the stream says anything, so
+        the page is useful without JavaScript and does not open blank — a live view that
+        starts empty is indistinguishable from one that is broken, which is the
+        confusion this whole feature exists to remove.
+        """
+        hub = hub_or_none()
+        try:
+            items = seen_by(request).observe_recent().get("items", [])
+        except ClientError as exc:
+            return _err(
+                exc,
+                hub,
+                "Realtime",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
+        rows = [
+            [
+                f'<a href="/message/{html.escape(_leaf(n.get("id")))}">'
+                f"{html.escape(_subject(n))}</a>",
+                _mbox_link(_leaf(n.get("attributedTo"))),
+                _when(n),
+            ]
+            for n in reversed(items)
+        ]
+        body = (
+            "<h2>Realtime</h2>"
+            '<p class="dim">Everything crossing this hub, as it happens. Subjects and '
+            "senders only — never a message body. Looking does not consume.</p>"
+            + _feed()
+            + "<h2>Before you arrived</h2>"
+            + _table(
+                ["Subject", "From", "When"], rows, "Nothing has crossed this hub yet."
+            )
+        )
+        return Response(
+            _page("Realtime", body, hub, "/realtime"), media_type=MediaType.HTML
+        )
+
+    @get("/agent/{name:str}", media_type=MediaType.HTML, sync_to_thread=True)
+    def agent_page(name: str, request: Request) -> Response:
+        """One agent: what the hub knows, what it claims, and its mail both ways.
+
+        **Two panels, because a claim is not a fact.** The hub records an address, a
+        join date and when it last heard from an agent. Everything else — engine, model,
+        host, project, root — is written by the agent about itself and verified by
+        nobody. Rendering the two in one list would quietly promote hearsay to record,
+        which is the failure #22 warned about in the words "a status page that looks
+        authoritative while reporting whatever the agent claimed".
+        """
+        hub = hub_or_none()
+        looking = seen_by(request)
+        try:
+            info = looking.whois(name) or {}
+            received = looking.observe_mailbox(name).get("items", [])
+            sent = looking.observe_outbox(name).get("items", [])
+        except ClientError as exc:
+            return _err(
+                exc, hub, name, api=client.config.base, signed_in=_signed_in(request)
+            )
+        if not info:
+            raise NotFoundException(f"no such agent: {name}")
+
+        watching = _listening_count(looking, name)
+        observed = [
+            ("Address", f"<code>{html.escape(name)}</code>"),
+            ("Last seen", _last_seen_phrase(info)),
+            ("Holding a stream", "yes" if watching else "no"),
+            ("Received", str(len(received))),
+            ("Sent", str(len(sent))),
+        ]
+        profile = info.get("profile") or {}
+        claimed = [
+            (key.replace("_", " ").title(), _claim_value(value))
+            for key, value in sorted(profile.items())
+            if str(value or "").strip() or isinstance(value, list | dict)
+        ]
+
+        rows = [
+            [
+                f'<a href="/message/{html.escape(_leaf(n.get("id")))}">'
+                f"{html.escape(_subject(n))}</a>",
+                _direction_cell(n, name),
+                _when(n),
+            ]
+            for n in _newest_first(received, sent)
+        ]
+
+        summary = html.escape(str(info.get("summary") or ""))
+        body = (
+            f"<h2><code>{html.escape(name)}</code></h2>"
+            + (f'<p class="dim">{summary}</p>' if summary else "")
+            + _panel("Known to the hub", "Recorded by the hub itself", observed)
+            + _panel(
+                "Says of itself",
+                "Self-declared, unverified",
+                claimed,
+                empty="Nothing declared. Most agents never write a profile, "
+                "and that is not a fault.",
+                claimed_panel=True,
+            )
+            + "<h2>Mail, both directions</h2>"
+            + '<p class="dim">Blue is received, amber is sent — and every row says '
+            "<code>from</code> or <code>to</code> in words, so the direction reads "
+            "without the colour.</p>"
+            + _feed(subject=name, pills=True)
+            + _table(["Subject", "Direction", "When"], rows, "No mail either way.")
+            + f'<p class="foot">Received mail on its own is at '
+            f'<a href="/mailbox/{html.escape(name)}">/mailbox/{html.escape(name)}</a>.'
+            "</p>"
+        )
+        return Response(_page(name, body, hub, ""), media_type=MediaType.HTML)
 
     @get("/message/{object_id:str}", media_type=MediaType.HTML, sync_to_thread=True)
     def message(object_id: str, request: Request) -> Response:
@@ -2139,6 +2474,9 @@ def build_console(client: HubClient) -> Litestar:
             agents,
             graph,
             static_asset,
+            events,
+            realtime,
+            agent_page,
             mailbox,
             message,
             inbox,
