@@ -873,6 +873,41 @@ def build_console(client: HubClient) -> Litestar:
         )
         return Response(_page(f"{name}", body, hub, ""), media_type=MediaType.HTML)
 
+    def _admitted_by(request: Request, name: str) -> str:
+        """Which token let this agent onto the hub, from `auth_token_use`.
+
+        **Observed, not claimed** — the hub writes this row itself on every successful
+        authentication, so it belongs in the first panel. It is the only genuinely new
+        observed fact this page gains.
+
+        Derived rather than newly captured: `/auth/tokens` already reports, per token,
+        which agents it has `admitted`. That is the same table read token-first, and
+        this page wants the other direction, so the answer is a filter rather than a
+        route. #22 recorded this as blocked on the shared-tokens mission; it landed, so
+        it is not.
+
+        Best-effort, and silent when refused. Tokens are an operator action and this
+        page is not: a viewer without that right sees the row omitted rather than an
+        error, because their inability to audit credentials is not a fault in the agent
+        they were looking at.
+        """
+        sid = request.cookies.get(SESSION_COOKIE)
+        try:
+            status, body, _ = client.auth_call("GET", "/auth/tokens", session=sid)
+        except ClientError, MailboxError:
+            return ""
+        if status >= 400 or not isinstance(body, dict):
+            return ""
+        labels = [
+            str(token.get("label") or token.get("id") or "")
+            for token in body.get("items", [])
+            if any(
+                str(use.get("name") or "") == name
+                for use in (token.get("admitted") or [])
+            )
+        ]
+        return ", ".join(html.escape(label) for label in labels if label)
+
     def _feed(subject: str = "", *, pills: bool = False) -> str:
         """The live feed's markup. One component, mounted by both pages.
 
@@ -1021,6 +1056,9 @@ def build_console(client: HubClient) -> Litestar:
             ("Received", str(len(received))),
             ("Sent", str(len(sent))),
         ]
+        admitted = _admitted_by(request, name)
+        if admitted:
+            observed.append(("Admitted by", admitted))
         profile = info.get("profile") or {}
         claimed = [
             (key.replace("_", " ").title(), _claim_value(value))

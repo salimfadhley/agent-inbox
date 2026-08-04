@@ -52,6 +52,8 @@ class StubHub(HubClient):
         self.received = [note("r1", TREVOR, [ROSEMARY], "inbound one", "2026-08-01")]
         self.sent = [note("s1", ROSEMARY, [TREVOR], "outbound one", "2026-08-02")]
         self.known = True
+        self.token_items: list[dict[str, Any]] = []
+        self.token_status = 200
 
     def hub_info(self) -> dict[str, Any]:
         return {
@@ -85,6 +87,11 @@ class StubHub(HubClient):
 
     def survey(self, since: str = "") -> dict[str, Any]:
         return {"listeningBy": {ROSEMARY: 1}, "listeningSessions": 1}
+
+    def auth_call(
+        self, method: str, path: str, *, session: str | None = None, **_: Any
+    ) -> tuple[int, dict[str, Any], Any]:
+        return self.token_status, {"items": list(self.token_items)}, None
 
     def list_agents(self) -> dict[str, Any]:
         return {"items": [{"preferredUsername": ROSEMARY, "profile": {}}]}
@@ -262,3 +269,51 @@ class TestTheAssetsAndTheCsp:
 
         assert "script-src 'self'" in csp
         assert "default-src 'self'" in csp
+
+
+class TestWhichTokenAdmittedIt:
+    """The one genuinely new *observed* fact the page gains.
+
+    Derived from `/auth/tokens`, which already reports per token which agents it has
+    admitted. Same table, read the other way round — #22 recorded this as blocked on the
+    shared-tokens mission, and that mission landed.
+    """
+
+    def test_it_names_the_token_that_admitted_this_agent(self, hub: StubHub) -> None:
+        hub.token_items = [
+            {"id": "t1", "label": "laptop", "admitted": [{"name": ROSEMARY}]},
+            {"id": "t2", "label": "other", "admitted": [{"name": TREVOR}]},
+        ]
+        with TestClient(app=build_console(hub)) as console:
+            text = console.get(f"/agent/{ROSEMARY}").text
+
+        assert "Admitted by" in text
+        assert "laptop" in text
+        # The paired negative: a filter that ignored the name would list both.
+        assert "other" not in text
+
+    def test_it_is_an_observed_fact_not_a_claimed_one(self, hub: StubHub) -> None:
+        """The hub writes this row itself, so it belongs in the first panel."""
+        hub.token_items = [
+            {"id": "t1", "label": "laptop", "admitted": [{"name": ROSEMARY}]}
+        ]
+        with TestClient(app=build_console(hub)) as console:
+            text = console.get(f"/agent/{ROSEMARY}").text
+
+        observed = text.split('class="panel claimed"', 1)[0]
+        assert "laptop" in observed, "an observed fact landed in the claimed panel"
+
+    def test_a_viewer_who_may_not_audit_tokens_sees_the_page_anyway(
+        self, hub: StubHub
+    ) -> None:
+        """Tokens are an operator action; this page is not.
+
+        Their inability to audit credentials is not a fault in the agent they were
+        looking at, so the row is omitted rather than the page broken.
+        """
+        hub.token_status = 403
+        with TestClient(app=build_console(hub)) as console:
+            page = console.get(f"/agent/{ROSEMARY}")
+
+        assert page.status_code == 200
+        assert "Admitted by" not in page.text
