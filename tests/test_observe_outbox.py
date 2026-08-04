@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from agent_inbox.mailbox import Mailbox
+from agent_inbox.records import ObjectRecord
 from agent_inbox.sqlite_store import SqliteStore
 from agent_inbox.store import InMemoryStore, MessageStore
 
@@ -121,3 +122,40 @@ async def test_an_agent_that_has_sent_nothing_gets_an_empty_answer(
 async def test_an_unknown_name_is_empty_rather_than_an_error(peopled: Mailbox) -> None:
     """It observes what is stored; it does not adjudicate who exists."""
     assert await peopled.observe_outbox("nobody_here") == ()
+
+
+async def test_a_send_with_no_local_recipient_is_still_visible_to_the_operator(
+    peopled: Mailbox,
+) -> None:
+    """The one genuinely new disclosure this mission adds, pinned as deliberate.
+
+    Found by an outside review, asked whether these routes expose anything
+    `/observe/mailbox/{name}` could not. They do: a message addressed only to a
+    **remote** peer has no local recipient, so it never appeared in anybody's observed
+    mailbox — and it does appear here, in `/observe/recent`, and on the hub-wide stream.
+
+    Kept, for two reasons. `House`'s observation block already states the principle —
+    *"the operator's view, passed through unfiltered on purpose… a rule that could hide
+    traffic from whoever is running the hub would make the audit log unauditable"* — and
+    an agent page that concealed an agent's federated sends would be a page that lies
+    about what that agent sent, which is worse than the disclosure.
+
+    The reader is an operator of the hub the message left *from*, seeing their own hub's
+    outbound traffic. What this test exists to prevent is the claim quietly reverting to
+    "no new disclosure", which the spec said before this was measured.
+    """
+    record = ObjectRecord(
+        id="remote-only",
+        attributed_to=ROSEMARY,
+        to=("someone@elsewhere.invalid",),
+        summary="off to a peer",
+        content="body",
+        published=peopled.now(),
+    )
+    await peopled._store.add_object(record)
+
+    assert [obj.id for obj in await peopled.observe_outbox(ROSEMARY)] == ["remote-only"]
+    # The paired negative: it is genuinely absent from every local mailbox, which is
+    # what makes it a new disclosure rather than one that was already available.
+    for who in (ROSEMARY, TREVOR, YITZHAK):
+        assert record.id not in {obj.id for obj in await peopled.observe_mailbox(who)}

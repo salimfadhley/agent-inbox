@@ -52,9 +52,26 @@ recorded on #46 and #51 and is not reopened here:
 **Not polling.** Ruled out by the owner explicitly. The console holds one upstream
 connection and re-emits; it does not ask repeatedly and call that live.
 
-**Not a new disclosure.** A signed-in operator can already read any mailbox through
-`/observe/mailbox/{name}`. A hub-wide feed shows the same authority as motion rather than
-as a series of separate lookups. This mission adds no reader who could not already read.
+**Almost not a new disclosure — and the exception is recorded rather than glossed.**
+A signed-in operator can already read any mailbox through `/observe/mailbox/{name}`, so
+for locally-delivered mail a hub-wide feed shows the same authority as motion rather than
+as a series of separate lookups.
+
+**One thing is genuinely new**, found by outside review of the implemented routes and
+confirmed by test: a message addressed **only to a remote peer** has no local recipient,
+so it never appeared in any observed mailbox. It appears in `/observe/outbox/{name}`, in
+`/observe/recent`, and on the hub-wide stream.
+
+This is kept deliberately. `House`'s observation block already states the principle —
+*"the operator's view, passed through unfiltered on purpose… a rule that could hide
+traffic from whoever is running the hub would make the audit log unauditable"* — and an
+agent page that concealed an agent's federated sends would be a page that lies about what
+that agent sent, which is worse than the disclosure. The reader is an operator of the hub
+the message left *from*, looking at their own hub's outbound traffic.
+
+The earlier wording here said "adds no reader who could not already read". That was
+asserted rather than measured, and it was wrong; `test_a_send_with_no_local_recipient_is_still_visible_to_the_operator`
+now pins the behaviour so the claim cannot quietly revert.
 
 **Not presence.** There is no heartbeat and this must not grow one by implication.
 `lastSeen` is recency. `listeningBy` from `/observe/stats` is the one honest liveness
