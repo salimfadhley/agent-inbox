@@ -144,12 +144,12 @@ published, never deduced from quiet.
 asset and can be built in parallel with WP05. **Independent test**: fed a scripted event
 sequence, it renders rows, ages them, and reports each connection state.
 
-- [ ] T023 Two-line rows, direction rail, and direction in words (WP06)
-- [ ] T024 The decaying wash, honouring `prefers-reduced-motion` (WP06)
-- [ ] T025 Self-ageing relative times (WP06)
-- [ ] T026 Head-row rendering, driven by state and never by silence (WP06)
-- [ ] T027 Same-origin subscription; unknown event types ignored (WP06)
-- [ ] T028 Filter pills (WP06)
+- [x] T023 Two-line rows, direction rail, and direction in words (WP06)
+- [x] T024 The decaying wash, honouring `prefers-reduced-motion` (WP06)
+- [x] T025 Self-ageing relative times (WP06)
+- [x] T026 Head-row rendering, driven by state and never by silence (WP06)
+- [x] T027 Same-origin subscription; unknown event types ignored (WP06)
+- [x] T028 Filter pills (WP06)
 
 **Risks**: colour must never be the only cue (FR-013); the wash must not become motion a
 reduced-motion user cannot escape.

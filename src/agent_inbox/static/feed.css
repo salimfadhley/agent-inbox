@@ -1,0 +1,204 @@
+/* The live feed: rows that arrive, age, and say when the line is down.
+ *
+ * Mounted twice — the Realtime tab (hub-wide) and an agent's own page (both
+ * directions, filtered). One stylesheet, because building it twice is how the two
+ * drift apart.
+ *
+ * Two rules here are requirements rather than taste:
+ *
+ *   1. Colour is never the only cue. Every row carries `from` or `to` in words as
+ *      well as a coloured rail, so direction reads without the hue. The pair is
+ *      blue/amber rather than a ledger's red/green because it survives the common
+ *      colour-vision deficiencies.
+ *
+ *   2. The head row shows what the relay published and never what the page guessed.
+ *      A quiet hub and a dead connection are both silence; only the relay knows
+ *      which is which.
+ */
+
+.feed {
+  --in:  #2F6F9E;
+  --out: #A8710F;
+  --live: #3E7C39;
+  --warn: #A8710F;
+  --lost: #A33F2A;
+  --band: color-mix(in srgb, currentColor 5%, transparent);
+  --hair: color-mix(in srgb, currentColor 12%, transparent);
+  --in-wash:  color-mix(in srgb, var(--in) 11%, transparent);
+  --out-wash: color-mix(in srgb, var(--out) 12%, transparent);
+
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 1rem 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .feed {
+    --in: #74B4E6;
+    --out: #DFAA46;
+    --live: #63B85A;
+    --warn: #DFAA46;
+    --lost: #E0725C;
+    --in-wash:  color-mix(in srgb, var(--in) 14%, transparent);
+    --out-wash: color-mix(in srgb, var(--out) 13%, transparent);
+  }
+}
+
+/* ---- the head row: the line itself ---------------------------------- */
+
+.feed-head {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+  padding: .5rem .9rem;
+  background: var(--band);
+  border-bottom: 1px solid var(--line);
+}
+
+.feed-lamp {
+  width: .45rem;
+  height: .45rem;
+  border-radius: 50%;
+  flex: none;
+  background: var(--live);
+  animation: feed-breathe 2.8s ease-in-out infinite;
+}
+
+.feed-state {
+  font: 500 .7rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+}
+
+/* Each state is a distinct, named look. `reconnecting` is not a quieter `open`
+   and `lost` is not a quieter `reconnecting`: an operator must be able to tell
+   them apart across a room, because that is when it matters. */
+.feed[data-state="reconnecting"] .feed-lamp { background: var(--warn); }
+.feed[data-state="reconnecting"] .feed-state { color: var(--warn); }
+.feed[data-state="lost"] .feed-lamp { background: var(--lost); animation: none; }
+.feed[data-state="lost"] .feed-state { color: var(--lost); }
+.feed[data-state="lost"] .feed-head { background: color-mix(in srgb, var(--lost) 10%, transparent); }
+
+.feed-clock {
+  margin-left: auto;
+  font: 500 .7rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes feed-breathe { 50% { opacity: .25; } }
+
+/* ---- filter pills ---------------------------------------------------- */
+
+.feed-pills { display: flex; gap: .3rem; }
+
+.feed-pills button {
+  font: 500 .72rem/1 inherit;
+  padding: .34rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+  cursor: pointer;
+}
+
+.feed-pills button[aria-pressed="true"] { color: inherit; border-color: currentColor; }
+.feed-pills button.in[aria-pressed="true"] { color: var(--in); }
+.feed-pills button.out[aria-pressed="true"] { color: var(--out); }
+.feed-pills button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- rows ------------------------------------------------------------ */
+
+.feed-rows { list-style: none; margin: 0; padding: 0; }
+
+.feed-row {
+  display: grid;
+  grid-template-columns: 3px 1fr;
+  gap: .75rem;
+  padding: 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.feed-row:last-child { border-bottom: 0; }
+
+/* The rail. Direction at the row's edge, legible before a word is read — and
+   never the only thing carrying it (see .feed-who). */
+.feed-rail { background: color-mix(in srgb, currentColor 20%, transparent); }
+.feed-row.in  .feed-rail { background: var(--in); }
+.feed-row.out .feed-rail { background: var(--out); }
+
+.feed-body { padding: .55rem .9rem .6rem 0; min-width: 0; }
+
+/* Two lines, which is why long subjects stopped being truncated. */
+.feed-meta {
+  display: flex;
+  gap: .5rem;
+  align-items: baseline;
+  font: 500 .72rem/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.feed-dir {
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .64rem;
+  color: color-mix(in srgb, currentColor 50%, transparent);
+}
+.feed-row.in  .feed-dir { color: var(--in); }
+.feed-row.out .feed-dir { color: var(--out); }
+
+.feed-who { font-weight: 600; }
+
+.feed-when {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  white-space: nowrap;
+}
+
+.feed-subject {
+  margin: .15rem 0 0;
+  font-size: .92rem;
+  overflow-wrap: anywhere;
+}
+
+.feed-subject.none { color: color-mix(in srgb, currentColor 45%, transparent); font-style: italic; }
+
+/* ---- arrival ---------------------------------------------------------- */
+
+.feed-row.fresh { animation: feed-wash 2.4s ease-out; }
+.feed-row.fresh.in  { animation-name: feed-wash-in; }
+.feed-row.fresh.out { animation-name: feed-wash-out; }
+
+@keyframes feed-wash-in {
+  0%   { background: var(--in-wash);  transform: translateY(-.45rem); }
+  16%  { transform: none; }
+  100% { background: transparent; }
+}
+@keyframes feed-wash-out {
+  0%   { background: var(--out-wash); transform: translateY(-.45rem); }
+  16%  { transform: none; }
+  100% { background: transparent; }
+}
+@keyframes feed-wash {
+  0%   { background: var(--band); transform: translateY(-.45rem); }
+  16%  { transform: none; }
+  100% { background: transparent; }
+}
+
+/* A new row must still announce itself to somebody who cannot have motion. The
+   weight is the console's existing vocabulary for "unread", so this borrows a
+   meaning readers already have rather than inventing one. */
+@media (prefers-reduced-motion: reduce) {
+  .feed-row.fresh { animation: none; }
+  .feed-row.fresh .feed-subject { font-weight: 600; }
+  .feed-lamp { animation: none; }
+}
+
+.feed-empty {
+  padding: 1.25rem .9rem;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-size: .9rem;
+}

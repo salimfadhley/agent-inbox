@@ -1364,6 +1364,8 @@ def build_console(client: HubClient) -> Litestar:
         allowed = {
             "vis-network.min.js": "application/javascript",
             "console.js": "application/javascript",
+            "feed.js": "application/javascript",
+            "feed.css": "text/css",
             "icon.svg": "image/svg+xml",
         }
         media = allowed.get(name)
