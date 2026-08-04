@@ -369,6 +369,31 @@ def _seed_row(note: dict[str, Any], subject: str) -> str:
     )
 
 
+def _who(name: Any, projects: dict[str, str]) -> str:
+    """An agent, and the work it is doing — for the overview's flow table.
+
+    A flow of bare names answers *who is busy* and not *which piece of work is busy*,
+    which is the question an operator with several projects on one hub actually has
+    (issue #18). The Agents table directly below already carries a Project column, so
+    the overview used to show the same agents twice, once with the useful context and
+    once without.
+
+    The project is **self-declared**, like everything else in a profile, and most agents
+    have never set one. A missing project renders as nothing at all rather than as a
+    placeholder: a column of "—" would add width and say less than blank space does.
+    """
+    safe = str(name or "")
+    project = projects.get(safe, "")
+    link = _mbox_link(safe)
+    if not project:
+        return link
+    shown = (project[:22] + "…") if len(project) > 22 else project
+    return (
+        f'{link} <span class="dim" title="{html.escape(project)}">'
+        f"{html.escape(shown)}</span>"
+    )
+
+
 def _panel(
     title: str,
     note: str,
@@ -766,8 +791,16 @@ def build_console(client: HubClient) -> Litestar:
             else ""
         )
 
+        # The project each name belongs to, from the roster this page already fetched
+        # for the table below — so naming the work costs no extra call.
+        projects = {
+            str(a.get("preferredUsername") or ""): str(
+                (a.get("profile") or {}).get("project") or ""
+            ).strip()
+            for a in actors
+        }
         flow_rows = [
-            [_mbox_link(frm), _mbox_link(to), str(count)]
+            [_who(frm, projects), _who(to, projects), str(count)]
             for frm, to, count in list(stats.get("flow", []))[:10]
         ]
         flow = "<h2>Who is talking to whom</h2>" + _table(

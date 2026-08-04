@@ -86,7 +86,12 @@ class StubHub(HubClient):
         return {"items": [*self.received, *self.sent]}
 
     def survey(self, since: str = "") -> dict[str, Any]:
-        return {"listeningBy": {ROSEMARY: 1}, "listeningSessions": 1}
+        return {
+            "listeningBy": {ROSEMARY: 1},
+            "listeningSessions": 1,
+            "flow": [[ROSEMARY, TREVOR, 3]],
+            "actors": 2,
+        }
 
     def auth_call(
         self, method: str, path: str, *, session: str | None = None, **_: Any
@@ -94,7 +99,15 @@ class StubHub(HubClient):
         return self.token_status, {"items": list(self.token_items)}, None
 
     def list_agents(self) -> dict[str, Any]:
-        return {"items": [{"preferredUsername": ROSEMARY, "profile": {}}]}
+        return {
+            "items": [
+                {"preferredUsername": ROSEMARY, "profile": {"project": "billing"}},
+                {"preferredUsername": TREVOR, "profile": {}},
+            ]
+        }
+
+    def survey_flow(self) -> list[tuple[str, str, int]]:
+        return [(ROSEMARY, TREVOR, 3)]
 
 
 @pytest.fixture
@@ -379,3 +392,43 @@ class TestWhichTokenAdmittedIt:
 
         assert page.status_code == 200
         assert "Admitted by" not in page.text
+
+
+def _flow_table(html_text: str) -> str:
+    """Just the flow table.
+
+    Scoped to the one table on purpose. The first version of these tests split on the
+    heading and kept everything after it — which includes the Agents table below, and
+    that table already carries a Project column. So "billing" was always present and the
+    assertions passed with the feature removed. Caught by running the removal proof and
+    getting no failures at all.
+    """
+    after = html_text.split("Who is talking to whom", 1)[1]
+    return after.split("<h2>", 1)[0]
+
+
+class TestTheFlowTableNamesTheWork:
+    """Issue #18. A flow of bare names says who is busy, not which work is busy."""
+
+    def test_it_shows_the_project_beside_the_name(self, console: TestClient) -> None:
+        flow = _flow_table(console.get("/").text)
+
+        assert "billing" in flow, "the flow table does not name the work"
+
+    def test_an_agent_with_no_project_renders_no_placeholder(
+        self, console: TestClient
+    ) -> None:
+        """Most agents have never set one. A column of dashes adds width and says less
+        than blank space does — the paired negative for the test above."""
+        flow = _flow_table(console.get("/").text)
+        row = flow.split(TREVOR, 1)[1][:120]
+
+        assert "—" not in row
+
+    def test_it_costs_no_extra_hub_call(self, console: TestClient) -> None:
+        """The roster is already fetched for the Agents table below; naming the work
+        must reuse it rather than asking again per row."""
+        text = console.get("/").text
+
+        assert "billing" in _flow_table(text)
+        assert text.count("Who is talking to whom") == 1
