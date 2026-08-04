@@ -177,12 +177,31 @@ class TestTheAgentPage:
         assert "inbound one" in text
         assert "outbound one" in text
 
-    def test_direction_is_written_in_words(self, console: TestClient) -> None:
-        """FR-013. Colour is never the only cue."""
-        text = console.get(f"/agent/{ROSEMARY}").text
+    def test_the_mail_is_in_the_feed_not_a_second_table(
+        self, console: TestClient
+    ) -> None:
+        feed = console.get(f"/agent/{ROSEMARY}").text.split('class="feed-rows"', 1)[1]
 
-        assert '<span class="dir out">to</span>' in text
-        assert '<span class="dir in">from</span>' in text
+        assert "inbound one" in feed
+        assert "outbound one" in feed
+
+    def test_a_seeded_row_carries_its_direction(self, console: TestClient) -> None:
+        """Direction is decided per viewer server-side too, not only in the script."""
+        feed = console.get(f"/agent/{ROSEMARY}").text.split('class="feed-rows"', 1)[1]
+
+        assert 'data-dir="in"' in feed
+        assert 'data-dir="out"' in feed
+
+    def test_direction_is_written_in_words(self, console: TestClient) -> None:
+        """FR-013. Colour is never the only cue.
+
+        Asserted on the feed rows, which is where direction now lives — the separate
+        table that used to carry it is gone.
+        """
+        feed = console.get(f"/agent/{ROSEMARY}").text.split('class="feed-rows"', 1)[1]
+
+        assert '<span class="feed-dir">to</span>' in feed
+        assert '<span class="feed-dir">from</span>' in feed
 
     def test_the_feed_is_told_whose_page_this_is(self, console: TestClient) -> None:
         """Direction is per viewer, so the page has to say who the viewer is."""
@@ -214,6 +233,49 @@ class TestTheRealtimeTab:
 
         assert "inbound one" in text
         assert "outbound one" in text
+
+    def test_the_recent_mail_is_in_the_feed_itself(self, console: TestClient) -> None:
+        """One list, not two.
+
+        There used to be a separate "Before you arrived" table beneath the live feed.
+        Two lists of the same thing — one live, one not — made a reader hold two ideas
+        where one would do, and the static half was the one that looked authoritative
+        while being the one that had stopped updating.
+        """
+        text = console.get("/realtime").text
+        feed = text.split('class="feed-rows"', 1)[1]
+
+        assert "inbound one" in feed, "recent mail is not inside the live feed"
+        assert "Before you arrived" not in text
+
+    def test_a_seeded_row_matches_the_shape_the_script_builds(
+        self, console: TestClient
+    ) -> None:
+        """Server-rendered and live rows land on one list and must look alike.
+
+        If the two drift, the same page shows two kinds of row and the difference reads
+        as a bug in whichever half the reader trusts less.
+        """
+        feed = console.get("/realtime").text.split('class="feed-rows"', 1)[1]
+
+        for part in (
+            "feed-row",
+            "feed-rail",
+            "feed-body",
+            "feed-meta",
+            "feed-who",
+            "feed-when",
+            "feed-subject",
+        ):
+            assert part in feed, f"a seeded row is missing {part}"
+
+    def test_the_empty_notice_is_hidden_when_there_is_mail(
+        self, console: TestClient
+    ) -> None:
+        """The paired positive for the seeding: "nothing yet" beside rows is a lie."""
+        text = console.get("/realtime").text
+
+        assert 'class="feed-empty" hidden' in text or "feed-empty hidden" in text
 
     def test_it_carries_no_subject_so_rows_render_plain(
         self, console: TestClient

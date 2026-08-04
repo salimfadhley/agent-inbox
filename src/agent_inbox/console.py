@@ -328,6 +328,47 @@ def _mbox_link(name: Any) -> str:
     return f'<a href="/agent/{safe}"><code>{safe}</code></a>'
 
 
+def _seed_row(note: dict[str, Any], subject: str) -> str:
+    """One already-arrived message, in the same shape the live script builds.
+
+    Server-rendered so the feed opens full rather than blank, and so both pages work
+    with JavaScript switched off entirely. The markup must stay in step with
+    `static/feed.js` — if the two drift, seeded rows and live rows will look different
+    on the same list, which reads as a bug in whichever half the reader trusts less.
+
+    Direction is decided here for the same reason the script decides it there: it is a
+    property of the viewer, not of the message.
+    """
+    sender = _leaf(note.get("attributedTo"))
+    direction = ""
+    other = sender
+    if subject:
+        if sender == subject:
+            direction = "out"
+            to = note.get("to") or []
+            other = (
+                ", ".join(_leaf(x) for x in to) if isinstance(to, list) else _leaf(to)
+            )
+        else:
+            direction = "in"
+    word = {"in": "from", "out": "to"}.get(direction, "")
+    when = str(note.get("published") or "")
+    oid = _leaf(note.get("id"))
+    subject_text = _subject(note)
+    return (
+        f'<li class="feed-row{" " + direction if direction else ""}" '
+        f'data-dir="{direction or "none"}">'
+        '<span class="feed-rail" aria-hidden="true"></span>'
+        '<div class="feed-body"><div class="feed-meta">'
+        + (f'<span class="feed-dir">{word}</span>' if word else "")
+        + f'<span class="feed-who">{html.escape(other or "—")}</span>'
+        f'<span class="feed-when" title="{html.escape(when)}">'
+        f"{html.escape(_shortdate(when))}</span></div>"
+        f'<p class="feed-subject"><a href="/message/{html.escape(oid)}">'
+        f"{html.escape(subject_text)}</a></p></div></li>"
+    )
+
+
 def _panel(
     title: str,
     note: str,
@@ -392,20 +433,6 @@ def _listening_count(looking: HubClient, name: str) -> int:
         return int((looking.survey().get("listeningBy") or {}).get(name, 0))
     except ClientError, ValueError, TypeError, AttributeError:
         return 0
-
-
-def _direction_cell(note: dict[str, Any], subject: str) -> str:
-    """Who *else* was involved, and which way it went — in words as well as colour.
-
-    On an agent's own page the agent is a given, so repeating their name in every row is
-    noise. Received rows name the sender; sent rows name the recipients.
-    """
-    sender = _leaf(note.get("attributedTo"))
-    if sender == subject:
-        to = note.get("to") or []
-        others = ", ".join(_leaf(x) for x in to) if isinstance(to, list) else _leaf(to)
-        return f'<span class="dir out">to</span> {_mbox_link(others or "—")}'
-    return f'<span class="dir in">from</span> {_mbox_link(sender)}'
 
 
 def _newest_first(
@@ -908,18 +935,35 @@ def build_console(client: HubClient) -> Litestar:
         ]
         return ", ".join(html.escape(label) for label in labels if label)
 
-    def _feed(subject: str = "", *, pills: bool = False) -> str:
+    def _feed(
+        subject: str = "",
+        *,
+        pills: bool = False,
+        seed: list[dict[str, Any]] | None = None,
+    ) -> str:
         """The live feed's markup. One component, mounted by both pages.
 
         `data-subject` is how direction is decided: the script compares each event's
         sender against it. The hub-wide tab passes nothing and every row renders plain,
         because on a hub-wide view there is no "us" for a message to be to or from.
 
+        **The feed opens already full.** `seed` is rendered server-side into the same
+        rows the script produces, newest first, so a reader sees recent traffic
+        immediately and new mail simply pushes in above it. There is no separate
+        "before you arrived" table: two lists of the same thing, one live and one not,
+        made a reader hold two ideas where one would do — and the static half was the
+        one that looked authoritative while being the one that stopped updating.
+
+        It also means the page is useful with no JavaScript at all, which is the same
+        property the separate table used to provide.
+
         The head row is rendered `reconnecting` and says so. It is **not** rendered
         optimistically as `open`: until the relay has actually said otherwise, "we are
         connected" would be a guess, and a page that opens by guessing right is a page
         that will one day open by guessing wrong.
         """
+        rows = "".join(_seed_row(n, subject) for n in reversed(seed or []))
+        empty_hidden = " hidden" if rows else ""
         filters = (
             '<div class="feed-pills" role="group" aria-label="Filter by direction">'
             '<button type="button" data-f="all" aria-pressed="true">All</button>'
@@ -939,8 +983,8 @@ def build_console(client: HubClient) -> Litestar:
             f"{filters}"
             '<span class="feed-clock"></span>'
             "</div>"
-            '<ul class="feed-rows"></ul>'
-            '<p class="feed-empty">Nothing yet. New mail appears here '
+            f'<ul class="feed-rows">{rows}</ul>'
+            f'<p class="feed-empty"{empty_hidden}>Nothing yet. New mail appears here '
             "as it arrives.</p>"
             "</div>"
         )
@@ -1001,24 +1045,11 @@ def build_console(client: HubClient) -> Litestar:
                 api=client.config.base,
                 signed_in=_signed_in(request),
             )
-        rows = [
-            [
-                f'<a href="/message/{html.escape(_leaf(n.get("id")))}">'
-                f"{html.escape(_subject(n))}</a>",
-                _mbox_link(_leaf(n.get("attributedTo"))),
-                _when(n),
-            ]
-            for n in reversed(items)
-        ]
         body = (
             "<h2>Realtime</h2>"
             '<p class="dim">Everything crossing this hub, as it happens. Subjects and '
             "senders only — never a message body. Looking does not consume.</p>"
-            + _feed()
-            + "<h2>Before you arrived</h2>"
-            + _table(
-                ["Subject", "From", "When"], rows, "Nothing has crossed this hub yet."
-            )
+            + _feed(seed=items)
         )
         return Response(
             _page("Realtime", body, hub, "/realtime"), media_type=MediaType.HTML
@@ -1066,16 +1097,6 @@ def build_console(client: HubClient) -> Litestar:
             if str(value or "").strip() or isinstance(value, list | dict)
         ]
 
-        rows = [
-            [
-                f'<a href="/message/{html.escape(_leaf(n.get("id")))}">'
-                f"{html.escape(_subject(n))}</a>",
-                _direction_cell(n, name),
-                _when(n),
-            ]
-            for n in _newest_first(received, sent)
-        ]
-
         summary = html.escape(str(info.get("summary") or ""))
         body = (
             f"<h2><code>{html.escape(name)}</code></h2>"
@@ -1093,8 +1114,11 @@ def build_console(client: HubClient) -> Litestar:
             + '<p class="dim">Blue is received, amber is sent — and every row says '
             "<code>from</code> or <code>to</code> in words, so the direction reads "
             "without the colour.</p>"
-            + _feed(subject=name, pills=True)
-            + _table(["Subject", "Direction", "When"], rows, "No mail either way.")
+            + _feed(
+                subject=name,
+                pills=True,
+                seed=list(reversed(_newest_first(received, sent))),
+            )
             + f'<p class="foot">Received mail on its own is at '
             f'<a href="/mailbox/{html.escape(name)}">/mailbox/{html.escape(name)}</a>.'
             "</p>"
