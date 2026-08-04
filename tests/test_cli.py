@@ -1243,3 +1243,89 @@ class TestHubAndTokenBelongTogether:
         self._at(tmp_path, monkeypatch, machine='token = "machine-token"\n')
         main(["--engine", "claude", "config", "set", "hub", "http://new:8081"])
         assert "belong together" not in capsys.readouterr().err
+
+
+class TestMachineFactsAtJoin:
+    """`join` describes the machine so the roster is not blank. Owner, 2026-08-04.
+
+    Four of fourteen agents on the reference hub had written any profile at all, so a
+    console panel fed purely by self-declaration would be a feature that shows nothing.
+    Auto-filling is what makes it real — and the trimming in `agent_inbox.machine` is
+    what makes it safe. These tests cover the wiring; the disclosure guarantee itself
+    is proved in `tests/test_machine_facts.py`.
+    """
+
+    class _Hub:
+        stored: dict[str, Any] = {}
+        raises: bool = False
+
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def join(self, name: str | None) -> dict[str, Any]:
+            return {"preferredUsername": name or "rosemary_nasrin"}
+
+        def whois(self, name: str) -> dict[str, Any]:
+            return {"preferredUsername": name, "profile": dict(type(self).stored)}
+
+        def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+            if type(self).raises:
+                raise ClientError("the hub said no")
+            type(self).stored = dict(profile)
+            return {"profile": dict(profile)}
+
+    @pytest.fixture(autouse=True)
+    def _hub(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        repo = tmp_path / "Users" / "someone" / "workspace" / "billing"
+        (repo / ".git").mkdir(parents=True)
+        monkeypatch.chdir(repo)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setattr("agent_inbox.cli.HubClient", self._Hub)
+        monkeypatch.setattr("agent_inbox.machine.hostname", lambda: "somebox.invalid")
+        self._Hub.stored = {}
+        self._Hub.raises = False
+        return repo
+
+    def test_joining_records_the_machine(self) -> None:
+        assert main(["join", "rosemary_nasrin", "--hub", "http://hub:8081"]) == 0
+        assert self._Hub.stored == {
+            "host": "somebox.invalid",
+            "root": "workspace/billing",
+        }
+
+    def test_the_recorded_root_is_not_the_path_on_disk(self) -> None:
+        """The wiring must not undo the narrowing the module performs."""
+        main(["join", "rosemary_nasrin", "--hub", "http://hub:8081"])
+        assert "someone" not in json.dumps(self._Hub.stored)
+
+    def test_the_flag_stops_it(self) -> None:
+        assert (
+            main(
+                [
+                    "join",
+                    "rosemary_nasrin",
+                    "--hub",
+                    "http://hub:8081",
+                    "--no-machine-facts",
+                ]
+            )
+            == 0
+        )
+        assert self._Hub.stored == {}, "--no-machine-facts described the machine anyway"
+
+    def test_the_environment_stops_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AGENT_INBOX_NO_MACHINE_FACTS", "1")
+        assert main(["join", "rosemary_nasrin", "--hub", "http://hub:8081"]) == 0
+        assert self._Hub.stored == {}
+
+    def test_a_hub_that_refuses_the_profile_does_not_fail_the_join(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The name is claimed and the config is written before this runs.
+
+        Reporting failure here would send somebody re-running `join --force` over a
+        join that had entirely succeeded.
+        """
+        self._Hub.raises = True
+        assert main(["join", "rosemary_nasrin", "--hub", "http://hub:8081"]) == 0
+        assert "rosemary_nasrin" in capsys.readouterr().out

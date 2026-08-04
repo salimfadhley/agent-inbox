@@ -21,6 +21,7 @@ the hub's own entry point runs through this module.
 """
 
 import json
+import logging
 import os
 import sys
 from contextlib import suppress
@@ -55,6 +56,9 @@ from agent_inbox.client import (
     write_project,
 )
 from agent_inbox.deployment import verify_all
+from agent_inbox.machine import machine_facts, merged_into
+
+logger = logging.getLogger(__name__)
 
 #: Settings `config` will write. Anything else is a typo, and a typo silently accepted
 #: leaves a file that reads correct and is not.
@@ -380,6 +384,11 @@ def reset_admin(username: str) -> int:
     help="a token minted by an operator; saved to this project. Not needed when a "
     "shared token is in the machine-wide config.",
 )
+@click.option(
+    "--no-machine-facts",
+    is_flag=True,
+    help="do not record this machine's hostname and checkout in the profile",
+)
 @click.pass_context
 def join(
     ctx: click.Context,
@@ -389,6 +398,7 @@ def join(
     engine: str | None,
     force: bool,
     token: str | None,
+    no_machine_facts: bool,
 ) -> int:
     """Claim a name and configure this engine. Omit NAME to be issued one."""
     # `--engine` on the command still works and wins; otherwise the root option, then
@@ -424,8 +434,46 @@ def join(
     path = write_config(
         hub_url, granted, engine=engine, role=role, force=force, token=given or None
     )
-    _print({"name": granted, "role": role, "engine": engine, "config": str(path)})
+    recorded = {} if no_machine_facts else _record_machine_facts(client, granted)
+    _print(
+        {
+            "name": granted,
+            "role": role,
+            "engine": engine,
+            "config": str(path),
+            **({"machine": recorded} if recorded else {}),
+        }
+    )
     return 0
+
+
+def _record_machine_facts(client: HubClient, name: str) -> dict[str, str]:
+    """Fill this machine's hostname and checkout into the profile. Best effort.
+
+    Returns what was actually written, which is ``{}`` whenever there was nothing to
+    add — suppressed, unknowable, or already stated by the agent itself.
+
+    The profile is replaced wholesale by the hub, never merged, so the existing one is
+    read and sent back with the gaps filled. That read is also what makes this safe on
+    a re-join: an agent that described its own ``host`` in words keeps those words.
+    """
+    facts = machine_facts()
+    if not facts:
+        return {}
+    try:
+        existing = dict(client.whois(name).get("profile") or {})
+        addition = merged_into(existing, facts)
+        if not addition:
+            return {}
+        client.update_profile({**existing, **addition})
+    except Exception as exc:  # noqa: BLE001 - the join already happened and is durable
+        # Decorating a profile is not worth failing a claim over: the name is taken,
+        # the config is written, and the agent can post its own profile at any time.
+        # Silence here loses a convenience; raising would make a successful join look
+        # like a failed one and send somebody re-running it with --force.
+        logger.debug("could not record machine facts for %s: %s", name, exc)
+        return {}
+    return addition
 
 
 @cli.group(
