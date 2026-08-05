@@ -102,7 +102,9 @@ def _install(version: str) -> str:
         # One line in the rendered prompt, deliberately: a `\`-continued shell command
         # is a paste hazard, and the reader is copying this into a terminal.
         return (
-            "```bash\nuv tool install --python "
+            "```bash\nuv python install "
+            + _python_floor()
+            + "\nuv tool install --python "
             + _python_floor()
             + ' --refresh --no-cache --force "agent-inbox[clients]"\n```'
             + """
@@ -115,7 +117,17 @@ upgrade command."""
     # Assembled here so the source line stays inside the limit while the *rendered*
     # command remains a single line — the reader pastes this into a terminal, and a
     # continuation backslash is the kind of thing that arrives broken.
+    # **Two commands, and the first is not optional.** `--python` pins the interpreter
+    # but does not *fetch* one: on a machine without 3.14, the pinned install fails
+    # rather than silently settling on an older release. Failing is the improvement —
+    # but a reader who meets that failure with no next step is stuck, so the fetch is a
+    # step of its own rather than a footnote (owner, 2026-08-05).
+    #
+    # `uv python install` is idempotent: it says the version is already installed and
+    # exits 0, so a reader who has 3.14 loses a second and nobody has to decide whether
+    # to run it.
     INSTALL_COMMAND = (
+        f"uv python install {PYTHON_FLOOR}\n"
         f"uv tool install --python {PYTHON_FLOOR} --refresh --no-cache --force "
         f'"agent-inbox[clients]>={MINIMUM_CLIENT}"'
     )

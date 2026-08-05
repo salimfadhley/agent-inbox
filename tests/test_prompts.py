@@ -171,6 +171,46 @@ class TestEveryInstallInstructionPinsTheInterpreter:
         assert not command.endswith("\\"), "the command is continued onto another line"
         assert command.count('"') == 2, "the requirement is not intact on this line"
 
+    def test_the_interpreter_is_fetched_before_it_is_pinned(self) -> None:
+        """Owner, 2026-08-05: the prompt should *install* 3.14, not assume it.
+
+        `--python` pins the interpreter; it does not fetch one. On a machine without
+        3.14 the pinned install fails rather than silently settling on an older
+        release — which is the improvement — but a reader who meets that failure with
+        no next step is stuck. So the fetch is a step of its own.
+
+        Order is the requirement, not the presence: fetching *after* the install would
+        be advice arriving one command too late.
+        """
+        from agent_inbox.prompts import _install, _python_floor
+
+        for version in ("", "0.66.0"):
+            lines = [
+                line
+                for line in _install(version).splitlines()
+                if line.startswith("uv ")
+            ]
+            assert lines[0] == f"uv python install {_python_floor()}", (
+                f"the interpreter is not fetched first for version={version!r}"
+            )
+            assert lines[1].startswith("uv tool install --python "), lines
+
+    def test_fetching_the_interpreter_is_safe_to_repeat(self) -> None:
+        """The paired concern. This runs on every reader, most of whom already have
+        3.14 — `uv python install` is idempotent and exits 0 when it is present, so
+        nobody has to decide whether to run it. Pinned as a property we rely on."""
+        import subprocess
+
+        done = subprocess.run(  # noqa: S603
+            ["uv", "python", "install", "3.14"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+
+        assert done.returncode == 0, done.stderr
+
     def test_the_release_gate_requires_the_pin(self) -> None:
         """The pin is load-bearing for the gate, not merely present in the text.
 

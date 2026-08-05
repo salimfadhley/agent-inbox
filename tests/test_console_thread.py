@@ -1,0 +1,167 @@
+"""The thread as a reader sees it: nesting, a reply on every message, who is human.
+
+**Asserted against the rendered page, never a helper.** A console test that exercises a
+helper cannot tell a working guard from a missing call — that has already happened in
+this repository and the test was green and worthless. So every assertion here goes
+through the route.
+
+The one exception is `thread_tree`, which is pure and is tested directly *as well*: it
+is the ordering logic, and pinning it separately means a rendering change cannot quietly
+alter the shape of a conversation.
+"""
+
+from typing import Any
+
+from litestar.testing import TestClient
+
+from agent_inbox.client import Config, HubClient
+from agent_inbox.console import SESSION_COOKIE, build_console, thread_tree
+
+HUB = "http://hub.invalid"
+HUMAN = "admin"
+AGENT = "rosemary_nasrin"
+
+
+def turn(oid: str, frm: str, parent: str | None, when: str, body: str = "x") -> dict:
+    made: dict[str, Any] = {
+        "id": f"{HUB}/objects/{oid}",
+        "attributedTo": f"{HUB}/actors/{frm}",
+        "summary": f"subject {oid}",
+        "content": body,
+        "published": when,
+    }
+    if parent:
+        made["inReplyTo"] = f"{HUB}/objects/{parent}"
+    return made
+
+
+class Hub(HubClient):
+    """A hub with one thread in it, and a directory that knows who is a person."""
+
+    def __init__(self, turns: list[dict[str, Any]]) -> None:
+        super().__init__(Config(hub=HUB, name="console"))
+        self.turns = turns
+
+    def hub_info(self) -> dict[str, Any]:
+        return {"name": "testhub", "version": "1.0.0", "authenticated": False}
+
+    def observe_thread(self, object_id: str) -> dict[str, Any]:
+        return {"items": self.turns}
+
+    def observe_object(self, object_id: str) -> dict[str, Any]:
+        return {"readBy": []}
+
+    def list_agents(self) -> dict[str, Any]:
+        return {
+            "items": [
+                {"preferredUsername": HUMAN, "type": "Person"},
+                {"preferredUsername": AGENT, "type": "Service"},
+            ]
+        }
+
+    def with_session(self, session: str) -> Hub:
+        return self
+
+    def acting_as(self, name: str, session: str) -> Hub:
+        return self
+
+    def whoami(self) -> str:
+        return HUMAN
+
+
+def page(turns: list[dict[str, Any]], signed_in: bool = True) -> str:
+    with TestClient(app=build_console(Hub(turns))) as console:
+        cookies = {SESSION_COOKIE: "a-session"} if signed_in else {}
+        # The leaf id, which is what the console links to and routes on.
+        return console.get("/message/a", cookies=cookies).text
+
+
+class TestNestingIsDerivedFromInReplyTo:
+    def test_a_reply_is_rendered_inside_its_parent(self) -> None:
+        rendered = page([turn("a", AGENT, None, "1"), turn("b", HUMAN, "a", "2")])
+
+        assert 'class="nest"' in rendered, "a reply was not nested under its parent"
+
+    def test_a_flat_thread_nests_nothing(self) -> None:
+        """The paired negative. Without it the test above would pass on a console that
+        indented every message it was given."""
+        rendered = page([turn("a", AGENT, None, "1"), turn("b", HUMAN, None, "2")])
+
+        assert 'class="nest"' not in rendered
+
+    def test_depth_is_bounded(self) -> None:
+        """A reddit thread can run twenty deep; a console column cannot. Past the cap
+        replies keep the deepest indent rather than walking off the edge and taking
+        their reply control with them."""
+        chain = [turn("t0", AGENT, None, "0")]
+        chain += [turn(f"t{n}", AGENT, f"t{n - 1}", str(n)) for n in range(1, 15)]
+
+        depths = [depth for _, depth, _ in thread_tree(chain)]
+
+        assert max(depths) <= 6
+        assert depths[:4] == [0, 1, 2, 3], "nesting stopped working entirely"
+
+    def test_every_turn_is_shown_even_in_a_cycle(self) -> None:
+        """A malformed thread must not silently lose a message. Two turns naming each
+        other is not something the hub should produce, but a view that quietly omitted
+        one would be worse than a view that looks odd."""
+        cyclic = [turn("a", AGENT, "b", "1"), turn("b", AGENT, "a", "2")]
+
+        assert len(thread_tree(cyclic)) == 2
+
+
+class TestAMissingParentStaysLegible:
+    def test_an_orphan_says_its_parent_is_absent(self) -> None:
+        """The parent may be on another hub, may be one the reader cannot see, or —
+        once retraction ships — may be a message whose body is gone. Presenting it as
+        the start of a conversation would be a lie about who spoke first."""
+        rendered = page([turn("b", HUMAN, "missing", "2")])
+
+        assert "not shown here" in rendered
+
+    def test_a_present_parent_is_not_labelled_that_way(self) -> None:
+        rendered = page([turn("a", AGENT, None, "1"), turn("b", HUMAN, "a", "2")])
+
+        assert "not shown here" not in rendered
+
+
+class TestAHumansMessageIsVisiblyAHumans:
+    def test_a_human_sender_is_marked(self) -> None:
+        rendered = page([turn("a", HUMAN, None, "1")])
+
+        assert 'class="human"' in rendered
+
+    def test_an_agent_sender_is_not(self) -> None:
+        """The paired negative, and the distinction the marker exists for."""
+        rendered = page([turn("a", AGENT, None, "1")])
+
+        assert 'class="human"' not in rendered
+
+    def test_the_mark_does_not_read_as_authority(self) -> None:
+        """FR-007 as a rendering rule. It says *who is speaking*, never *listen to this
+        one* — a badge saying "operator" or "admin" would turn a fact into an order."""
+        rendered = page([turn("a", HUMAN, None, "1")]).lower()
+
+        for shouted in ("operator", "authority", "official", "important"):
+            assert shouted not in rendered, f"the human marker reads as {shouted!r}"
+
+
+class TestAReplyControlOnEveryMessage:
+    def test_each_message_carries_its_own(self) -> None:
+        """FR-004 is *reply to any individual message*. One control on the thread would
+        make every reply a sibling and nesting impossible."""
+        rendered = page([turn("a", AGENT, None, "1"), turn("b", AGENT, None, "2")])
+
+        assert rendered.count("/reply'") == 2
+
+    def test_it_posts_to_the_message_it_sits_under(self) -> None:
+        rendered = page([turn("a", AGENT, None, "1")])
+
+        assert "/message/a/reply" in rendered
+
+    def test_nothing_is_offered_to_somebody_not_signed_in(self) -> None:
+        """Not a decision about who may post — the hub refuses that regardless
+        (NFR-002). This only avoids offering a control that cannot work."""
+        rendered = page([turn("a", AGENT, None, "1")], signed_in=False)
+
+        assert "/reply" not in rendered

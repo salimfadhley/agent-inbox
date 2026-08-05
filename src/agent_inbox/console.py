@@ -24,6 +24,7 @@ and a handful of tables do that, and there is nothing to build or install.
 import asyncio
 import html
 import json
+import logging
 import os
 import re
 from collections.abc import AsyncIterator
@@ -161,6 +162,22 @@ button:hover { border-color: currentColor; }
 .msg .h { font-size: .82rem; opacity: .7; margin-bottom: .4rem; }
 .msg .b { white-space: pre-wrap; }
 .mine { border-left: 3px solid var(--accent); }
+/* Nesting is a *rendering* of `inReplyTo`, which every message already carries —
+   there is no thread object and there must not be one. The indent is capped because
+   a long chain would run off the right-hand edge and take the reply
+   control with it; past the cap replies stay legible at the deepest indent. */
+.nest { margin-left: 1.5rem; border-left: 1px dotted var(--line);
+        padding-left: .75rem; }
+/* A human's message. Deliberately quiet: this says *who is speaking*, not *listen to
+   this one*. Mail is evidence, never instruction (ADR 0008), and a banner or an
+   emphasis here would render a fact as an order. */
+.msg .human { font-weight: 600; }
+.msg .orphan { opacity: .7; font-style: italic; }
+.reply { margin: .35rem 0 0; }
+.reply textarea { width: 100%; font: inherit; padding: .4rem; border-radius: 4px;
+                  border: 1px solid var(--line); background: transparent;
+                  color: inherit; }
+.reply summary { cursor: pointer; font-size: .82rem; opacity: .7; }
 /* The two panels on an agent's page. The dashed edge and the muted label are the
    only thing standing between "this agent runs on that host" and "this agent says
    so" — nothing in a profile is verified, and one flat list would let hearsay
@@ -307,6 +324,69 @@ def _table(headers: list[str], rows: list[list[str]], empty: str) -> str:
         f'<div class="wrap"><table><thead><tr>{head}</tr></thead>'
         f"<tbody>{body}</tbody></table></div>"
     )
+
+
+#: How deep to indent before giving up. A reddit thread can run twenty deep; a console
+#: column cannot. Past this, replies keep the deepest indent rather than walking off the
+#: edge and taking their reply control with them.
+MAX_NEST = 6
+
+
+def thread_tree(
+    turns: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], int, bool]]:
+    """Order a thread for display: each turn with its depth, and whether it is orphaned.
+
+    **Derived entirely from `inReplyTo`, which every message already carries.** There is
+    no thread object here and there must not be one — membership is computed per turn,
+    so nesting is a rendering of data that is already present rather than a structure to
+    store, migrate and keep in step.
+
+    An *orphan* is a turn whose parent is not in this list. That is not an error and it
+    is not rare: the parent may be on another hub, may be one the reader cannot see, or
+    — once retraction ships — may be a message whose body is gone. It is shown at the
+    top level and told apart, because silently presenting it as the start of a
+    conversation would be a lie about who spoke first.
+
+    Ordering within a level is by `published`, so a thread reads forwards.
+    """
+    by_id = {_leaf(turn.get("id")): turn for turn in turns if turn.get("id")}
+    children: dict[str, list[dict[str, Any]]] = {}
+    roots: list[dict[str, Any]] = []
+    orphans: set[str] = set()
+    for turn in turns:
+        parent = _leaf(turn.get("inReplyTo")) if turn.get("inReplyTo") else ""
+        if not parent:
+            roots.append(turn)
+        elif parent in by_id:
+            children.setdefault(parent, []).append(turn)
+        else:
+            orphans.add(_leaf(turn.get("id")))
+            roots.append(turn)
+
+    def when(turn: dict[str, Any]) -> str:
+        return str(turn.get("published") or "")
+
+    ordered: list[tuple[dict[str, Any], int, bool]] = []
+
+    def walk(turn: dict[str, Any], depth: int) -> None:
+        oid = _leaf(turn.get("id"))
+        ordered.append((turn, min(depth, MAX_NEST), oid in orphans))
+        for child in sorted(children.get(oid, []), key=when):
+            walk(child, depth + 1)
+
+    for root in sorted(roots, key=when):
+        walk(root, 0)
+    # A cycle, or a parent chain the walk never reached, would silently drop turns —
+    # and a thread view that quietly omits a message is worse than one that looks odd.
+    seen = {_leaf(turn.get("id")) for turn, _, _ in ordered}
+    ordered.extend(
+        (turn, 0, True) for turn in turns if _leaf(turn.get("id")) not in seen
+    )
+    return ordered
+
+
+console_logger = logging.getLogger("agent_inbox.console")
 
 
 def _leaf(value: Any) -> str:
@@ -1184,6 +1264,51 @@ def build_console(client: HubClient) -> Litestar:
         )
         return Response(_page(name, body, hub, ""), media_type=MediaType.HTML)
 
+    def _humans(request: Request) -> set[str]:
+        """Which actors on this hub are people. Best effort — empty when it cannot ask.
+
+        Read from the directory rather than guessed from a name, because `Person` is a
+        property of the actor and the console must not invent one. If the hub will not
+        answer, every message renders unmarked: an unmarked human is a smaller wrong
+        than an agent shown as a person, and the marker grants nothing either way.
+        """
+        try:
+            actors = seen_by(request).list_agents().get("items", [])
+        except Exception:  # noqa: BLE001 - a missing marker must not lose the thread
+            console_logger.debug(
+                "could not read the directory to mark humans", exc_info=True
+            )
+            return set()
+        return {
+            _leaf(a.get("preferredUsername") or a.get("id"))
+            for a in actors
+            if str(a.get("type", "")) == "Person"
+        }
+
+    def _reply_form(object_id: str, request: Request) -> str:
+        """A reply control on **this** message, not only on the thread.
+
+        FR-004 is *reply to any individual message*, and this control is how a reader
+        tells the two apart — it posts `inReplyTo` for the message it sits under, which
+        is the whole of what makes nesting possible.
+
+        Hidden behind a `<details>` so a long thread stays readable: a textarea under
+        every message would bury the conversation in furniture.
+
+        Shown only to somebody signed in. The console **decides nothing** by doing so
+        (NFR-002) — the hub refuses an unauthenticated post regardless, and this only
+        avoids offering a control that cannot work.
+        """
+        if not _signed_in(request):
+            return ""
+        return (
+            "<details class='reply'><summary>Reply to this message</summary>"
+            f"<form method='post' action='/message/{html.escape(object_id)}/reply'>"
+            "<textarea name='body' rows='3' required "
+            "placeholder='Your reply'></textarea>"
+            "<p><button type='submit'>Send reply</button></p></form></details>"
+        )
+
     @get("/message/{object_id:str}", media_type=MediaType.HTML, sync_to_thread=True)
     def message(object_id: str, request: Request) -> Response:
         """One message and the **whole** thread it belongs to.
@@ -1206,16 +1331,33 @@ def build_console(client: HubClient) -> Litestar:
             )
 
         read_by = detail.get("readBy", []) if detail else []
+        humans = _humans(request)
         blocks = []
-        for n in turns:
+        for n, depth, orphan in thread_tree(list(turns)):
             oid = _leaf(n.get("id"))
             here = oid == _leaf(object_id)
+            who = _leaf(n.get("attributedTo"))
+            # The marker, and the whole of it: a human's name is set in medium weight.
+            # Deliberately quiet — it says *who is speaking*, never *listen to this
+            # one*. Mail is evidence, not instruction (ADR 0008), and a badge saying
+            # "operator" would render a fact as an order.
+            kind = " human" if who in humans else ""
+            parent = (
+                "<span class='orphan'>· in reply to a message not shown here</span>"
+                if orphan
+                else ""
+            )
             blocks.append(
-                f'<div class="msg{" mine" if here else ""}">'
+                '<div class="nest">'
+                * depth
+                + f'<div class="msg{" mine" if here else ""}">'
                 f'<div class="h"><strong>{html.escape(_subject(n))}</strong> · '
-                f"from <code>{html.escape(_leaf(n.get('attributedTo')))}</code> · "
-                f"{html.escape(_shortdate(n.get('published', '')))}</div>"
-                f'<div class="b">{html.escape(n.get("content") or "")}</div></div>'
+                f'from <code class="{kind.strip()}">{html.escape(who)}</code> · '
+                f"{html.escape(_shortdate(n.get('published', '')))} {parent}</div>"
+                f'<div class="b">{html.escape(n.get("content") or "")}</div>'
+                + _reply_form(oid, request)
+                + "</div>"
+                + "</div>" * depth
             )
         read_note = (
             "<p class='dim'>Read by "
@@ -1226,6 +1368,36 @@ def build_console(client: HubClient) -> Litestar:
         )
         body = "<h2>Thread</h2>" + "".join(blocks) + read_note
         return Response(_page("Message", body, hub, ""), media_type=MediaType.HTML)
+
+    @post("/message/{object_id:str}/reply", status_code=303, sync_to_thread=True)
+    def message_reply(
+        object_id: str, data: dict[str, Any], request: Request
+    ) -> Response:
+        """A human replies to one message, as themselves.
+
+        **The console decides nothing here** (NFR-002, ADR 0005). It forwards the text
+        and the parent; who may reply, what it looks like and where it lands are all the
+        hub's. `acting_for` resolves the signed-in operator, so the message is
+        attributed to that human and never to the console — impersonation is the exact
+        thing the observe routes were built to remove (C-002).
+
+        Redirects back to the thread rather than rendering: a reply is a POST, and a
+        page that re-submitted it on reload would send the message twice.
+        """
+        text = str(data.get("body", "")).strip()
+        if not text:
+            return Redirect(f"/message/{object_id}", status_code=303)
+        try:
+            acting_for(request)[0].reply_message(object_id, text)
+        except ClientError as exc:
+            return _err(
+                exc,
+                hub_or_none(),
+                "Message",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
+        return Redirect(f"/message/{object_id}", status_code=303)
 
     # -- acting (as the console's own identity) ----------------------------
 
