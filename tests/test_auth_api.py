@@ -635,3 +635,94 @@ class TestTheAdminOverrideIsAdvertised:
         )
         with TestClient(app=build_api(house, HUB, auth=auth, auth_mode="enforce")) as c:
             assert "sekrit-value" not in c.get("/").text
+
+
+class TestAnOperatorSessionReachesEveryOperatorRoute:
+    """Reported by the owner, 2026-08-05: Maintenance and Settings both refused a
+    logged-in operator while every other tab worked.
+
+    **These tests do not reproduce that.** Written to, and they pass — an enrolled
+    operator reaches both routes on the hub. So the hub half is correct and this class
+    exists to keep it that way while the console half is investigated; it is not the
+    fix, and nothing here should be read as one.
+
+    What the failed reproduction did establish is worth more than a guess at the cause:
+    `/observe/purge` and `/hub/settings` carry `guard_enforce` *and* `provide_operator`,
+    while `/auth/tokens` — the tab that works — carries only `provide_operator`. Guards
+    run before dependencies, so on those two routes the weaker check runs first. That is
+    a real smell (two checks, weaker one first) and it is where a fix would go, but the
+    weaker check *passes* here, so it is not yet the explanation.
+
+    The reason no existing test would have caught the reported fault either way:
+    **every console test stubs `auth_call` wholesale**, so the console-to-hub path this
+    bug lives on is exercised by nothing.
+    """
+
+    @staticmethod
+    async def _enrolled(client: TestClient, auth: AuthService) -> None:
+        """Take the admin all the way through setup — the state a console user is in.
+
+        Built through the real flow rather than by writing an ACTIVE row: a session's
+        `limited` flag is exactly what this bug turns on, and a fixture that set the
+        state directly could produce a session no real login ever issues.
+        """
+        pw = await auth.bootstrap()
+        client.post("/auth/login", json={"username": "admin", "password": pw})
+        enrol = client.get("/auth/enrol").json()
+        secret = enrol["provisioningUri"].split("secret=")[1].split("&")[0]
+        client.post(
+            "/auth/enrol",
+            json={"password": "newpassword", "otp": totp.current_code(secret)},
+        )
+
+    async def test_maintenance_and_settings_answer_a_logged_in_operator(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            await self._enrolled(c, auth)
+
+            refused = {
+                path: c.get(path).status_code
+                for path in ("/observe/purge", "/hub/settings")
+                if c.get(path).status_code != 200
+            }
+
+        assert not refused, f"an enrolled operator was refused: {refused}"
+
+    async def test_the_tab_that_always_worked_still_does(self) -> None:
+        """The paired positive. Without it the test above would pass on a hub that had
+        simply stopped enforcing anything."""
+        client, auth = _build("enforce")
+        with client as c:
+            await self._enrolled(c, auth)
+
+            assert c.get("/auth/tokens").status_code == 200
+
+    async def test_an_anonymous_caller_is_still_refused(self) -> None:
+        """The other paired negative, and the one that matters. Fixing this by removing
+        the guard must not open the route — `provide_operator` is strictly stronger, and
+        this is what proves it rather than assuming it."""
+        client, _auth = _build("enforce")
+        with client as c:
+            for path in ("/observe/purge", "/hub/settings"):
+                assert c.get(path).status_code == 401, f"{path} is open to anyone"
+
+    async def test_an_agents_token_cannot_reach_them_either(self) -> None:
+        """A credential that lets an agent send mail must not also let it purge
+        everyone's. That rule lived in `provide_operator` all along; removing the guard
+        must leave it standing."""
+        client, auth = _build("enforce")
+        with client as c:
+            await self._enrolled(c, auth)
+            minted = c.post("/auth/tokens", json={"label": "a laptop"}).json()
+            c.post("/auth/logout", json={})
+            c.cookies.clear()
+
+            for path in ("/observe/purge", "/hub/settings"):
+                answer = c.get(
+                    path,
+                    headers={
+                        "Authorization": f"Bearer {minted['token']}",
+                        IDENTITY_HEADER: ROSEMARY,
+                    },
+                )
+                assert answer.status_code == 401, f"an agent's token reached {path}"
