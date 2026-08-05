@@ -2102,7 +2102,15 @@ def build_api(
         for it after someone is locked out is too late.
         """
         assert auth is not None
-        password = await auth.add_operator(
+        from agent_inbox import merge
+
+        # Through the coordinator, not `auth.add_operator` directly: an operator account
+        # and a mailbox are one identity now, and creating one half without the other is
+        # the state everything downstream misbehaves in. `merge.create_human` is the one
+        # place that knows a human needs both.
+        password = await merge.create_human(
+            auth,
+            house.mailbox.store,
             str(data.get("username", "")),
             str(data.get("email", "")),
             str(data.get("group", "") or "admin"),
@@ -2440,8 +2448,21 @@ def build_api(
 
         This is where `admin` and `host` come into being. Without it the hub would
         serve happily and quietly have nowhere to report a fault to.
+
+        It is also where **an operator account becomes a mailbox** (owner, 2026-08-05).
+        Idempotent, so it runs every boot and does nothing after the first — which is
+        what makes it safe to put here rather than behind a command somebody has to
+        remember on the one deployment that needed it.
         """
         await house.open()
+        if auth is not None:
+            from agent_inbox import merge
+
+            report = await merge.adopt_existing(auth, house.mailbox.store)
+            for line in report.lines():
+                # `warning`, including for a plain rename: somebody's login changed and
+                # this log is the only place several operators will ever see it.
+                api_logger.warning("event=namespace.migration %s", line)
 
     handlers = [
         hub,

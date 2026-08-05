@@ -93,6 +93,17 @@ class Mailbox:
         await self._store.remember_activity(activity_id, self._now())
 
     @property
+    def store(self) -> MessageStore:
+        """The store underneath, for callers that operate on actors rather than mail.
+
+        Public because the namespace merge needs to claim a name through the same atomic
+        call an agent's join uses — that is the whole design (`merge.py`), and reaching
+        through a private attribute to do it would hide the one relationship worth
+        seeing.
+        """
+        return self._store
+
+    @property
     def hub_name(self) -> str:
         """What this mailbox calls itself. It also always answers to ``local``."""
         return self._hub_name
