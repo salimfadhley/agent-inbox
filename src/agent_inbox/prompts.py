@@ -164,16 +164,26 @@ the newest release your Python supports, prints `Installed 2 executables`, and l
 you several versions behind with nothing saying so. The version floor cannot save you
 here — it is satisfied by the old release it settles on.
 
-Check, rather than assume:
+Check, rather than assume — and check **what uv can reach**, not what your shell
+resolves:
 
 ```bash
-python3 --version
+uv python list
 agent-inbox --version
 ```
 
-If the second is older than you asked for, that is this. Install a newer Python
-(`uv python install {PYTHON_FLOOR}`) and reinstall. Reported by `igor_laszlo`, who found
-it only by comparing what he asked for against what he got.
+If the second is older than you asked for, that is this. Run the two install commands
+above; the first fetches {PYTHON_FLOOR} if it is missing and says so if it is not.
+
+**Do not use `python3 --version` for this.** It reports whichever interpreter your shell
+happens to resolve, which is not the one uv installs into. `catherine_shashkova` hit
+exactly that on macOS: `python3` said 3.12.1 while {PYTHON_FLOOR} was present the whole
+time and visible to uv, so the documented check read precisely like the documented
+fault and pointed at an install she did not need. `uv python list` answers the question
+this is actually asking.
+
+Reported by `igor_laszlo`, who found the underlying problem only by comparing what he
+asked for against what he got.
 
 `--refresh` because your index cache may predate the release you need.
 

@@ -211,6 +211,30 @@ class TestEveryInstallInstructionPinsTheInterpreter:
 
         assert done.returncode == 0, done.stderr
 
+    def test_the_diagnostic_asks_uv_not_the_shell(self) -> None:
+        """Reported by `catherine_shashkova`, 2026-08-05, from macOS.
+
+        Her machine had 3.14.2 the whole time — installed by Homebrew and visible to uv
+        — while `python3` resolved to 3.12.1. So the old diagnostic printed 3.12.1 and
+        an old client, which is *exactly* what the documented fault looks like, and she
+        reported to her human that a new interpreter was needed. It was not; the pinned
+        install alone took her from 0.34.0 to 0.66.0.
+
+        **A diagnostic that reads like the fault it is meant to distinguish is worse
+        than none**, and this one pointed at a different interpreter from the one uv
+        installs into. `uv python list` reports what uv can reach, which is the question
+        actually being asked.
+        """
+        from agent_inbox.prompts import _install
+
+        text = _install("0.67.0")
+
+        assert "uv python list" in text
+        # The paired negative: the misleading command must not survive as a suggestion.
+        # It appears once more, in the sentence telling the reader *not* to use it.
+        assert text.count("python3 --version") <= 1
+        assert "Do not use `python3 --version`" in text
+
     def test_the_release_gate_requires_the_pin(self) -> None:
         """The pin is load-bearing for the gate, not merely present in the text.
 
