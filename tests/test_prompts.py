@@ -171,30 +171,47 @@ class TestEveryInstallInstructionPinsTheInterpreter:
         assert not command.endswith("\\"), "the command is continued onto another line"
         assert command.count('"') == 2, "the requirement is not intact on this line"
 
-    def test_the_interpreter_is_fetched_before_it_is_pinned(self) -> None:
-        """Owner, 2026-08-05: the prompt should *install* 3.14, not assume it.
+    def test_the_pasteable_block_is_safe_to_paste_whole(self) -> None:
+        """`igor_laszlo`, 2026-08-05: a comment is the part a reader pastes past.
 
-        `--python` pins the interpreter; it does not fetch one. On a machine without
-        3.14 the pinned install fails rather than silently settling on an older
-        release — which is the improvement — but a reader who meets that failure with
-        no next step is stuck. So the fetch is a step of its own.
+        The fetch briefly sat inside the block with a trailing "skip this if you already
+        have 3.14". He pointed out that somebody mid-onboarding wants the commands to
+        just work, and that the failure is silent and self-inflicted — nothing errors,
+        they quietly own two interpreters.
 
-        Order is the requirement, not the presence: fetching *after* the install would
-        be advice arriving one command too late.
+        So the block looks and installs; it does not fetch. Most readers already have a
+        3.14, and the one who does not is the one definitely reading.
         """
         from agent_inbox.prompts import _install, _python_floor
 
         for version in ("", "0.66.0"):
-            lines = [
-                line
-                for line in _install(version).splitlines()
-                if line.startswith("uv ")
-            ]
-            assert lines[0].startswith("uv python list"), (
-                f"the reader is not told to look before fetching (version={version!r})"
+            # The block that installs the tool — not the first fenced block, which on
+            # the versioned path is the `agent-inbox --version` check.
+            block = next(
+                part.split("```", 1)[0]
+                for part in _install(version).split("```bash")[1:]
+                if "uv tool install" in part.split("```", 1)[0]
             )
-            assert lines[1] == f"uv python install {_python_floor()}", lines
-            assert lines[2].startswith("uv tool install --python "), lines
+            lines = [
+                line for line in block.splitlines() if line.strip().startswith("uv ")
+            ]
+
+            assert lines[0].startswith("uv python list"), lines
+            assert lines[1].startswith("uv tool install --python "), lines
+            assert f"uv python install {_python_floor()}" not in block, (
+                f"the fetch is inside the pasteable block (version={version!r})"
+            )
+
+    def test_the_fetch_is_still_offered_to_whoever_needs_it(self) -> None:
+        """The paired positive. Making the block safe must not strand the reader the
+        step exists for — the one with no 3.14 at all, for whom the pin simply fails."""
+        from agent_inbox.prompts import _install, _python_floor
+
+        for version in ("", "0.66.0"):
+            text = _install(version)
+
+            assert f"uv python install {_python_floor()}" in text, version
+            assert "Only if" in text or "only if" in text, version
 
     def test_the_fetch_is_marked_skippable_and_says_why(self) -> None:
         """**This replaces a test that asserted something false.**
@@ -217,7 +234,7 @@ class TestEveryInstallInstructionPinsTheInterpreter:
 
         text = _install("0.68.0")
 
-        assert "skip the next line" in text, "the fetch is not marked skippable"
+        assert "Do not run that otherwise" in text, "the fetch is not marked optional"
         assert "uv-managed" in text, "nothing says what the fetch actually installs"
         # The paired negative: the false reassurance must be gone, not merely softened.
         assert "idempotent" not in text

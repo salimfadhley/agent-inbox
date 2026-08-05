@@ -101,56 +101,50 @@ def _install(version: str) -> str:
     if not version:
         # One line in the rendered prompt, deliberately: a `\`-continued shell command
         # is a paste hazard, and the reader is copying this into a terminal.
+        floor = _python_floor()
         return (
-            "```bash\nuv python list          # already have "
-            + _python_floor()
-            + "? then skip the next line\nuv python install "
-            + _python_floor()
-            + "\nuv tool install --python "
-            + _python_floor()
+            "```bash\nuv python list\nuv tool install --python "
+            + floor
             + ' --refresh --no-cache --force "agent-inbox[clients]"\n```'
-            + """
+            + f"""
 
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
 installed — which is exactly the case where you need it to act. There is no separate
 upgrade command.
 
-`uv python install` fetches a **uv-managed** interpreter and ignores every other
-kind, so a Python from Homebrew, scoop, winget or python.org satisfies the pin while
-remaining invisible to it. Look before you fetch, or you install a second one — on
-Windows today a strictly older one."""
+`uv python list` first because the install **pins** the interpreter without fetching
+one. You need a {floor} in that list, from anywhere — uv, Homebrew, scoop, winget,
+conda, python.org. **Only if there is none at all:**
+
+```bash
+uv python install {floor}
+```
+
+Do not run that otherwise: it fetches a **uv-managed** interpreter and cannot see any
+other kind, so it installs a second one alongside the {floor} you already have."""
         )
     PYTHON_FLOOR = _python_floor()
     # Assembled here so the source line stays inside the limit while the *rendered*
     # command remains a single line — the reader pastes this into a terminal, and a
     # continuation backslash is the kind of thing that arrives broken.
-    # **Two commands, and the first is not optional.** `--python` pins the interpreter
-    # but does not *fetch* one: on a machine without 3.14, the pinned install fails
-    # rather than silently settling on an older release. Failing is the improvement —
-    # but a reader who meets that failure with no next step is stuck, so the fetch is a
-    # step of its own rather than a footnote (owner, 2026-08-05).
+    # **The block a reader pastes must be safe to paste whole**, and the block below
+    # is: it looks, then installs the tool. The interpreter *fetch* is not in it.
     #
-    # `uv python install` is idempotent: it says the version is already installed and
-    # exits 0, so a reader who has 3.14 loses a second and nobody has to decide whether
-    # to run it.
-    # **Look first, and only fetch if you must.** `--python` pins the interpreter but
-    # does not fetch one, so a machine without 3.14 needs the fetch — and a machine that
-    # already has one does not.
+    # It was, briefly, with a trailing comment saying to skip it if you already had
+    # 3.14. `igor_laszlo` pointed out that a comment is exactly the part somebody
+    # pastes past — "especially somebody mid-onboarding who is already stuck and wants
+    # the commands to just work" — and that the failure is silent and self-inflicted:
+    # nothing errors, they quietly own two interpreters.
     #
-    # The difference matters more than it looks: `uv python install` counts only
-    # **uv-managed** interpreters. A 3.14 from scoop, Homebrew, winget or python.org
-    # satisfies the pin perfectly and is invisible to it, so running the fetch anyway
-    # downloads a second, redundant interpreter — and on Windows today a strictly older
-    # one, since uv can fetch 3.14.3 while scoop ships 3.14.6.
-    #
-    # Hypothesised by `igor_laszlo` from a Windows/scoop machine, who declined to test
-    # it on a colleague's workstation and said so; confirmed here against a version
-    # present only from miniconda, which uv downloaded 15.7 MiB to duplicate.
+    # He is right, and the fix is not better wording. `uv python install` counts only
+    # **uv-managed** interpreters, so a 3.14 from scoop, Homebrew, winget or python.org
+    # satisfies the pin while being invisible to the fetch — and on Windows today uv can
+    # fetch only 3.14.3 where scoop ships 3.14.6, so the fetch would install a strictly
+    # older one. Most readers already have a 3.14. Putting the fetch outside the block
+    # makes the common path safe by default and costs the stuck reader one more line —
+    # and the stuck reader is the one who is definitely reading.
     INSTALL_COMMAND = (
-        "uv python list          # already have "
-        + PYTHON_FLOOR
-        + "? then skip the next line\n"
-        f"uv python install {PYTHON_FLOOR}\n"
+        "uv python list\n"
         f"uv tool install --python {PYTHON_FLOOR} --refresh --no-cache --force "
         f'"agent-inbox[clients]>={MINIMUM_CLIENT}"'
     )
@@ -168,6 +162,22 @@ on a copy too old to have the flag — **or if it prints anything older than
 ```bash
 {INSTALL_COMMAND}
 ```
+
+`uv python list` first because the second line **pins** the interpreter without
+fetching one. You need a {PYTHON_FLOOR} in that list — from anywhere: uv, Homebrew,
+scoop, winget, conda, python.org. If one is there, the pin finds it and you are done.
+
+**Only if that list shows no {PYTHON_FLOOR} at all:**
+
+```bash
+uv python install {PYTHON_FLOOR}
+```
+
+Do not run that otherwise. It fetches a **uv-managed** interpreter and cannot see any
+other kind, so on a machine that already has a {PYTHON_FLOOR} it installs a second one —
+and on Windows today a strictly *older* one, because uv can fetch 3.14.3 while scoop
+ships 3.14.6. `agent-inbox doctor` names your interpreter and its source, if you would
+rather be told than work it out.
 
 The package is `agent-inbox` and so is the command. (`agent-mailbox` still works, and
 is what older deployments and hooks call: they are the same program.)
@@ -195,8 +205,8 @@ uv python list
 agent-inbox --version
 ```
 
-If the second is older than you asked for, that is this. Run the two install commands
-above; the first fetches {PYTHON_FLOOR} if it is missing and says so if it is not.
+If the second is older than you asked for, that is this. Re-run the install above,
+fetching {PYTHON_FLOOR} first **only if it is not in the list**.
 
 **`uv python install` fetches a *uv-managed* interpreter and ignores every other
 kind.** If `uv python list` already shows a {PYTHON_FLOOR} — from uv, Homebrew, scoop,
