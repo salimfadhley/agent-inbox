@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from agent_inbox import __version__
 from agent_inbox.exceptions import ReleaseGateError
 from agent_inbox.prompts import MINIMUM_CLIENT, onboarding
+from agent_inbox.staleness import interpreter_pin
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,9 +36,8 @@ CHECK_RELEASE_ARTIFACT = "release-artifact"
 DEFAULT_CHECKS = (CHECK_PROMPT_FLOOR, CHECK_RELEASE_ARTIFACT)
 
 PROMPT_INSTALL_RE = re.compile(
-    r'uv tool install --refresh --no-cache --force "'
-    r"(?P<requirement>agent-inbox\[clients\]>=(?P<version>[^\"\s]+))"
-    r'"'
+    r"uv tool install --python (?P<python>[0-9.]+) --refresh --no-cache --force "
+    r'"(?P<requirement>agent-inbox\[clients\]>=(?P<version>[^"\s]+))"'
 )
 
 Runner = Callable[[Sequence[str], float], subprocess.CompletedProcess[str]]
@@ -53,9 +53,26 @@ class PromptInstall:
     command: tuple[str, ...]
 
 
-def install_command(requirement: str) -> tuple[str, ...]:
-    """Return the exact clean install shape agents are told to use."""
-    return ("uv", "tool", "install", "--refresh", "--no-cache", "--force", requirement)
+def install_command(requirement: str, python: str = "") -> tuple[str, ...]:
+    """Return the exact clean install shape agents are told to use.
+
+    ``python`` pins the interpreter. It is part of the command rather than an optional
+    extra because **uv will not change the interpreter for you**: asked for a release
+    that needs a newer Python than the tool is currently installed under, it resolves
+    to an older release that fits and reports success. The pin is what turns that into
+    a failure somebody can see (owner, 2026-08-05).
+    """
+    pin = ("--python", python) if python else ()
+    return (
+        "uv",
+        "tool",
+        "install",
+        *pin,
+        "--refresh",
+        "--no-cache",
+        "--force",
+        requirement,
+    )
 
 
 def extract_prompt_install(prompt: str) -> PromptInstall:
@@ -71,7 +88,10 @@ def extract_prompt_install(prompt: str) -> PromptInstall:
     return PromptInstall(
         version=match.group("version"),
         requirement=requirement,
-        command=install_command(requirement),
+        # The interpreter the prompt itself names, not one chosen here. The gate must
+        # run the command agents are actually given — a pin it substituted would verify
+        # something nobody was told to type.
+        command=install_command(requirement, match.group("python")),
     )
 
 
@@ -102,7 +122,7 @@ def release_artifact_install_for_version(version: str) -> PromptInstall:
     return PromptInstall(
         version=version,
         requirement=requirement,
-        command=install_command(requirement),
+        command=install_command(requirement, interpreter_pin()),
     )
 
 

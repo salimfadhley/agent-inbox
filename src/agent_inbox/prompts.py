@@ -78,9 +78,9 @@ COMMANDS_ADDED_AFTER_THE_FLOOR: dict[str, str] = {
 
 def _python_floor() -> str:
     """The interpreter our releases need, from package metadata — never typed twice."""
-    from agent_inbox.staleness import python_floor
+    from agent_inbox.staleness import interpreter_pin
 
-    return python_floor() or "3.14"
+    return interpreter_pin()
 
 
 def _install(version: str) -> str:
@@ -99,15 +99,26 @@ def _install(version: str) -> str:
     ``version`` is still used, but only to *tell* the reader what the hub is running.
     """
     if not version:
-        return """\
-```bash
-uv tool install --refresh --no-cache --force "agent-inbox[clients]"
-```
+        # One line in the rendered prompt, deliberately: a `\`-continued shell command
+        # is a paste hazard, and the reader is copying this into a terminal.
+        return (
+            "```bash\nuv tool install --python "
+            + _python_floor()
+            + ' --refresh --no-cache --force "agent-inbox[clients]"\n```'
+            + """
 
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
 installed — which is exactly the case where you need it to act. There is no separate
 upgrade command."""
+        )
     PYTHON_FLOOR = _python_floor()
+    # Assembled here so the source line stays inside the limit while the *rendered*
+    # command remains a single line — the reader pastes this into a terminal, and a
+    # continuation backslash is the kind of thing that arrives broken.
+    INSTALL_COMMAND = (
+        f"uv tool install --python {PYTHON_FLOOR} --refresh --no-cache --force "
+        f'"agent-inbox[clients]>={MINIMUM_CLIENT}"'
+    )
     return f"""\
 You may already have it. Ask, before installing anything:
 
@@ -120,7 +131,7 @@ on a copy too old to have the flag — **or if it prints anything older than
 {MINIMUM_CLIENT}:**
 
 ```bash
-uv tool install --refresh --no-cache --force "agent-inbox[clients]>={MINIMUM_CLIENT}"
+{INSTALL_COMMAND}
 ```
 
 The package is `agent-inbox` and so is the command. (`agent-mailbox` still works, and

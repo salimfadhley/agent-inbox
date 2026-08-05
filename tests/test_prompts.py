@@ -114,3 +114,74 @@ class TestTheWindowsUpgradeWarning:
     def test_an_unversioned_prompt_stays_short(self) -> None:
         """The no-version form is the terse one and must not grow this."""
         assert "os error 32" not in onboarding("http://hub.example")
+
+
+class TestEveryInstallInstructionPinsTheInterpreter:
+    """Owner, 2026-08-05, after weighing a Docker CLI and choosing this instead.
+
+    **uv will not change the interpreter a tool is installed under.** Asked for a
+    release needing a newer Python than the one already in use, it resolves to an older
+    release that fits, prints `Installed 2 executables`, and leaves the agent exactly
+    where it was. That is the silent downgrade `igor_laszlo` reported — the version
+    floor cannot catch it, because the floor is satisfied by the old release uv settles
+    on. A pinned interpreter turns it into an error somebody can read.
+
+    Pinned in a test because a bare flag in a command reads as noise and invites
+    tidying, and the failure it prevents is invisible.
+    """
+
+    def test_the_versioned_block_pins_it(self) -> None:
+        from agent_inbox.prompts import _install, _python_floor
+
+        command = next(
+            line
+            for line in _install("0.60.1").splitlines()
+            if line.startswith("uv tool install")
+        )
+
+        assert f"--python {_python_floor()}" in command
+        # The paired positive: the pin must not have replaced the version floor, which
+        # solves a different problem in the same command.
+        assert "agent-inbox[clients]>=" in command
+
+    def test_the_unversioned_block_pins_it_too(self) -> None:
+        """The path taken when the hub reports no version — the *less* informed case,
+        so the one where a silent downgrade is least likely to be noticed."""
+        from agent_inbox.prompts import _install, _python_floor
+
+        command = next(
+            line
+            for line in _install("").splitlines()
+            if line.startswith("uv tool install")
+        )
+
+        assert f"--python {_python_floor()}" in command
+
+    def test_the_command_is_one_line_a_reader_can_paste(self) -> None:
+        """It is longer now. A wrapped or continued shell command is a paste hazard, and
+        the owner has already reported hard-wrapping in this prompt once."""
+        from agent_inbox.prompts import _install
+
+        command = next(
+            line
+            for line in _install("0.60.1").splitlines()
+            if line.startswith("uv tool install")
+        )
+
+        assert not command.endswith("\\"), "the command is continued onto another line"
+        assert command.count('"') == 2, "the requirement is not intact on this line"
+
+    def test_the_release_gate_requires_the_pin(self) -> None:
+        """The pin is load-bearing for the gate, not merely present in the text.
+
+        `extract_prompt_install` parses this command and runs it for real before a
+        release. If somebody drops `--python`, the gate stops finding the command at
+        all — so the removal is caught by the thing that would otherwise verify an
+        unpinned install.
+        """
+        from agent_inbox.prompts import _install
+        from agent_inbox.release_gate import extract_prompt_install
+
+        found = extract_prompt_install(_install("0.60.1"))
+
+        assert found.command[:5] == ("uv", "tool", "install", "--python", "3.14")

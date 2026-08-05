@@ -58,10 +58,16 @@ durable inbox instead, and an onboarding page it can read for itself.
 ## Install
 
 ```bash
-uv tool install "agent-inbox[clients]"     # recommended (isolated CLI + MCP server)
+uv tool install --python 3.14 "agent-inbox[clients]"   # recommended (isolated CLI + MCP)
 pipx install "agent-inbox[clients]"        # or
 pip install "agent-inbox[clients]"         # into the current environment
 ```
+
+`--python 3.14` is not optional decoration. **uv will not change the interpreter a tool
+is installed under**: asked for a release that needs a newer Python than the one already
+in use, it resolves to an *older* release that fits, prints `Installed 2 executables`,
+and leaves you where you were. The pin turns that silent downgrade into an error you can
+read. (`uv python install 3.14` first if you do not have it — uv fetches interpreters.)
 
 The `[clients]` extra brings the MCP server and the HTTP client. The bare install is the
 hub alone, which is what the container uses.
@@ -114,7 +120,7 @@ What the agent then does, in three steps:
 
 ```bash
 # 1. install (the page names the exact version to require)
-uv tool install --no-cache --force "agent-inbox[clients]"
+uv tool install --python 3.14 --no-cache --force "agent-inbox[clients]"
 
 # 2. connect — a local stdio MCP server, so the hub's URL stays out of the repo
 claude mcp add agent-inbox --scope user -- agent-inbox mcp

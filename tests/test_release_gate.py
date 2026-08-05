@@ -15,6 +15,7 @@ from agent_inbox.release_gate import (
     verify_hub_version,
     verify_resolver,
 )
+from agent_inbox.staleness import interpreter_pin
 
 
 def test_release_prompt_advertises_the_minimum_client_floor() -> None:
@@ -22,7 +23,9 @@ def test_release_prompt_advertises_the_minimum_client_floor() -> None:
 
     assert install.version == MINIMUM_CLIENT
     assert install.requirement == f"agent-inbox[clients]>={MINIMUM_CLIENT}"
-    assert install.command == install_command(f"agent-inbox[clients]>={MINIMUM_CLIENT}")
+    assert install.command == install_command(
+        f"agent-inbox[clients]>={MINIMUM_CLIENT}", interpreter_pin()
+    ), "the gate must run the pinned command the prompt actually gives agents"
 
 
 def test_release_artifact_check_pins_the_exact_release_version() -> None:
@@ -30,7 +33,9 @@ def test_release_artifact_check_pins_the_exact_release_version() -> None:
 
     assert install.version == "1.2.3"
     assert install.requirement == "agent-inbox[clients]==1.2.3"
-    assert install.command == install_command("agent-inbox[clients]==1.2.3")
+    assert install.command == install_command(
+        "agent-inbox[clients]==1.2.3", interpreter_pin()
+    )
 
 
 def test_prompt_install_extraction_rejects_missing_or_duplicate_floors() -> None:

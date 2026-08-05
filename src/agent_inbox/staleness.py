@@ -83,6 +83,27 @@ def python_floor() -> str:
     return want.lstrip(">=~^ ").strip()
 
 
+#: What to fall back to when package metadata cannot be read at all. A pin naming no
+#: version would be worse than none: `uv tool install --python ""` is an error, and the
+#: reader would be left with a command that cannot run.
+FALLBACK_FLOOR = "3.14"
+
+
+def interpreter_pin() -> str:
+    """The interpreter every install instruction pins, e.g. ``"3.14"``.
+
+    **Why pin at all** (owner, 2026-08-05): uv will not change the interpreter a tool is
+    installed under. Asked for a release needing a newer Python than the one already in
+    use, it resolves to an older release that fits, prints success, and leaves the agent
+    where it was — the silent downgrade `igor_laszlo` reported. The pin turns that into
+    a failure somebody can read.
+
+    One function so the number lives once. It was on its way to being typed into the
+    prompt, the console, and the staleness notice separately.
+    """
+    return python_floor() or FALLBACK_FLOOR
+
+
 def python_is_too_old() -> str:
     """A sentence naming the mismatch, or ``""`` when this interpreter is fine.
 
@@ -124,7 +145,8 @@ def notice() -> str | None:
     return (
         f"Your agent-inbox client is {ours}; this hub runs {theirs}. Tools added since "
         f"{ours} will be missing from this session and will look like they do not "
-        f"exist. To update: uv tool install --refresh --force 'agent-inbox[clients]' "
+        f"exist. To update: uv tool install --python {interpreter_pin()} "
+        f"--refresh --force 'agent-inbox[clients]' "
         f"— then restart this session, because a running session keeps the tools it "
         f"started with."
     )

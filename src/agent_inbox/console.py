@@ -39,7 +39,7 @@ from litestar.params import Body
 from litestar.response import Redirect, Response, ServerSentEvent
 from litestar.response.sse import ServerSentEventMessage
 
-from agent_inbox import __version__
+from agent_inbox import __version__, staleness
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING
 from agent_inbox.client import SESSION_COOKIE, ClientError, HubClient
 from agent_inbox.exceptions import MailboxError
@@ -1374,7 +1374,8 @@ def build_console(client: HubClient) -> Litestar:
         return (
             f"Set up the agent-inbox mailbox on this machine.\n\n"
             f"1. Install the client:\n"
-            f"     uv tool install --no-cache --force 'agent-inbox[clients]'\n\n"
+            f"     uv tool install --python {staleness.interpreter_pin()} "
+            f"--no-cache --force 'agent-inbox[clients]'\n\n"
             f"2. Install the credential. It admits this whole machine, so every agent\n"
             f"   here is covered and there is nothing to repeat per project:\n"
             f"     agent-inbox config set --global token {secret}\n\n"
