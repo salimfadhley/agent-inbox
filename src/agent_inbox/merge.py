@@ -24,7 +24,7 @@ knows nothing about mailboxes, which is right; the coordination belongs here.
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from agent_inbox.auth.exceptions import OperatorExists
@@ -74,9 +74,14 @@ class Migration:
     """
 
     already: tuple[str, ...] = ()
+    #: Actors that existed and are now marked `Person`. `admin` on every upgraded hub:
+    #: the standing residents are installed at startup *before* this runs, so claiming
+    #: fails and promoting is the difference between "an operator has a mailbox" and
+    #: "an operator has *that* mailbox".
+    promoted: tuple[str, ...] = ()
     renamed: tuple[Renamed, ...] = ()
     collisions: tuple[Collision, ...] = ()
-    claimed: tuple[str, ...] = field(default=())
+    claimed: tuple[str, ...] = ()
 
     @property
     def needs_a_human(self) -> bool:
@@ -134,7 +139,7 @@ async def create_human(
     stamp = now()
     if not await store.claim_name(
         ActorRecord(
-            name=name, actor_type=ActorType.SERVICE, created=stamp, last_seen=stamp
+            name=name, actor_type=ActorType.PERSON, created=stamp, last_seen=stamp
         )
     ):
         # Lost the race. Undo the account rather than leave a human who can sign in and
@@ -163,6 +168,7 @@ async def adopt_existing(
     Case needs no migration: usernames were already stored folded.
     """
     already: list[str] = []
+    promoted: list[str] = []
     renamed: list[Renamed] = []
     collisions: list[Collision] = []
     claimed: list[str] = []
@@ -206,7 +212,7 @@ async def adopt_existing(
         if await store.claim_name(
             ActorRecord(
                 name=wanted,
-                actor_type=ActorType.SERVICE,
+                actor_type=ActorType.PERSON,
                 created=stamp,
                 last_seen=stamp,
             )
@@ -214,9 +220,12 @@ async def adopt_existing(
             claimed.append(wanted)
         else:
             already.append(wanted)
+            if await _promote(store, wanted):
+                promoted.append(wanted)
 
     report = Migration(
         already=tuple(already),
+        promoted=tuple(promoted),
         renamed=tuple(renamed),
         collisions=tuple(collisions),
         claimed=tuple(claimed),
@@ -224,6 +233,32 @@ async def adopt_existing(
     for line in report.lines():
         logger.warning("event=namespace.migration %s", line)
     return report
+
+
+async def _promote(store: MessageStore, name: str) -> bool:
+    """Mark an actor a human, keeping everything else about it. ``True`` if changed.
+
+    `admin` needs this on every hub that already exists: the standing residents are
+    installed at startup *before* the merge runs, so the actor is there and already
+    holds the drop box's purpose text and its mail.
+
+    Only the type changes. Overwriting the profile would discard the sentence explaining
+    what the drop box is for — which is text every agent reads in its own prompt.
+    """
+    actor = await store.get_actor(name)
+    if actor is None or actor.actor_type is ActorType.PERSON:
+        return False
+    await store.put_actor(
+        ActorRecord(
+            name=actor.name,
+            actor_type=ActorType.PERSON,
+            profile=actor.profile,
+            created=actor.created,
+            last_seen=actor.last_seen,
+        )
+    )
+    logger.info("event=namespace.actor.promoted name=%s type=Person", name)
+    return True
 
 
 def _usable(username: str) -> str | None:
