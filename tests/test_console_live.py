@@ -94,8 +94,16 @@ class StubHub(HubClient):
         }
 
     def auth_call(
-        self, method: str, path: str, *, session: str | None = None, **_: Any
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        session: str | None = None,
+        **_: Any,
     ) -> tuple[int, dict[str, Any], Any]:
+        if method == "POST" and path == "/auth/tokens":
+            return 201, {"token": "a-minted-secret"}, None
         return self.token_status, {"items": list(self.token_items)}, None
 
     def list_agents(self) -> dict[str, Any]:
@@ -432,3 +440,35 @@ class TestTheFlowTableNamesTheWork:
 
         assert "billing" in _flow_table(text)
         assert text.count("Who is talking to whom") == 1
+
+
+class TestTheSetupPromptPointsSomewhereReal:
+    """The token screen hands an agent its last instruction: where to read the rest.
+
+    It used to send them to `<api>/prompts/agent`, which 404s — the API has no such
+    route and the console is what renders that page. Two addresses that look
+    interchangeable and are not, in the one place a reader cannot check before
+    following it.
+    """
+
+    def test_it_sends_the_agent_to_the_console_not_the_api(self, hub: StubHub) -> None:
+        with TestClient(app=build_console(hub)) as console:
+            page = console.post("/tokens/mint", data={"label": "laptop"})
+
+        text = page.text
+        assert "/prompts/agent" in text, "the setup prompt names no prompt address"
+        # The API base must not be the thing carrying that path.
+        assert f"{HUB}/prompts/agent" not in text, (
+            "the setup prompt points at the API, which has no /prompts route"
+        )
+
+    def test_it_still_joins_against_the_api(self, hub: StubHub) -> None:
+        """The paired positive: the *hub* address is still the API's, and must be.
+
+        `join --hub` talks to the API. Repointing everything at the console would swap
+        one broken instruction for another.
+        """
+        with TestClient(app=build_console(hub)) as console:
+            text = console.post("/tokens/mint", data={"label": "laptop"}).text
+
+        assert f"join --hub {HUB}" in text

@@ -1325,7 +1325,7 @@ def build_console(client: HubClient) -> Litestar:
 
     # -- tokens -----------------------------------------------------
 
-    def _setup_prompt(secret: str, hub_url: str) -> str:
+    def _setup_prompt(secret: str, hub_url: str, prompt_url: str) -> str:
         """The prompt an agent needs, with this token already in it (FR-013).
 
         **A second document, not the standing prompt.** The Prompt tab is on the
@@ -1337,6 +1337,13 @@ def build_console(client: HubClient) -> Litestar:
         This one exists inside a single HTTP response and is never served again. The hub
         keeps only a hash of the token, so there is no way to rebuild this page later
         even for the operator who made it.
+
+        **Two addresses, and they are not interchangeable.** `join --hub` needs the
+        *API*; the standing prompt is served by the *console*. This used to send the
+        reader to `<api>/prompts/agent`, which 404s — the API has no such route, and it
+        is the console that renders the page. Every agent onboarded with a token was
+        handed a dead link as its last instruction, which is the worst place for one:
+        the step that explains how any of it works.
         """
         return (
             f"Set up the agent-inbox mailbox on this machine.\n\n"
@@ -1352,10 +1359,10 @@ def build_console(client: HubClient) -> Litestar:
             f"The token is sent automatically from now on; you never type it again.\n"
             f"It admits the machine, not you: your name still comes from your own\n"
             f"configuration, and every agent here uses the same credential.\n\n"
-            f"Then read {hub_url}/prompts/agent for how the mailbox works."
+            f"Then read {prompt_url} for how the mailbox works."
         )
 
-    def _token_instructions(secret: str, hub_url: str) -> str:
+    def _token_instructions(secret: str, hub_url: str, prompt_url: str) -> str:
         """What to do with a token, shown at the only moment it is visible.
 
         The hub stores a hash, so this is the one and only time anyone can read it.
@@ -1363,7 +1370,7 @@ def build_console(client: HubClient) -> Litestar:
         pasted — not a description of the file, but the command that writes it, and
         (FR-013) the whole setup prompt with the token already in place.
         """
-        prompt = _setup_prompt(secret, hub_url)
+        prompt = _setup_prompt(secret, hub_url, prompt_url)
         return (
             '<div class="warn"><p><strong>Copy it now.</strong> The hub keeps only a '
             "hash, so this is the only time it can be read — and that goes for the "
@@ -1664,7 +1671,12 @@ def build_console(client: HubClient) -> Litestar:
                 request, f"<p class='warn'>{html.escape(str(detail))}</p>"
             )
         secret = str((body or {}).get("token", ""))
-        return _tokens_page(request, _token_instructions(secret, client.config.base))
+        return _tokens_page(
+            request,
+            _token_instructions(
+                secret, client.config.base, f"{_console_base(request)}/prompts/agent"
+            ),
+        )
 
     @post("/tokens/revoke", status_code=200, sync_to_thread=True)
     def revoke(request: Request, data: Form) -> Response:
