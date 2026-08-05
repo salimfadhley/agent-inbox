@@ -36,6 +36,7 @@ from agent_inbox.auth.records import (
     User,
 )
 from agent_inbox.auth.store import AuthStore
+from agent_inbox.naming import validate_operator_name
 
 logger = logging.getLogger("agent_inbox.auth")
 
@@ -285,9 +286,10 @@ class AuthService:
         second factor. The password is returned rather than mailed because this hub
         cannot send mail; whoever invites them has to pass it on out of band.
         """
-        name = username.strip().lower()
-        if not name:
-            raise ValueError("an operator needs a username")
+        # Refused here rather than repaired: an operator and an actor are becoming one
+        # namespace, so a username no actor could hold is an account that can never
+        # have a mailbox. `validate_operator_name` says why in full.
+        name = validate_operator_name(username)
         if await self._store.get_user(name) is not None:
             raise OperatorExists(f"{name!r} is already an operator here")
         password = secrets.generate_token()

@@ -23,21 +23,20 @@ from agent_inbox.name_pool import FAMILY_NAMES, GIVEN_NAMES
 #: Reserved: addressing keywords, not names anyone may hold. ``local`` matters
 #: most — it is a guarantee of non-egress, so it must never be something an
 #: agent can be called.
-RESERVED_NAMES: frozenset[str] = frozenset(
-    {
-        # addressing keywords
-        "local",
-        "all",
-        "any",
-        "public",
-        "me",
-        "everyone",
-        # standing residents — the hub's own mailboxes. Reserved so no agent can claim
-        # one and quietly start receiving the hub's complaints or its introductions.
-        "admin",
-        "host",
-    }
+#: Words that mean *who to send to* rather than *who somebody is*. An actor called
+#: ``everyone`` makes every broadcast ambiguous, so these are refused to everybody —
+#: agent and human alike.
+ADDRESSING_KEYWORDS: frozenset[str] = frozenset(
+    {"local", "all", "any", "public", "me", "everyone"}
 )
+
+#: The hub's own mailboxes. Reserved so no *agent* can claim one and quietly start
+#: receiving the hub's complaints or its introductions — but these are exactly the
+#: names a human operator holds, which is why they are a separate set from the
+#: addressing keywords above rather than one undifferentiated list.
+STANDING_RESIDENTS: frozenset[str] = frozenset({"admin", "host"})
+
+RESERVED_NAMES: frozenset[str] = ADDRESSING_KEYWORDS | STANDING_RESIDENTS
 
 _VALID = re.compile(r"^[a-z0-9](?:[a-z0-9_]{0,62}[a-z0-9])?$")
 
@@ -99,6 +98,52 @@ def validate(raw: str) -> Name:
             "ending with a letter or digit"
         )
     return Name(candidate)
+
+
+def validate_operator_name(raw: str) -> str:
+    """Validate a human operator's username. It must be a name an actor could hold.
+
+    Operators and agents are becoming **one namespace** (owner, 2026-08-05): signing in
+    as a human will give you that human's mailbox, and a mailbox is addressed by an
+    actor name. A username that no actor could hold is therefore an account that can
+    never have an inbox — so the rule is applied at registration, where the person is
+    present to fix it, rather than discovered later by someone whose mail has nowhere
+    to go.
+
+    Two deliberate differences from :func:`validate`, and the reasoning for each is the
+    reasoning in :func:`validate_hub_name`:
+
+    **No normalisation, except case.** ``validate`` reshapes a proposed *agent* name
+    because the hub is issuing it. A username is typed into a form by somebody who then
+    has to type it again to sign in, so quietly turning ``sal.fadhley`` into
+    ``sal_fadhley`` hands them a login they did not choose and will get wrong. They are
+    told the rule instead. Case is the exception — ``Sal`` and ``sal`` are the same
+    word, every login system in the world folds it, and this one already did.
+
+    **A standing resident is allowed.** ``admin`` is refused to agents precisely so it
+    stays available to the human who operates the hub; refusing it here would lock the
+    one account the merge exists to serve out of its own name. Addressing keywords stay
+    refused to everybody: ``everyone`` as a username would make a broadcast ambiguous
+    no matter which side of the machine held it.
+    """
+    candidate = raw.strip().lower()
+    if not candidate:
+        raise NameUnavailable("an operator needs a username")
+    if candidate in ADDRESSING_KEYWORDS:
+        raise NameUnavailable(
+            f"{candidate!r} is how mail is addressed, not who somebody is; "
+            f"reserved: {', '.join(sorted(ADDRESSING_KEYWORDS))}"
+        )
+    if not _VALID.match(candidate):
+        raise NameUnavailable(
+            f"{candidate!r} cannot be a username — 1 to 64 characters of lowercase "
+            "letters, digits and underscores, starting and ending with a letter or "
+            f"digit (try {normalize(candidate)!r})"
+            if normalize(candidate)
+            else f"{candidate!r} cannot be a username — use lowercase letters, digits "
+            "and underscores, for example 'sam_okonkwo'"
+        )
+    return candidate
 
 
 def validate_hub_name(raw: str) -> str:

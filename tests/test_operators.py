@@ -21,6 +21,7 @@ from agent_inbox.auth.exceptions import (
 from agent_inbox.auth.records import ADMIN_GROUP, USER_GROUP, EnrolmentState
 from agent_inbox.auth.service import AuthService
 from agent_inbox.auth.store import InMemoryAuthStore
+from agent_inbox.exceptions import NameUnavailable
 
 
 @pytest.fixture
@@ -68,8 +69,85 @@ class TestInvitingAHuman:
             await auth.add_operator("admin")
 
     async def test_a_username_needs_to_be_something(self, auth: AuthService) -> None:
-        with pytest.raises(ValueError):
+        # `NameUnavailable` rather than the bare `ValueError` this used to raise: it is
+        # the type every other unusable name raises, and it carries the code the HTTP
+        # layer turns into a status instead of a 500.
+        with pytest.raises(NameUnavailable):
             await auth.add_operator("   ")
+
+
+class TestAUsernameMustBeANameAMailboxCouldHold:
+    """Owner, 2026-08-05, ahead of the namespace merge.
+
+    An operator account and a mailbox are becoming one identity, so a username no actor
+    could hold is an account that can never have an inbox. Refused at registration,
+    where the person is present to fix it — not discovered later by somebody whose mail
+    has nowhere to go.
+    """
+
+    @pytest.mark.parametrize(
+        "username",
+        [
+            "sal.fadhley",  # a dot: what people type when they mean an email
+            "sal-1",  # a hyphen: valid everywhere else, not here
+            "sal fadhley",  # a space
+            "_sal",  # must start with a letter or digit
+            "sal_",  # and end with one
+            "sal@example.com",  # an address, not a name
+            "a" * 65,  # past the ceiling
+        ],
+    )
+    async def test_a_username_no_actor_could_hold_is_refused(
+        self, auth: AuthService, username: str
+    ) -> None:
+        with pytest.raises(NameUnavailable):
+            await auth.add_operator(username)
+
+        assert {u.username for u in await auth.operators()} == {"admin"}, (
+            "the account was created anyway"
+        )
+
+    async def test_an_addressing_keyword_is_refused_to_humans_too(
+        self, auth: AuthService
+    ) -> None:
+        """`everyone` as a username would make every broadcast ambiguous."""
+        with pytest.raises(NameUnavailable):
+            await auth.add_operator("everyone")
+
+    async def test_a_standing_resident_is_not_refused(self, auth: AuthService) -> None:
+        """The paired positive, and the point of the whole change.
+
+        `admin` is withheld from agents precisely so the human who operates the hub can
+        hold it. A rule that rejected it would lock out the one account the merge exists
+        to serve — and this test is what stops a future tightening from doing that
+        quietly. It gets as far as OperatorExists, which means the *name* was accepted.
+        """
+        with pytest.raises(OperatorExists):
+            await auth.add_operator("admin")
+
+    async def test_case_is_folded_rather_than_refused(self, auth: AuthService) -> None:
+        """The one normalisation kept: every login system in the world folds case, and
+        this one already did. Refusing `Ludmila` would be a change nobody asked for."""
+        await auth.add_operator("Ludmila")
+
+        assert "ludmila" in {u.username for u in await auth.operators()}
+
+    async def test_a_good_username_still_works(self, auth: AuthService) -> None:
+        """The paired positive for the whole class: without it, every assertion above
+        would pass on an `add_operator` that had simply stopped working."""
+        await auth.add_operator("sam_okonkwo")
+
+        assert "sam_okonkwo" in {u.username for u in await auth.operators()}
+
+    async def test_the_refusal_says_what_to_type_instead(
+        self, auth: AuthService
+    ) -> None:
+        """A refusal a human cannot act on is a dead end, and this one reaches a human
+        by definition — it is a person filling in a form."""
+        with pytest.raises(NameUnavailable) as refusal:
+            await auth.add_operator("sal.fadhley")
+
+        assert "sal_fadhley" in str(refusal.value)
 
 
 class TestTheEmailAddress:
