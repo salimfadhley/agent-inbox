@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 from agent_inbox import outbound
+from agent_inbox.federation import may_exchange
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.records import ObjectRecord
 
@@ -184,6 +185,19 @@ class FederatedDelivery:
     async def deliver(self, resolved: object, record: ObjectRecord) -> None:
         assert isinstance(resolved, outbound.RemoteRecipient)
         key, key_id = await self._signing(record.attributed_to)
+
+        # **Before the signature, before the socket.** A blocked hub must learn nothing,
+        # and a request that arrives is itself information: it confirms this hub exists,
+        # is running, and is still trying to reach them. So the refusal happens here,
+        # ahead of everything that would touch the network.
+        #
+        # Asked of `federation.may_exchange` rather than answered here. `deliver` is
+        # handed a peer list and checks membership; this is a different question with a
+        # different answer, and the moment it is re-derived in two places they begin to
+        # disagree — which for a blocklist means a blocked hub gets talked to (C-006).
+        verdict = await may_exchange(self.mailbox.store, resolved.origin)
+        if not verdict:
+            raise outbound.DeliveryRefused(verdict.reason)
 
         # Read immediately before the call and handed straight in, so `outbound.deliver`
         # decides against what is true *now*. Never cache this (FR-050).

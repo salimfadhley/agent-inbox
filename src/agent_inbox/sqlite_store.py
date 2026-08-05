@@ -91,6 +91,18 @@ _SCHEMA = (
         note    TEXT NOT NULL DEFAULT ''
     )
     """,
+    # Origins this hub refuses. **A separate table from the peers, not a column on it**,
+    # because a block is not a kind of peer: an operator blocks hubs they have never
+    # added and never will, and a block must outlive the removal of a peering. Keeping
+    # them in one table would make "blocked" a property of something trusted, which is
+    # the wrong shape and the one that produces a bypass when a peer is deleted.
+    """
+    CREATE TABLE IF NOT EXISTS federation_blocks (
+        origin  TEXT PRIMARY KEY,
+        added   TEXT NOT NULL DEFAULT '',
+        note    TEXT NOT NULL DEFAULT ''
+    )
+    """,
     # Activity ids already delivered. FR-5: a peer that retries must not double-deliver,
     # and "have I seen this" is the only way to know.
     """
@@ -263,6 +275,23 @@ class SqliteStore:
 
     async def remove_peer(self, origin: str) -> None:
         await self._execute("DELETE FROM federation_peers WHERE origin=?", (origin,))
+        await self._db.commit()
+
+    async def blocks(self) -> dict[str, str]:
+        """Origins this hub refuses, mapped to the note explaining why."""
+        cursor = await self._execute("SELECT origin, note FROM federation_blocks")
+        return {str(r["origin"]): str(r["note"]) for r in await cursor.fetchall()}
+
+    async def add_block(self, origin: str, added: str, note: str = "") -> None:
+        await self._execute(
+            "INSERT INTO federation_blocks (origin, added, note) VALUES (?, ?, ?) "
+            "ON CONFLICT(origin) DO UPDATE SET note=excluded.note",
+            (origin, added, note),
+        )
+        await self._db.commit()
+
+    async def remove_block(self, origin: str) -> None:
+        await self._execute("DELETE FROM federation_blocks WHERE origin=?", (origin,))
         await self._db.commit()
 
     async def hub_settings(self) -> dict[str, str]:

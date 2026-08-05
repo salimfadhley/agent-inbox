@@ -63,8 +63,10 @@ from agent_inbox.exceptions import (
 from agent_inbox.federation import (
     ENABLED,
     FEDERATION_MODES,
+    PeerBlocked,
     check_may_enable_federation,
     federates,
+    may_exchange,
 )
 from agent_inbox.house import House
 from agent_inbox.hub_settings import HUB_SETTING_KEYS, resolve_hub_settings
@@ -677,10 +679,65 @@ class Api:
             origin = peer_origin(raw)
         except MailboxError as refused:
             raise HTTPException(status_code=422, detail=str(refused)) from refused
+        # **Before anything else touches this origin.** FR-007 orders the flow:
+        # normalise, check the blocklist, only then go near the network. The order is
+        # the requirement rather than an optimisation — blocking a hub while still
+        # sending it a request tells it we tried, which is worse than not blocking it.
+        verdict = await may_exchange(self.house.mailbox.store, origin)
+        if not verdict:
+            raise PeerBlocked(verdict.reason)
         note = str(data.get("note", "")).strip()
         added = datetime.now(UTC).date().isoformat()
         await self.house.mailbox.add_peer(origin, added, note)
         return {"origin": origin, "trusted": True}
+
+    async def blocks(self) -> dict[str, Any]:
+        """Origins this hub refuses, and why."""
+        blocked = await self.house.mailbox.store.blocks()
+        return {
+            "items": [
+                {"origin": origin, "note": note}
+                for origin, note in sorted(blocked.items())
+            ]
+        }
+
+    async def add_block(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Refuse an origin, whatever the mode says.
+
+        Normalised through the **same** `peer_origin` the decision uses, so a block
+        entered with a trailing slash or an explicit `:443` matches the traffic it was
+        meant to stop. Two nearly-agreeing notions of "same hub" is how a blocklist
+        acquires a bypass.
+
+        Blocking does not remove an existing peering, and deliberately so: the block
+        wins while it stands, and un-blocking should not silently restore trust the
+        operator may since have changed their mind about. Both facts stay visible.
+        """
+        raw = str(data.get("origin", "")).strip()
+        if not raw:
+            raise HTTPException(status_code=422, detail="give an origin to block")
+        try:
+            origin = peer_origin(raw)
+        except MailboxError as refused:
+            raise HTTPException(status_code=422, detail=str(refused)) from refused
+        note = str(data.get("note", "")).strip()
+        added = datetime.now(UTC).date().isoformat()
+        await self.house.mailbox.store.add_block(origin, added, note)
+        api_logger.warning(
+            "event=federation.blocked origin=%s note=%s", origin, note or "(none)"
+        )
+        return {"origin": origin, "blocked": True}
+
+    async def remove_block(self, origin: str) -> dict[str, Any]:
+        """Stop refusing an origin. **It is not thereby trusted** — that is a separate
+        statement, and one an operator has to make on purpose."""
+        try:
+            normalised = peer_origin(origin)
+        except MailboxError as refused:
+            raise HTTPException(status_code=422, detail=str(refused)) from refused
+        await self.house.mailbox.store.remove_block(normalised)
+        api_logger.warning("event=federation.unblocked origin=%s", normalised)
+        return {"origin": normalised, "blocked": False, "trusted": False}
 
     async def remove_peer(self, origin: str) -> dict[str, Any]:
         """Stop trusting a hub.
@@ -2250,6 +2307,38 @@ def build_api(
         return await api.remove_peer(origin)
 
     @get(
+        "/observe/blocks",
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def list_blocks_route(operator: str) -> dict[str, Any]:
+        """Who this hub refuses. Operator-only: a roster of refusals is a statement
+        about other people, and not one to hand to anybody who asks."""
+        return await api.blocks()
+
+    @post(
+        "/observe/blocks",
+        status_code=201,
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def add_block_route(data: dict[str, Any], operator: str) -> dict[str, Any]:
+        """Refuse a hub. Operator-only, for the same reason adding a peer is: an agent
+        that could edit the blocklist could be talked into editing it."""
+        return await api.add_block(data)
+
+    @delete(
+        "/observe/blocks",
+        status_code=200,
+        guards=[guard_enforce],
+        dependencies={"operator": Provide(provide_operator)},
+    )
+    async def remove_block_route(origin: str, operator: str) -> dict[str, Any]:
+        """Stop refusing a hub. Takes effect on the next exchange, because the decision
+        is made per attempt and never carried (FR-050)."""
+        return await api.remove_block(origin)
+
+    @get(
         "/observe/purge",
         guards=[guard_enforce],
         dependencies={"operator": Provide(provide_operator)},
@@ -2561,6 +2650,9 @@ def build_api(
         remove_operator_route,
         list_peers_route,
         add_peer_route,
+        list_blocks_route,
+        add_block_route,
+        remove_block_route,
         remove_peer_route,
         purge_preview,
         purge_status_route,

@@ -13,7 +13,10 @@ Note what is gated: **enabling the mode**, not federating. A hub that has switch
 federation on and has not been named is a state worth not having.
 """
 
+from dataclasses import dataclass
+
 from agent_inbox.exceptions import MailboxError
+from agent_inbox.store import MessageStore
 
 #: The name every hub answers to in addition to its own, and the default.
 LOCAL = "local"
@@ -50,3 +53,69 @@ def check_may_enable_federation(hub_name: str) -> None:
 def federates(settings: dict[str, str]) -> bool:
     """Whether federation is on. Off unless something says otherwise."""
     return settings.get(FEDERATION_KEY, DISABLED) == ENABLED
+
+
+class PeerBlocked(MailboxError):
+    """This origin is refused, whatever the mode says.
+
+    Its own type rather than a generic refusal, because the *remedy* differs from every
+    other reason an exchange might not happen: nothing about the peer, the network or
+    the mode will change it. An operator decided this, and only an operator undoes it.
+    """
+
+    code = "peer_blocked"
+
+
+@dataclass(frozen=True, slots=True)
+class Exchange:
+    """Whether an exchange with an origin may happen, and why not if it may not.
+
+    Carrying the reason rather than a bare ``False`` is the same rule the rest of this
+    codebase follows: a caller reconstructing *why* is how two call sites begin to
+    disagree, and a disagreement about whether to talk to a stranger is a disclosure.
+    """
+
+    allowed: bool
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        return self.allowed
+
+
+async def may_exchange(store: MessageStore, origin: str) -> Exchange:
+    """**The** decision: may this hub exchange anything with *origin*?
+
+    One function, consulted by every path that needs the answer — adding a peer,
+    delivering outbound, accepting inbound. If the decision is made in two places they
+    will disagree, and a disagreement here is a disclosure (C-006).
+
+    **The blocklist overrides the mode in every case, and is checked first.** A blocked
+    origin is refused even when it is also a trusted peer: that combination is not a
+    contradiction to resolve but a peer somebody added and later blocked, and block
+    wins. Checking it first is not an optimisation — it is what stops a blocked hub
+    learning that we tried.
+
+    Matching is on the **normalised** origin, through the same `peer_origin` every other
+    guard uses, so a block survives the three ways one is evaded by accident: case, a
+    trailing slash, and an explicit `:443`.
+
+    Nothing here reads the mode setting. Whether federation is on at all is a separate
+    question with a separate answer, asked by the caller that knows the mode; folding it
+    in would make this function need a second input and give it a second reason to
+    refuse, which is how one decision becomes two.
+    """
+    from agent_inbox.peers import peer_origin
+
+    try:
+        normalised = peer_origin(origin)
+    except MailboxError as unusable:
+        # An origin we cannot even normalise is not one we can decide about, and
+        # "cannot parse" must never read as "permitted".
+        return Exchange(False, str(unusable))
+
+    blocked = await store.blocks()
+    if normalised in blocked:
+        note = blocked[normalised]
+        because = f" — {note}" if note else ""
+        return Exchange(False, f"{normalised} is blocked by this hub{because}")
+    return Exchange(True)

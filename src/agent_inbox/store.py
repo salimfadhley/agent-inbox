@@ -95,6 +95,18 @@ class MessageStore(Protocol):
         """Origins this hub trusts, mapped to when each was added."""
         ...
 
+    async def blocks(self) -> dict[str, str]:
+        """Origins this hub refuses, mapped to why. Empty until an operator says so."""
+        ...
+
+    async def add_block(self, origin: str, added: str, note: str = "") -> None:
+        """Refuse an origin. Idempotent — blocking twice is not an error."""
+        ...
+
+    async def remove_block(self, origin: str) -> None:
+        """Stop refusing an origin. It is not thereby trusted."""
+        ...
+
     async def seen_activity(self, activity_id: str) -> bool:
         """Whether this activity has already been delivered."""
         ...
@@ -128,6 +140,7 @@ class InMemoryStore:
         self._reads: dict[str, dict[str, ReadRecord]] = {}
         self._hub_settings: dict[str, str] = {}
         self._peers: dict[str, str] = {}
+        self._blocks: dict[str, str] = {}
         self._seen: dict[str, str] = {}
 
     async def claim_name(self, actor: ActorRecord) -> bool:
@@ -188,6 +201,15 @@ class InMemoryStore:
 
     async def peers(self) -> dict[str, str]:
         return dict(self._peers)
+
+    async def blocks(self) -> dict[str, str]:
+        return dict(self._blocks)
+
+    async def add_block(self, origin: str, added: str, note: str = "") -> None:
+        self._blocks[origin] = note or added
+
+    async def remove_block(self, origin: str) -> None:
+        self._blocks.pop(origin, None)
 
     async def add_peer(self, origin: str, added: str, note: str = "") -> None:
         self._peers[origin] = added

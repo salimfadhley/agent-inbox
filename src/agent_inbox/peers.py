@@ -41,6 +41,10 @@ _CHUNK = 8 * 1024
 #: exists.
 ALLOWED_SCHEMES = ("https",)
 
+#: The port each scheme means when none is written. Naming them is what lets
+#: `https://peer.example:443` and `https://peer.example` compare equal — see `_origin`.
+_DEFAULT_PORTS = {"https": 443, "http": 80}
+
 #: …except against a hub on this machine, which is how the demo and the tests work.
 #: Narrow by design: an explicit opt-in for loopback only, not "http when you feel
 #: like it".
@@ -147,7 +151,13 @@ def _origin(url: str) -> tuple[str, str, str]:
             "except http to a hub on this machine, or anywhere when this deployment "
             f"sets AGENT_INBOX_{INSECURE_ENV}"
         )
-    port = f":{parts.port}" if parts.port else ""
+    # **The scheme's own default port is dropped.** `https://peer.example:443` and
+    # `https://peer.example` are the same hub, and a trust or block list that treats
+    # them as different has a bypass anybody can type by accident — or on purpose.
+    # Found on 2026-08-05 while testing the blocklist against exactly this evasion;
+    # it applied equally to the peer list, which is the more serious half.
+    default = _DEFAULT_PORTS.get(parts.scheme)
+    port = f":{parts.port}" if parts.port and parts.port != default else ""
     return parts.scheme, host, port
 
 
