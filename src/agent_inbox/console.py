@@ -328,6 +328,27 @@ def _mbox_link(name: Any) -> str:
     return f'<a href="/agent/{safe}"><code>{safe}</code></a>'
 
 
+def _who_links(who: str) -> str:
+    """The other party, as links to their own pages.
+
+    A name in the feed is the most natural thing in the console to click, and until now
+    it was the one place a name was rendered as plain text. Sent rows can name several
+    recipients, so each is linked separately — one anchor around "alice, bob" would go
+    to an agent called `alice, bob`.
+
+    Kept in step with `static/feed.js`, which builds the same anchors for rows that
+    arrive live. The two land on one list and any difference reads as a bug in whichever
+    half the reader trusts less.
+    """
+    names = [part.strip() for part in (who or "").split(",") if part.strip()]
+    if not names:
+        return "—"
+    return ", ".join(
+        f'<a href="/agent/{html.escape(name)}">{html.escape(name)}</a>'
+        for name in names
+    )
+
+
 def _seed_row(note: dict[str, Any], subject: str) -> str:
     """One already-arrived message, in the same shape the live script builds.
 
@@ -361,7 +382,7 @@ def _seed_row(note: dict[str, Any], subject: str) -> str:
         '<span class="feed-rail" aria-hidden="true"></span>'
         '<div class="feed-body"><div class="feed-meta">'
         + (f'<span class="feed-dir">{word}</span>' if word else "")
-        + f'<span class="feed-who">{html.escape(other or "—")}</span>'
+        + f'<span class="feed-who">{_who_links(other)}</span>'
         f'<span class="feed-when" title="{html.escape(when)}">'
         f"{html.escape(_shortdate(when))}</span></div>"
         f'<p class="feed-subject"><a href="/message/{html.escape(oid)}">'

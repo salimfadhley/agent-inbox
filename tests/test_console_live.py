@@ -532,3 +532,49 @@ class TestTheClientVersionTheHubSaw:
             text = console.get(f"/agent/{ROSEMARY}").text
 
         assert "Client seen" not in text
+
+
+class TestNamesInTheFeedAreClickable:
+    """The most natural thing in the console to click was the one plain-text name.
+
+    Owner's request, 2026-08-05. It has to hold in both halves: rows the server seeds
+    and rows the script adds land on the same list, and a name that is a link in one and
+    not the other reads as a bug in whichever the reader trusts less.
+    """
+
+    def test_a_seeded_row_links_the_other_party(self, console: TestClient) -> None:
+        feed = console.get("/realtime").text.split('class="feed-rows"', 1)[1]
+
+        assert f'href="/agent/{ROSEMARY}"' in feed, "the name is not clickable"
+
+    def test_the_live_half_builds_the_same_link(self) -> None:
+        """Pinned against the script, since no browser runs in this suite."""
+        from agent_inbox.console import STATIC_DIR
+
+        script = (STATIC_DIR / "feed.js").read_text()
+
+        assert '"/agent/"' in script
+        assert "encodeURIComponent" in script, "a name with a slash would break the url"
+        assert "innerHTML" not in script, "a name is somebody else's text"
+
+    def test_several_recipients_get_several_links(self, hub: StubHub) -> None:
+        """One anchor around "alice, bob" points at an agent of that name."""
+        hub.sent = [
+            note("s2", ROSEMARY, [TREVOR, "yitzhak_levin"], "to two", "2026-08-03")
+        ]
+        with TestClient(app=build_console(hub)) as console:
+            feed = console.get(f"/agent/{ROSEMARY}").text.split('class="feed-rows"', 1)[
+                1
+            ]
+
+        assert feed.count('href="/agent/') >= 2, "the recipients share one link"
+
+    def test_a_row_with_nobody_named_does_not_link_a_dash(self, hub: StubHub) -> None:
+        """The paired negative: an em dash is not an agent."""
+        hub.sent = [note("s3", ROSEMARY, [], "to nobody", "2026-08-03")]
+        with TestClient(app=build_console(hub)) as console:
+            feed = console.get(f"/agent/{ROSEMARY}").text.split('class="feed-rows"', 1)[
+                1
+            ]
+
+        assert 'href="/agent/—"' not in feed

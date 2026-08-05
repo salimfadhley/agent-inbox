@@ -133,7 +133,23 @@
 
     var who = document.createElement("span");
     who.className = "feed-who";
-    who.textContent = this.otherParty(event, direction);
+    /* Each name links to its own page — the most natural thing here to click. Built as
+       elements rather than markup: a name is somebody else's text, and `textContent`
+       is what keeps it text. Several recipients get several anchors, because one link
+       around "alice, bob" would point at an agent called "alice, bob". */
+    var parties = this.otherParty(event, direction).split(",");
+    parties.forEach(function (raw, index) {
+      var name = raw.trim();
+      if (index) who.appendChild(document.createTextNode(", "));
+      if (!name || name === "—") {
+        who.appendChild(document.createTextNode(name || "—"));
+        return;
+      }
+      var link = document.createElement("a");
+      link.href = "/agent/" + encodeURIComponent(name);
+      link.textContent = name;
+      who.appendChild(link);
+    });
     meta.appendChild(who);
 
     var when = document.createElement("span");
