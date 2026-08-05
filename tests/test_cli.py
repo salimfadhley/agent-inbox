@@ -946,9 +946,13 @@ def test_doctor_names_the_interpreter_and_where_it_came_from(
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
+    # The *base* interpreter, not the venv in front of it — which is the whole point
+    # of the fix this asserts. Both are patched: `_base_executable` is what the code
+    # prefers, and `base_prefix` is the fallback when a build does not expose it.
     monkeypatch.setattr(
-        sys, "executable", r"C:\Users\x\scoop\apps\python\current\python.exe"
+        sys, "_base_executable", r"C:\Users\x\scoop\apps\python\current\python.exe"
     )
+    monkeypatch.setattr(sys, "base_prefix", r"C:\Users\x\scoop\apps\python\current")
 
     main(["--engine", "claude", "doctor"])
     out = capsys.readouterr().out

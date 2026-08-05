@@ -128,6 +128,31 @@ _ORIGINS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _base_interpreter() -> str:
+    """The real interpreter behind this process, not the virtualenv in front of it.
+
+    **`sys.executable` is the wrong question here**, and wrong in exactly the case this
+    is for. Installed the documented way — `uv tool install` — agent-inbox runs inside
+    a tool venv, so `sys.executable` is that venv's `python`, whose path says nothing
+    about where the interpreter came from. On this machine it reported nothing at all
+    while the real interpreter was plainly uv-managed.
+
+    Found from `igor_laszlo`'s Windows data before anyone ran the code: he sent the
+    `pyvenv.cfg` of a scoop install, whose `home = C:/Users/…/scoop/apps/python/current`
+    is precisely `sys.base_prefix`. A venv records where it came from; the venv's own
+    path does not.
+
+    `sys._base_executable` is the most exact answer and is private, so it is preferred
+    and then fallen back on — the public `base_prefix` names the installation directory,
+    which carries the same telltale fragments.
+    """
+    import sys
+
+    return str(
+        getattr(sys, "_base_executable", "") or sys.base_prefix or sys.executable or ""
+    )
+
+
 def interpreter_origin(executable: str | None = None) -> str:
     """Where the interpreter running this client came from — ``"uv"``, ``"scoop"``, …
 
@@ -140,9 +165,8 @@ def interpreter_origin(executable: str | None = None) -> str:
     Windows today a strictly older one. `igor_laszlo` found that shape; this is what
     lets `doctor` say which case a reader is in rather than leave them to work it out.
     """
-    import sys
 
-    path = (executable if executable is not None else sys.executable or "").lower()
+    path = (executable if executable is not None else _base_interpreter()).lower()
     path = path.replace("\\", "/")
     for fragment, name in _ORIGINS:
         if fragment in path:

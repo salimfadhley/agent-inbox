@@ -250,3 +250,53 @@ class TestWhereTheInterpreterCameFrom:
             staleness.interpreter_origin(r"C:\Users\x\scoop\shims\python3.exe")
             == "scoop"
         )
+
+
+class TestItLooksBehindTheVirtualenv:
+    """**The shipped 0.70.0 detection did not work for the documented install.**
+
+    Installed the way the prompt says — `uv tool install` — agent-inbox runs inside a
+    tool venv, so `sys.executable` is that venv's python and its path says nothing about
+    where the interpreter came from. On the author's own machine `doctor` printed no
+    source at all while the interpreter was plainly uv-managed, and the tests passed
+    because every one of them fed a path in directly.
+
+    Found from `igor_laszlo`'s Windows data **before anyone ran the code**: he sent the
+    `pyvenv.cfg` of a scoop install rather than a doctor line, because he could not
+    upgrade. Its `home = C:/Users/.../scoop/apps/python/current` is exactly
+    `sys.base_prefix` — a venv records where it came from, and the venv's own path
+    does not.
+    """
+
+    def test_this_process_reports_a_source(self) -> None:
+        """The test the module tests could not be: no path is passed in, so it
+        exercises what `doctor` inspects. Under `uv run`, this venv's base is
+        uv-managed."""
+        assert staleness.interpreter_origin() == "uv", (
+            "the detection is looking at the virtualenv rather than through it"
+        )
+
+    def test_a_uv_tool_venv_is_not_mistaken_for_a_uv_interpreter(self) -> None:
+        """The near-miss that would make the bug invisible. A tool venv lives under
+        `uv/tools/`, not `uv/python/` — reporting it as a uv *interpreter* would be
+        confidently wrong in precisely the case being fixed."""
+        assert (
+            staleness.interpreter_origin(
+                r"C:\Users\x\AppData\Roaming\uv\tools\agent-inbox\Scripts\python.exe"
+            )
+            == ""
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # Both shapes `uv python list` reports for one scoop install. A table
+            # matching only `scoop\apps` would miss anything resolved via the shim, and
+            # vice versa — `igor_laszlo` sent both and recommended matching on `scoop`
+            # alone, which is what this pins.
+            r"C:\Users\SFadhley\scoop\apps\python\current",
+            r"C:\Users\SFadhley\scoop\shims\python3.exe",
+        ],
+    )
+    def test_both_scoop_shapes_are_recognised(self, path: str) -> None:
+        assert staleness.interpreter_origin(path) == "scoop"
