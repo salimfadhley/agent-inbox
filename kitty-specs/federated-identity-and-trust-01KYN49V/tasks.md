@@ -156,6 +156,28 @@ anywhere carries a key, a token, or message content.
 `api.py` today, so this requirement may already be satisfied — in which case close it rather
 than re-satisfying it.
 
+## On the requirement-mapping validator
+
+`finalize-tasks --validate-only` reports twenty-five unmapped functional requirements.
+Recorded rather than worked around, because the number is misleading in two distinct
+ways and a later reader will otherwise think this decomposition has holes.
+
+**Most of them are not this mission's requirements.** The spec's FR table carries a
+*Parent* column for traceability — `FR-025`, `FR-041` through `FR-053` and the rest are
+ids belonging to `manual-activitypub-federation-v1`, kept so the split can be traced
+back. The validator reads that column as requirements of this mission. They have no
+work packages here because they are not requirements here.
+
+**The remainder are already shipped**, and the audit in `plan.md` names each with a file
+and line: FR-001 (federation off by default), FR-002 (the enable guard), FR-005
+(https-only by allowlist), FR-011 (WebFinger), FR-018 (the signing keypair). Mapping them
+to a work package would schedule work that produces no change, which is the exact failure
+the audit exists to prevent.
+
+Ownership *was* worth re-checking by hand, and found something real: WP03 and WP06 both
+claimed `house.py`. WP06 now owns `federation.py`, where a federation audit belongs
+anyway. No overlaps remain across the fourteen owned paths.
+
 ## MVP
 
 **WP01 alone is shippable and is the safety gap.** Without it there is no way to refuse a
