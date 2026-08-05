@@ -1809,3 +1809,34 @@ def test_the_client_header_is_spelled_the_same_on_both_sides() -> None:
     from agent_inbox.client import CLIENT_HEADER as client_side
 
     assert hub_side == client_side
+
+
+def test_the_hub_header_is_spelled_the_same_on_both_sides() -> None:
+    """The same pin for the answer travelling the other way.
+
+    Drift here is just as quiet: the client reads a header nobody sends, records
+    nothing, and goes on repeating whatever version it learned first — which is the
+    bug this header exists to fix, restored by a typo.
+    """
+    from agent_inbox.api import HUB_HEADER as hub_side
+    from agent_inbox.client import HUB_HEADER as client_side
+
+    assert hub_side == client_side
+
+
+def test_every_answer_carries_the_hub_version(client: TestClient) -> None:
+    """The premise for the client-side tests, asserted where it is actually produced.
+
+    Reported by `mariana_taphrale`: an MCP session learned the hub version once and
+    repeated it for its whole life. Those tests stub a response and would pass just as
+    happily against a hub that had never sent the header — which is the vacuous shape
+    this project has been caught by before.
+
+    Two routes, one of them nothing to do with versions: the value of an `after_request`
+    hook is that a route added next month cannot forget.
+    """
+    from agent_inbox.api import HUB_HEADER
+
+    for path in ("/health", "/actors"):
+        answer = client.get(path)
+        assert answer.headers.get(HUB_HEADER), f"{path} did not say which hub answered"

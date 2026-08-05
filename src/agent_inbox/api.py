@@ -103,6 +103,20 @@ SESSION_COOKIE = "agent_inbox_session"
 #: agent used (`igor_laszlo`, 2026-08-05).
 CLIENT_HEADER = "X-Agent-Inbox-Client"
 
+#: What version this hub is running, on **every** response — the mirror of the header
+#: above, and for the same reason in the other direction.
+#:
+#: Reported by `mariana_taphrale`, 2026-08-05: an MCP session learned the hub's version
+#: once, from `ping`, and then repeated it in every tool result for the rest of its
+#: life. The hub upgraded twice underneath one such session, which went on telling its
+#: agent "this hub runs 0.58.0" while its own calls were being answered by 0.60.1 — a
+#: cached fact presented as an observation, which is the failure this project keeps
+#: meeting in other clothes.
+#:
+#: A header rather than a field in each payload: it costs nothing per route, cannot be
+#: forgotten by a new one, and reaches responses that carry no body at all.
+HUB_HEADER = "X-Agent-Inbox-Hub"
+
 #: ActivityStreams asks for this; plain JSON clients are not refused for lacking it.
 ACTIVITY_JSON = "application/activity+json"
 
@@ -2512,9 +2526,21 @@ def build_api(
             with suppress(asyncio.CancelledError):
                 await task
 
+    def stamp_the_hub_version(response: Response[Any]) -> Response[Any]:
+        """Say which hub answered, on every response. See :data:`HUB_HEADER`.
+
+        An `after_request` hook rather than something each route remembers to do: the
+        whole value of this is that a client can rely on it being there, and a route
+        added next month that forgot it would make the staleness notice silently wrong
+        for exactly the calls that route serves.
+        """
+        response.headers[HUB_HEADER] = __version__
+        return response
+
     app = Litestar(
         on_startup=[open_the_house],
         lifespan=[scheduled_purge],
+        after_request=stamp_the_hub_version,
         route_handlers=handlers,
         # Published rather than merely generated. A client author working in a language
         # with no `agent-inbox` package has otherwise had to read this module, and the

@@ -167,3 +167,102 @@ class TestTheClientSaysWhatItIs:
         client = HubClient(Config(hub="http://hub.invalid", name="jed_smith"))
 
         assert client.stream_headers()[CLIENT_HEADER]
+
+
+class TestTheHubSaysWhatItIsOnEveryAnswer:
+    """Reported by `mariana_taphrale`, 2026-08-05.
+
+    An MCP session learned the hub's version once, from `ping`, and then repeated it in
+    every tool result for the rest of its life. The hub was upgraded twice underneath
+    one such session, which went on telling its agent "this hub runs 0.58.0" while its
+    own calls were being answered by 0.60.1.
+
+    The bug is not the number being wrong. It is a **cached fact presented as an
+    observation** — the failure this project keeps meeting, and the reason the fix is a
+    header on every response rather than one more route that remembers to report it.
+    """
+
+    @staticmethod
+    def _reply(headers: dict[str, str]) -> object:
+        class _Reply:
+            def __init__(self) -> None:
+                self.headers = {"Content-Type": "application/json", **headers}
+
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Reply":  # noqa: UP037
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+        return _Reply()
+
+    def test_an_ordinary_call_records_the_hub_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not `ping`. `check_inbox` is what a session actually spends its life doing,
+        and before this it taught the client nothing about the hub."""
+        from agent_inbox import staleness
+        from agent_inbox.client import HUB_HEADER
+
+        staleness.reset()
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda request, timeout=0: self._reply({HUB_HEADER: "999.0.0"}),
+        )
+
+        HubClient(Config(hub="http://hub.invalid", name="jed_smith")).check_inbox()
+
+        assert staleness.notice(), "an ordinary call taught the client nothing"
+        assert "999.0.0" in str(staleness.notice())
+        staleness.reset()
+
+    def test_a_later_answer_corrects_an_earlier_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The actual defect: not that the first observation was wrong, but that no
+        second one could ever replace it. A hub upgraded mid-session must be
+        believed."""
+        from agent_inbox import staleness
+        from agent_inbox.client import HUB_HEADER
+
+        staleness.reset()
+        client = HubClient(Config(hub="http://hub.invalid", name="jed_smith"))
+
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda request, timeout=0: self._reply({HUB_HEADER: "999.0.0"}),
+        )
+        client.check_inbox()
+        assert staleness.notice(), "the premise failed — nothing was recorded at all"
+
+        # The hub is rolled back to something this client is not behind. The notice must
+        # stop, rather than persisting because it was learned first.
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda request, timeout=0: self._reply({HUB_HEADER: "0.0.1"}),
+        )
+        client.check_inbox()
+
+        assert staleness.notice() is None, (
+            "a version learned once was never corrected — the reported bug"
+        )
+        staleness.reset()
+
+    def test_an_answer_with_no_header_is_not_evidence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The paired negative. An older hub sends nothing, and silence must not be read
+        as a version — inventing one would make the notice confidently wrong."""
+        from agent_inbox import staleness
+
+        staleness.reset()
+        monkeypatch.setattr(
+            "urllib.request.urlopen", lambda request, timeout=0: self._reply({})
+        )
+
+        HubClient(Config(hub="http://hub.invalid", name="jed_smith")).check_inbox()
+
+        assert staleness.notice() is None

@@ -53,6 +53,34 @@ IDENTITY_HEADER = "X-Agent-Name"
 #: fact about now.
 CLIENT_HEADER = "X-Agent-Inbox-Client"
 
+#: What the hub says *it* is running, returned on every response. The mirror of the
+#: header above, and the answer to the same class of problem in the other direction: a
+#: version learned once and believed for ever is not an observation.
+#:
+#: Spelled here rather than imported from the hub — a client does not depend on the hub
+#: package — and pinned by a test against `api.HUB_HEADER`, exactly as `CLIENT_HEADER`
+#: is, so the two spellings cannot drift apart unnoticed.
+HUB_HEADER = "X-Agent-Inbox-Hub"
+
+
+def _note_hub(version: str) -> None:
+    """Record the hub's version, and never let doing so break a call.
+
+    A best-effort act following one that has already succeeded — the response is in
+    hand — so the charter's boundary applies: this may fail silently, because a
+    bookkeeping error here would turn a delivered message into an exception the agent
+    sees instead. The cost of losing it is a staleness notice one call out of date.
+    """
+    if not version:
+        return
+    try:
+        from agent_inbox import staleness
+
+        staleness.note_hub_version(version)
+    except Exception:  # noqa: BLE001 - see above: never fail a completed call
+        logger.debug("could not record the hub version %r", version, exc_info=True)
+
+
 #: Client settings, current name first. As with the hub's own prefix, the new name wins
 #: when both are present: whoever set it is mid-migration and means the newer one.
 ENV_NAMES: dict[str, tuple[str, ...]] = {
@@ -889,6 +917,12 @@ class HubClient:
             request.add_header("Cookie", f"{SESSION_COOKIE}={self.session}")
         try:
             with self._open(request) as response:
+                # Every answer says which hub gave it, so the staleness notice
+                # reflects the hub as it is now rather than as it was when this
+                # session started. `mariana_taphrale` found an MCP session repeating
+                # a version the hub had left two releases behind: it learned it once,
+                # from `ping`, and nothing ever corrected it.
+                _note_hub(response.headers.get(HUB_HEADER, ""))
                 raw = response.read()
                 if not raw:
                     return None
