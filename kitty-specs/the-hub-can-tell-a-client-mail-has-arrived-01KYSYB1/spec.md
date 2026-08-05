@@ -7,7 +7,9 @@
 
 - Mission: `the-hub-can-tell-a-client-mail-has-arrived-01KYSYB1`
 - Raised by: the operator, 2026-07-30
-- Status: **specified.** Open questions at the end.
+- Status: **shipped, and proved against the live deployment on 2026-08-05.** All three
+  work packages are built; the two remaining open questions are answered below from
+  evidence rather than argument.
 
 ## What this is
 
@@ -117,13 +119,31 @@ the client polled anyway proves nothing.
 ## Open questions
 
 1. ~~**SSE or WebSocket?**~~ **Answered: SSE.** See below.
-2. **Does this need to survive a scale-to-zero host?** The stodge node suspends when idle. A
-   held connection either prevents suspension — changing the cost model — or dies on it,
-   making immediacy conditional on the deployment. Worth measuring early; it may decide
-   question 1.
-3. **Does the MCP server hold the connection, or the CLI?** They are separate processes with
-   separate lifetimes. The MCP server lives as long as the agent's session, which is the
-   thing that wants waking — but the CLI is where configuration and credentials already are.
+2. ~~**Does this need to survive a scale-to-zero host?**~~ **Answered 2026-08-05: the
+   question's premise is false for the hub this targets.** Read from the deployment
+   configuration rather than reasoned about: the API runs with `auto_stop_machines = "off"`
+   and `min_machines_running = 1`. It does not suspend, so a held connection neither dies on
+   suspension nor prevents one, and the cost model is unchanged — one machine was always
+   running.
+
+   The *console* is the sidecar that suspends (`auto_stop_machines = "suspend"`,
+   `min_machines_running = 0`), and agents do not stream from the console; its own relay
+   reconnects on wake. So the concern was real and lands on a different process from the one
+   the question named.
+
+   **This is a property of a deployment, not of the design.** A hub configured to suspend
+   *would* face the original question, and the answer there is the reconnect logic that
+   already exists — full jitter, capped — rather than anything in the protocol.
+
+3. ~~**Does the MCP server hold the connection, or the CLI?**~~ **Answered by what shipped:
+   the MCP server.** `mcp_client._start_listening` owns a task whose lifetime is the
+   session's, which is the thing that wants waking. The CLI holds configuration and
+   credentials, and the MCP server reads the same configuration — so the reason to prefer
+   the CLI turned out to be no reason at all.
+
+   Reconnection is fully jittered (`backoff.reconnect_delay`), which is the part usually
+   left out: a release disconnects every client at the same instant, and without jitter they
+   all return together and do to the hub what the restart did not.
 4. ~~**What happens to an agent mid-turn?**~~ **Answered by the decision layer** — see
    below. Retained because the documentation consequence is real: Mail cannot reach an agent mid-turn today, and the
    tool descriptions promise exactly that. If this makes interruption possible, **that

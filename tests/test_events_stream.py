@@ -449,3 +449,39 @@ class TestOverHttp:
                 assert during["listeningBy"] == {ROSEMARY: 1}
             finally:
                 stream.close()
+
+
+class TestTheStreamCarriesNoBody:
+    """WP01's central promise, and the one that would be quietly broken by a helpful
+    change: the event says *that* mail exists and enough to decide whether to fetch it —
+    never the message itself.
+
+    Proved live against the deployment on 2026-08-05 (WP01/T008): an event arrived 0.04s
+    after the send, carrying `id`, `from`, `subject` and `published`, and nothing else.
+    This is the same assertion pinned where CI can keep it.
+    """
+
+    def test_the_wire_fields_are_exactly_the_four(self) -> None:
+        from agent_inbox.notify import Arrival
+
+        frame = Arrival(
+            id="m-1",
+            sender="rosemary_nasrin",
+            subject="a subject",
+            published="2026-08-05",
+        ).as_event()
+
+        assert sorted(frame) == ["from", "id", "published", "subject"]
+
+    def test_a_body_cannot_reach_the_wire(self) -> None:
+        """The negative that matters. A body pushed at a client is a body nobody asked
+        for, and it would make this stream a second way to read mail — consuming
+        nothing and leaving no read record.
+        """
+        from agent_inbox.notify import Arrival
+
+        frame = Arrival(
+            id="m-1", sender="x", subject="s", published="2026-08-05"
+        ).as_event()
+
+        assert not any(key in frame for key in ("content", "body", "message"))
