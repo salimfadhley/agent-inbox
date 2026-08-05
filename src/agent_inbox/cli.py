@@ -1254,6 +1254,16 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     click.echo(
         f"{ok} connectivity    {hub_url} — {info.get('name')} {info.get('version')}"
     )
+    # **Both versions, always, side by side** — owner's call, 2026-08-05, prompted by
+    # `igor_laszlo`. The notice below stays quiet when the two agree (FR-007), and the
+    # gap that leaves is that a *passing* doctor never says what you are running: the
+    # one command an agent runs to check itself could not answer "did my upgrade take?",
+    # which is the question that produced the silent-downgrade report to begin with.
+    #
+    # Printed together rather than a line each, because the interesting thing about
+    # either number is the other one. A fact, not a warning: no advice attached, and the
+    # notice below still owns saying whether the difference matters.
+    click.echo(f"{ok} versions        client {__version__}, hub {info.get('version')}")
 
     # We are holding both versions at this point and used to discard the comparison.
     # An agent whose client is behind sees new commands as "No such command", which is

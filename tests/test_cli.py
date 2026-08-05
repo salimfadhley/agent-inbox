@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from agent_inbox import __version__
+from agent_inbox import __version__, staleness
 from agent_inbox.cli import force_utf8, main
 from agent_inbox.client import CONFIG_NAME, ClientError, Config
 
@@ -913,6 +913,63 @@ def test_doctor_hub_flag_contacts_the_hub_it_names(
     )
     assert "http://configured:8081" not in seen, (
         "doctor contacted the configured hub despite being asked about another"
+    )
+
+
+def test_doctor_reports_both_versions_even_when_healthy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Owner, 2026-08-05, prompted by `igor_laszlo` after the silent-downgrade fix.
+
+    The staleness notice is deliberately quiet when client and hub agree (FR-007), and
+    the gap that leaves is that a *passing* doctor never says what you are running — so
+    the one command an agent runs to check itself cannot answer "did my upgrade take?",
+    which is the question that produced the downgrade report in the first place.
+
+    Both numbers, together: the interesting thing about either is the other.
+
+    Removal proof: delete the `versions` echo and this fails while the staleness tests
+    keep passing, since none of them look at the healthy path's output.
+    """
+    from agent_inbox import __version__
+
+    HUB_VERSION = "99.0.0"
+
+    class FakeHubClient:
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def hub_info(self) -> dict[str, Any]:
+            return {"name": "here", "version": HUB_VERSION}
+
+        def remote_doctor(self) -> dict[str, Any]:
+            return {"you": {"token": "accepted"}, "verdict": "fine"}
+
+        def ping(self) -> dict[str, Any]:
+            return {"waiting": 0}
+
+        def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            return {"unread": 0, "items": [], "cursor": ""}
+
+    (tmp_path / CONFIG_NAME).write_text(
+        'hub = "http://here:8080"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
+
+    main(["--engine", "claude", "doctor"])
+    out = capsys.readouterr().out
+
+    assert f"client {__version__}" in out, (
+        "a passing doctor does not say which client is running"
+    )
+    assert f"hub {HUB_VERSION}" in out, "and it does not say what the hub runs either"
+    # The paired negative: these are *facts*, not the staleness notice arriving by
+    # another route. The two numbers here differ, and it is the notice's job — not this
+    # line's — to say whether that matters and what to do about it.
+    assert staleness.notice() in out, (
+        "the notice that owns the advice has stopped firing — these two lines are "
+        "additive, and the facts line must not have replaced the judgement"
     )
 
 
