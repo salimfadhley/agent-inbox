@@ -165,3 +165,85 @@ class TestAReplyControlOnEveryMessage:
         rendered = page([turn("a", AGENT, None, "1")], signed_in=False)
 
         assert "/reply" not in rendered
+
+
+class TestPressingTheReplyButtonActuallyWorks:
+    """Reported by the owner, 2026-08-05: **Send Reply gave a 404.**
+
+    The route existed and was never added to the console's `route_handlers`, so it was
+    dead code with a button pointing at it. Every test in this file passed anyway,
+    because they all assert the control *renders* — not that pressing it does anything.
+    That is the same shape as the API prompt route earlier today, which was also written
+    and never registered, and it is why a rendering test is not a substitute for
+    exercising the thing it renders.
+    """
+
+    def test_a_reply_is_accepted_and_sent(self) -> None:
+        sent: list[tuple[str, str]] = []
+
+        class Replying(Hub):
+            def reply_message(
+                self, object_id: str, body: str, subject: str | None = None
+            ) -> dict[str, Any]:
+                sent.append((object_id, body))
+                return {"id": f"{HUB}/objects/new"}
+
+        with TestClient(
+            app=build_console(Replying([turn("a", AGENT, None, "1")]))
+        ) as c:
+            answer = c.post(
+                "/message/a/reply",
+                data={"body": "my reply"},
+                cookies={SESSION_COOKIE: "a-session"},
+                follow_redirects=False,
+            )
+
+        assert answer.status_code != 404, "the reply route is not registered"
+        assert answer.status_code == 303, answer.status_code
+        assert sent == [("a", "my reply")], "the reply never reached the hub"
+
+    def test_it_returns_to_the_thread_rather_than_rendering(self) -> None:
+        """A reply is a POST. A page that re-submitted it on reload would send the
+        message twice, which is not something a reader can undo."""
+
+        class Replying(Hub):
+            def reply_message(
+                self, object_id: str, body: str, subject: str | None = None
+            ) -> dict[str, Any]:
+                return {"id": f"{HUB}/objects/new"}
+
+        with TestClient(
+            app=build_console(Replying([turn("a", AGENT, None, "1")]))
+        ) as c:
+            answer = c.post(
+                "/message/a/reply",
+                data={"body": "my reply"},
+                cookies={SESSION_COOKIE: "a-session"},
+                follow_redirects=False,
+            )
+
+        assert answer.headers["location"] == "/message/a"
+
+    def test_an_empty_reply_sends_nothing(self) -> None:
+        """The paired negative. An accidental submit must not post a blank message into
+        somebody's thread."""
+        sent: list[str] = []
+
+        class Replying(Hub):
+            def reply_message(
+                self, object_id: str, body: str, subject: str | None = None
+            ) -> dict[str, Any]:
+                sent.append(body)
+                return {}
+
+        with TestClient(
+            app=build_console(Replying([turn("a", AGENT, None, "1")]))
+        ) as c:
+            c.post(
+                "/message/a/reply",
+                data={"body": "   "},
+                cookies={SESSION_COOKIE: "a-session"},
+                follow_redirects=False,
+            )
+
+        assert sent == []

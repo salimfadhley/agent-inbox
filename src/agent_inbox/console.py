@@ -1370,9 +1370,7 @@ def build_console(client: HubClient) -> Litestar:
         return Response(_page("Message", body, hub, ""), media_type=MediaType.HTML)
 
     @post("/message/{object_id:str}/reply", status_code=303, sync_to_thread=True)
-    def message_reply(
-        object_id: str, data: dict[str, Any], request: Request
-    ) -> Response:
+    def message_reply(object_id: str, data: Form, request: Request) -> Response:
         """A human replies to one message, as themselves.
 
         **The console decides nothing here** (NFR-002, ADR 0005). It forwards the text
@@ -1970,6 +1968,16 @@ def build_console(client: HubClient) -> Litestar:
         """
         hub = hub_or_none() or {}
         address = _advertised(hub, client.config.base)
+        # **The snippet names the API, not this console** (owner, 2026-08-05). What gets
+        # pasted is an address written into somebody's `CLAUDE.md`, re-read for months
+        # by sessions that cannot debug it, and the two doors are not equal for that
+        # purpose: the API serves the prompt as its own route, while this console page
+        # now needs a sign-in and its plain-text route exists only for compatibility.
+        # Pointing an agent at the durable machine-facing address is the honest answer.
+        #
+        # The *page* below still shows the document as this console renders it; only the
+        # pasteable pointer changes.
+        paste_url = f"{address}/prompts/agent"
         prompt_url = f"{_console_base(request)}/prompts/agent"
         note = "".join(
             f"<p>{html.escape(para)}</p>"
@@ -1984,12 +1992,12 @@ def build_console(client: HubClient) -> Litestar:
         body = (
             f"{note}"
             "<p>Paste this to an agent. It is short on purpose: it tells the agent "
-            "to fetch the full prompt from this console every time it starts, so an "
+            "to fetch the full prompt from the hub's API every time it starts, so an "
             "agent onboarded months ago still follows current instructions.</p>"
             "<p><button data-copy='prompt' type='button'>Copy the prompt</button> "
             "<span id='said' class='dim'></span></p>"
             "<textarea id='prompt' readonly rows='16'>"
-            f"{html.escape(bootstrap(prompt_url))}</textarea>"
+            f"{html.escape(bootstrap(paste_url))}</textarea>"
             f"<p class='dim'>It points at <a href='/prompts/agent'><code>"
             f"{html.escape(prompt_url)}</code></a> — the full prompt below, served as "
             "plain text. Written for <code>"
@@ -2851,6 +2859,7 @@ def build_console(client: HubClient) -> Litestar:
             agent_page,
             mailbox,
             message,
+            message_reply,
             inbox,
             do_read,
             compose_form,

@@ -259,3 +259,69 @@ class TestTheTwoCopiesStayOneDocument:
         assert "console.example.invalid" not in api
         assert "console.example.invalid" in console
         assert "api.example.invalid" not in console
+
+
+class TestThePasteableSnippetNamesTheApi:
+    """Owner, 2026-08-05, looking at the console's Prompt page: the pasteable snippet
+    should point at the hub's API address rather than at the console.
+
+    **This is a change of mind and it is worth recording as one.** Yesterday's reasoning
+    — which I gave `igor_laszlo` in writing — was that each copy should name the door
+    the reader came through, because a proven address beats a recommended one. That
+    still holds for the *document*, which is why the two rendered copies still differ.
+
+    It does not hold for the **pasteable snippet**, and the difference is who is
+    reading. The document is read by whoever fetched it. The snippet is written into a
+    `CLAUDE.md` and re-read for months by sessions that cannot debug it — and the two
+    doors are not equal for that: the API serves the prompt as its own route, while the
+    console's page now needs a sign-in and its plain-text route exists for
+    compatibility. A pointer that outlives everything should name the durable
+    machine-facing address.
+    """
+
+    @staticmethod
+    def _console(hub_id: str) -> TestClient:
+        from agent_inbox.client import Config, HubClient
+        from agent_inbox.console import build_console
+
+        class Stub(HubClient):
+            def __init__(self) -> None:
+                super().__init__(Config(hub="http://console-reaches-hub", name="c"))
+
+            def hub_info(self) -> dict[str, Any]:
+                return {
+                    "id": hub_id,
+                    "name": "testhub",
+                    "version": "1.0.0",
+                    "authenticated": False,
+                }
+
+        return TestClient(app=build_console(Stub()))
+
+    def test_the_snippet_points_at_the_hubs_own_address(self) -> None:
+        with self._console("https://api.example.invalid") as console:
+            page = console.get("/prompts").text
+
+        snippet = page.split("<textarea", 1)[1].split("</textarea>", 1)[0]
+
+        assert "https://api.example.invalid/prompts/agent" in snippet
+
+    def test_the_snippet_does_not_point_at_the_console(self) -> None:
+        """The paired negative, and the reported bug: the snippet named the console."""
+        with self._console("https://api.example.invalid") as console:
+            page = console.get("/prompts").text
+
+        snippet = page.split("<textarea", 1)[1].split("</textarea>", 1)[0]
+
+        assert "testserver" not in snippet, "the snippet still names this console"
+
+    def test_the_document_below_still_names_this_console(self) -> None:
+        """Unchanged, deliberately. Only the pointer moved; the rendered document still
+        names the door its reader came through, which is what `igor_laszlo` and
+        `mariana_taphrale` have a baseline for."""
+        with self._console("https://api.example.invalid") as console:
+            page = console.get("/prompts").text
+
+        below = page.split("</textarea>", 1)[1]
+
+        assert "testserver" in below

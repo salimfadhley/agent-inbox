@@ -667,13 +667,24 @@ def test_the_pasted_prompt_sends_the_agent_back_for_the_real_one(
     assert "join(" not in box
 
 
-def test_the_pasted_prompt_points_at_this_console_not_the_hub(
+def test_the_pasted_prompt_points_at_the_hub_not_this_console(
     console: TestClient,
 ) -> None:
-    """The prompt lives on the console's port, which is not the hub's.
+    """**This assertion is the reverse of what it was**, and the premise is why.
 
-    Reusing the hub's published address here would send agents to a port that does
-    not serve the page — the sidecar trap, in the other direction.
+    It used to require the hub's address to be *absent*, on sound reasoning: the prompt
+    lived only on the console's port, so naming the hub would have sent agents to a port
+    that did not serve the page — the sidecar trap, in the other direction.
+
+    Since 0.65.0 the API serves `/prompts/<role>` itself, so that premise is simply no
+    longer true, and the owner has asked for the snippet to name it (2026-08-05). The
+    reason is what the snippet *is*: an address written into somebody's `CLAUDE.md` and
+    re-read for months by sessions that cannot debug it. The API serves the prompt as
+    its own route; this console's page now needs a sign-in and its plain-text route
+    exists for compatibility. The durable machine-facing address is the honest pointer.
+
+    The rendered document below the box is unchanged and still names this console —
+    see `test_prompt_surface.py`, where both halves are pinned together.
     """
     box = (
         console.get("/prompts")
@@ -681,7 +692,7 @@ def test_the_pasted_prompt_points_at_this_console_not_the_hub(
         .split("</textarea>")[0]
     )
     assert "/prompts/agent" in box
-    assert HUB not in box
+    assert HUB in box, "the snippet does not name the hub that serves the prompt"
 
 
 def test_the_prompt_explains_the_config_file_it_writes(console: TestClient) -> None:
