@@ -30,6 +30,16 @@ than after thirty days. Lemmy's delay exists to let an author change their mind;
 retraction here is often an operator acting on somebody else's message, and a grace
 period would leave a message the operator believes is gone readable for a month.
 
+**Why a tombstone rather than a delete, in one more sentence than the requirement
+needs.** `catherine_shashkova` observed on the day this shipped that the pull to retract
+is strongest exactly where the record has most value — because embarrassment and
+evidentiary worth come from the same property. Her example was a message she had got
+wrong and corrected an hour later: retracting the first would leave the second
+explaining a mistake nobody could see, "a worse record than the mistake". Keeping the
+position, the sender and the time means a retracted message still shows that something
+was said and withdrawn, which is the difference between this and a delete, and the
+reason not to reach for one later.
+
 **It is local.** A copy already delivered to a peer hub is not withdrawn, and nothing
 here says it was. That is what federation can honestly deliver; claiming more would be
 a promise this cannot keep.
