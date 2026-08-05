@@ -1645,6 +1645,7 @@ def build_api(
         """
         if auth is None or auth_mode == "off":
             return None
+        bearer_actor: str | None = None
         header = conn.headers.get("Authorization", "")
         if header.lower().startswith("bearer "):
             token = await auth.resolve_token(header[7:].strip())
@@ -1671,12 +1672,28 @@ def build_api(
                 # What the caller says it is running. A header, so it is what the hub
                 # saw on this request rather than what an agent once wrote down.
                 await auth.admit(token, admitted, _client_of(conn))
-                return token.actor
+                bearer_actor = token.actor
+                if token.actor != SHARED_ACTOR:
+                    return token.actor
+                # **A shared token names no one.** It proves this machine is allowed
+                # here and says nothing about who is using it, so it must not out-rank
+                # a session, which names a person. Falling through rather than
+                # returning `"*"` — reported by the owner, 2026-08-05: the console
+                # sends both its device token and the signed-in human's cookie, the
+                # token won, and a reply was attributed to `*`, which has joined no
+                # mailbox. Nothing is weakened: both credentials were verified, and
+                # only the more specific of the two is being believed.
         sid = conn.cookies.get(SESSION_COOKIE)
         if sid:
             session = await auth.resolve_session(sid)
             if session is not None and not session.limited:
                 return session.username
+        # A shared token with no session is still a valid credential — it admits the
+        # machine — so say so rather than reporting no credential at all.
+        # `provide_caller` turns this into the header identity, which is how one
+        # laptop runs four agents.
+        if bearer_actor == SHARED_ACTOR:
+            return SHARED_ACTOR
         return None
 
     async def provide_caller(request: Request) -> str:

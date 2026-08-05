@@ -102,7 +102,9 @@ def _install(version: str) -> str:
         # One line in the rendered prompt, deliberately: a `\`-continued shell command
         # is a paste hazard, and the reader is copying this into a terminal.
         return (
-            "```bash\nuv python install "
+            "```bash\nuv python list          # already have "
+            + _python_floor()
+            + "? then skip the next line\nuv python install "
             + _python_floor()
             + "\nuv tool install --python "
             + _python_floor()
@@ -111,7 +113,12 @@ def _install(version: str) -> str:
 
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
 installed — which is exactly the case where you need it to act. There is no separate
-upgrade command."""
+upgrade command.
+
+`uv python install` fetches a **uv-managed** interpreter and ignores every other
+kind, so a Python from Homebrew, scoop, winget or python.org satisfies the pin while
+remaining invisible to it. Look before you fetch, or you install a second one — on
+Windows today a strictly older one."""
         )
     PYTHON_FLOOR = _python_floor()
     # Assembled here so the source line stays inside the limit while the *rendered*
@@ -126,7 +133,23 @@ upgrade command."""
     # `uv python install` is idempotent: it says the version is already installed and
     # exits 0, so a reader who has 3.14 loses a second and nobody has to decide whether
     # to run it.
+    # **Look first, and only fetch if you must.** `--python` pins the interpreter but
+    # does not fetch one, so a machine without 3.14 needs the fetch — and a machine that
+    # already has one does not.
+    #
+    # The difference matters more than it looks: `uv python install` counts only
+    # **uv-managed** interpreters. A 3.14 from scoop, Homebrew, winget or python.org
+    # satisfies the pin perfectly and is invisible to it, so running the fetch anyway
+    # downloads a second, redundant interpreter — and on Windows today a strictly older
+    # one, since uv can fetch 3.14.3 while scoop ships 3.14.6.
+    #
+    # Hypothesised by `igor_laszlo` from a Windows/scoop machine, who declined to test
+    # it on a colleague's workstation and said so; confirmed here against a version
+    # present only from miniconda, which uv downloaded 15.7 MiB to duplicate.
     INSTALL_COMMAND = (
+        "uv python list          # already have "
+        + PYTHON_FLOOR
+        + "? then skip the next line\n"
         f"uv python install {PYTHON_FLOOR}\n"
         f"uv tool install --python {PYTHON_FLOOR} --refresh --no-cache --force "
         f'"agent-inbox[clients]>={MINIMUM_CLIENT}"'
@@ -174,6 +197,12 @@ agent-inbox --version
 
 If the second is older than you asked for, that is this. Run the two install commands
 above; the first fetches {PYTHON_FLOOR} if it is missing and says so if it is not.
+
+**`uv python install` fetches a *uv-managed* interpreter and ignores every other
+kind.** If `uv python list` already shows a {PYTHON_FLOOR} — from uv, Homebrew, scoop,
+winget or python.org — the pin below will find it and the fetch is unnecessary. Running
+it anyway is not free: it downloads a second interpreter, and on Windows today that is a
+strictly older one, because uv can fetch 3.14.3 while scoop ships 3.14.6.
 
 **Do not use `python3 --version` for this.** It reports whichever interpreter your shell
 happens to resolve, which is not the one uv installs into. `catherine_shashkova` hit

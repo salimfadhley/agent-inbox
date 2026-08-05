@@ -726,3 +726,68 @@ class TestAnOperatorSessionReachesEveryOperatorRoute:
                     },
                 )
                 assert answer.status_code == 401, f"an agent's token reached {path}"
+
+
+class TestASharedTokenDoesNotOutrankASession:
+    """Reported by the owner, 2026-08-05: replying from the console failed with
+    *"'*' has not joined this mailbox"*.
+
+    The console sends **both** its device token and the signed-in human's session
+    cookie. `resolve_verified_caller` checked the bearer token first and returned its
+    actor — and for a shared token that actor is `*`, which is not a name and has joined
+    no mailbox. So the reply was attributed to nobody.
+
+    **A shared token names no one.** It proves the machine is allowed here and says
+    nothing about who is using it; a session names a person. When both arrive, the more
+    specific one is the identity. Nothing is weakened by preferring it — both were
+    verified, and the question is only which of two true things to believe about *who*.
+    """
+
+    async def test_a_session_wins_when_a_shared_token_is_also_present(self) -> None:
+        client, auth = _build("enforce")
+        with client as c:
+            pw = await auth.bootstrap()
+            c.post("/auth/login", json={"username": "admin", "password": pw})
+            enrol = c.get("/auth/enrol").json()
+            secret = enrol["provisioningUri"].split("secret=")[1].split("&")[0]
+            c.post(
+                "/auth/enrol",
+                json={"password": "newpassword", "otp": totp.current_code(secret)},
+            )
+            minted = c.post("/auth/tokens", json={"label": "the console"}).json()
+
+            said = c.get(
+                "/doctor", headers={"Authorization": f"Bearer {minted['token']}"}
+            ).json()
+
+        assert said["you"]["verified"] == "admin", (
+            "a shared token out-ranked the signed-in human — the reported bug"
+        )
+
+    async def test_a_shared_token_alone_is_still_a_valid_credential(self) -> None:
+        """The paired positive, and the thing that must not break: one laptop runs four
+        agents on one token, and that token still admits the machine when nobody is
+        signed in. Preferring a session must not have made the token worthless."""
+        client, auth = _build("enforce")
+        with client as c:
+            pw = await auth.bootstrap()
+            c.post("/auth/login", json={"username": "admin", "password": pw})
+            enrol = c.get("/auth/enrol").json()
+            secret = enrol["provisioningUri"].split("secret=")[1].split("&")[0]
+            c.post(
+                "/auth/enrol",
+                json={"password": "newpassword", "otp": totp.current_code(secret)},
+            )
+            minted = c.post("/auth/tokens", json={"label": "a laptop"}).json()
+            c.post("/auth/logout", json={})
+            c.cookies.clear()
+
+            said = c.get(
+                "/doctor",
+                headers={
+                    "Authorization": f"Bearer {minted['token']}",
+                    IDENTITY_HEADER: ROSEMARY,
+                },
+            ).json()
+
+        assert said["you"]["token"] == "accepted", "the token stopped being accepted"

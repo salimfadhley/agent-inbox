@@ -190,26 +190,37 @@ class TestEveryInstallInstructionPinsTheInterpreter:
                 for line in _install(version).splitlines()
                 if line.startswith("uv ")
             ]
-            assert lines[0] == f"uv python install {_python_floor()}", (
-                f"the interpreter is not fetched first for version={version!r}"
+            assert lines[0].startswith("uv python list"), (
+                f"the reader is not told to look before fetching (version={version!r})"
             )
-            assert lines[1].startswith("uv tool install --python "), lines
+            assert lines[1] == f"uv python install {_python_floor()}", lines
+            assert lines[2].startswith("uv tool install --python "), lines
 
-    def test_fetching_the_interpreter_is_safe_to_repeat(self) -> None:
-        """The paired concern. This runs on every reader, most of whom already have
-        3.14 — `uv python install` is idempotent and exits 0 when it is present, so
-        nobody has to decide whether to run it. Pinned as a property we rely on."""
-        import subprocess
+    def test_the_fetch_is_marked_skippable_and_says_why(self) -> None:
+        """**This replaces a test that asserted something false.**
 
-        done = subprocess.run(  # noqa: S603
-            ["uv", "python", "install", "3.14"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=False,
-        )
+        It used to claim `uv python install` "is idempotent and exits 0 when it is
+        present, so nobody has to decide whether to run it" — and proved it by running
+        the command on a machine that already had a *uv-managed* 3.14, where it is
+        indeed a no-op. That is the one case where the claim holds.
 
-        assert done.returncode == 0, done.stderr
+        `igor_laszlo` hypothesised the gap from a Windows/scoop machine and declined to
+        test it on a colleague's workstation, which was the right call. Confirmed here
+        against a version present only from miniconda: uv downloaded 15.7 MiB and
+        installed a duplicate, because **`uv python install` counts only uv-managed
+        interpreters**. On his machine the duplicate would also have been *older* —
+        uv can fetch 3.14.3 where scoop ships 3.14.6.
+
+        So the reader is told to look first, and told what the fetch actually does.
+        """
+        from agent_inbox.prompts import _install
+
+        text = _install("0.68.0")
+
+        assert "skip the next line" in text, "the fetch is not marked skippable"
+        assert "uv-managed" in text, "nothing says what the fetch actually installs"
+        # The paired negative: the false reassurance must be gone, not merely softened.
+        assert "idempotent" not in text
 
     def test_the_diagnostic_asks_uv_not_the_shell(self) -> None:
         """Reported by `catherine_shashkova`, 2026-08-05, from macOS.
