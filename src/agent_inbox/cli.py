@@ -442,6 +442,7 @@ def join(
     )
     recorded = {} if no_machine_facts else _record_machine_facts(client, granted)
     woken = None if no_wake_hook else _install_wake_hook()
+    ignored = _keep_it_out_of_git(path)
     _print(
         {
             "name": granted,
@@ -450,8 +451,16 @@ def join(
             "config": str(path),
             **({"machine": recorded} if recorded else {}),
             **({"wake_hook": woken} if woken else {}),
+            **({"gitignore": ignored} if ignored else {}),
         }
     )
+    if ignored == "tracked":
+        _err(
+            f"{path.name} is committed to this repository. It holds this project's "
+            "identity and may hold a device token, so it should not be. Remove it from "
+            f"git (`git rm --cached {path.name}`) and, if it ever carried a token, "
+            "revoke that token — history is public once pushed."
+        )
     if woken:
         click.echo(
             "Wake hooks installed — restart your session and mail will reach you "
@@ -459,6 +468,29 @@ def join(
             err=True,
         )
     return 0
+
+
+def _keep_it_out_of_git(path: Path) -> str:
+    """Make sure the config we just wrote is one git will not commit.
+
+    It holds this project's identity and may hold a device token. Until now this was
+    advice on the onboarding page — *"add it to `.gitignore` if it is not there
+    already"* — which asks a reader to judge whether an existing line covers them. A
+    rename made that judgement wrong everywhere at once: repositories still carry a
+    correctly-commented `agent-mailbox.toml` line that misses `agent-inbox.toml` by one
+    word, so they read as protected and are not (`parisa_murthy`, issue #58).
+
+    Best effort, and never fatal. The join has already succeeded; a checkout that is not
+    a repository, or a `.gitignore` we may not write, costs a safeguard and must not
+    cost the agent the name it just claimed.
+    """
+    from agent_inbox import ignores
+
+    try:
+        return ignores.ensure_ignored(path, path.parent)
+    except Exception as exc:  # noqa: BLE001 - the join already happened and is durable
+        logger.debug("could not check the ignore rules for %s: %s", path, exc)
+        return ""
 
 
 def _install_wake_hook() -> str | None:
