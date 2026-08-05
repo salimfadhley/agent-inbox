@@ -1552,16 +1552,61 @@ def build_console(client: HubClient) -> Litestar:
         """
         return _tokens_page(request)
 
+    #: A session that has run out looks, from the hub, exactly like never having had
+    #: one: the cookie resolves to nothing and the route refuses. But the two need
+    #: opposite actions from the reader, and only the console can tell them apart —
+    #: it can see whether the browser is carrying a cookie at all.
+    STALE_SESSION = (
+        "Your session has expired. Sign in again and this page will work — "
+        "nothing is wrong with the hub or with your account."
+    )
+
+    def _refusal_text(
+        status: int, body: dict[str, Any] | None, fallback: str, *, had_cookie: bool
+    ) -> tuple[str, str]:
+        """What to tell a human, and where to send them. Never the hub's own wording.
+
+        Reported by the owner, 2026-08-05: Maintenance and Settings showed *"present a
+        device token or log in at the console"* to somebody who was looking at the
+        console, logged in, with the other tabs working. Logging out and back in fixed
+        it, which is the tell — the session had expired.
+
+        That sentence is correct for the audience the hub is answering, an agent calling
+        the API with no credential. It is useless to a human already inside, and it
+        sent one debugging a hub that was working perfectly.
+
+        The observe tabs kept working throughout because they travel on the console's
+        own device token; only the operator routes need the human's session. So an
+        expired session breaks exactly the two tabs that were reported and nothing else,
+        which is worth knowing the next time this shape appears.
+        """
+        if status == 401:
+            if had_cookie:
+                return STALE_SESSION, "/login"
+            return "Sign in to see this page.", "/login"
+        return str((body or {}).get("detail", fallback)), ""
+
     def _refused(
-        body: dict[str, Any] | None, fallback: str, hub: dict[str, Any] | None
+        body: dict[str, Any] | None,
+        fallback: str,
+        hub: dict[str, Any] | None,
+        *,
+        status: int = 0,
+        had_cookie: bool = False,
+        title: str = "Maintenance",
+        path: str = "/maintenance",
     ) -> str:
-        detail = (body or {}).get("detail", fallback)
+        detail, go = _refusal_text(status, body, fallback, had_cookie=had_cookie)
+        action = (
+            f"<p><a href='{go}'>Sign in</a></p>"
+            if go
+            else f"<p><a href='{html.escape(path)}'>Try again</a></p>"
+        )
         return _page(
-            "Maintenance",
-            f"<h2>Expiry</h2><p>{html.escape(str(detail))}</p>"
-            "<p><a href='/maintenance'>Try again</a></p>",
+            title,
+            f"<h2>{html.escape(title)}</h2><p>{html.escape(detail)}</p>{action}",
             hub,
-            "/maintenance",
+            path,
         )
 
     def _purge_page(
@@ -1649,7 +1694,13 @@ def build_console(client: HubClient) -> Litestar:
         status, body, _ = client.auth_call("GET", "/observe/purge", session=sid)
         if status != 200:
             return Response(
-                _refused(body, "the hub would not say what it would purge", hub),
+                _refused(
+                    body,
+                    "the hub would not say what it would purge",
+                    hub,
+                    status=status,
+                    had_cookie=bool(sid),
+                ),
                 media_type=MediaType.HTML,
             )
         return Response(_purge_page(body or {}, hub), media_type=MediaType.HTML)
@@ -2317,7 +2368,15 @@ def build_console(client: HubClient) -> Litestar:
         status, body, _ = client.auth_call("GET", "/hub/settings", session=sid)
         if status != 200:
             return Response(
-                _refused(body, "the hub would not say how it is configured", hub),
+                _refused(
+                    body,
+                    "the hub would not say how it is configured",
+                    hub,
+                    status=status,
+                    had_cookie=bool(sid),
+                    title="Settings",
+                    path="/settings",
+                ),
                 media_type=MediaType.HTML,
             )
         return Response(
@@ -2589,7 +2648,14 @@ def build_console(client: HubClient) -> Litestar:
         on whether that session is real, and refuses on every route that matters.
         """
         path = request.url.path
-        if path in OPEN_PATHS or path.startswith(("/prompts", "/static/")):
+        # `/prompts/<role>` and `/prompts.txt` stay open: an agent needs the prompt
+        # before it has a credential, and the API serves the same document
+        # unauthenticated for the same reason. The bare `/prompts` **page** is not in
+        # that set — it is a human's page, and there is no reason to show the console
+        # to somebody who has not signed in (owner, 2026-08-05).
+        if path in OPEN_PATHS or path.startswith(("/prompts/", "/static/")):
+            return None
+        if path == "/prompts.txt":
             return None
         if request.cookies.get(SESSION_COOKIE):
             return None

@@ -73,6 +73,7 @@ from agent_inbox.keys import SigningKey
 from agent_inbox.naming import validate_hub_name
 from agent_inbox.notify import TooManyListeners
 from agent_inbox.peers import fetch_actor_document, insecure_federation, peer_origin
+from agent_inbox.prompts import onboarding
 from agent_inbox.signatures import parse_signature, verify_request
 from agent_inbox.wire import (
     BLIND_FIELDS,
@@ -1780,6 +1781,38 @@ def build_api(
         """Unauthenticated, as WebFinger is everywhere. Silent unless federating."""
         return await api.webfinger(resource)
 
+    @get("/prompts/{role:str}", media_type=MediaType.TEXT, sync_to_thread=False)
+    async def prompt_route(role: str) -> str:
+        """The onboarding prompt, as plain text, from the API itself.
+
+        **Unauthenticated on purpose, and the one route where that is not a hole.** An
+        agent needs this document *before* it has a credential — the prompt is what
+        tells it how to get one — so gating it would be a lock whose key is inside.
+
+        It publishes nothing an outsider does not already have: this hub's address,
+        which they had in order to ask, and the version, which the descriptor gives
+        anyone. The caution about an unauthenticated hub is generated from the hub's own
+        setting, so an enforcing hub cannot accidentally serve the open-hub warning.
+
+        Owner, 2026-08-05: the console used to be the only thing serving this, which
+        meant the console had a page readable without signing in. Serving it here
+        instead puts an unauthenticated document on the unauthenticated surface, and
+        lets the console gate everything it shows a human.
+
+        Any role name returns the same text — `/prompts/agent`, `/prompts/host`,
+        `/prompts/admin` are one document. What a role *means* is fetched from the hub
+        at runtime, so there is nothing per-role to write here, and accepting the names
+        keeps every bookmark and pasted instruction working.
+        """
+        del role  # accepted, deliberately not dispatched on — see above
+        descriptor = await api.hub()
+        return onboarding(
+            public_url,
+            f"{public_url}/prompts/agent",
+            str(descriptor.get("version") or ""),
+            bool(descriptor.get("authenticated")),
+        )
+
     @get("/health")
     async def health() -> dict[str, str]:
         return await api.health()
@@ -2467,6 +2500,7 @@ def build_api(
     handlers = [
         hub,
         health,
+        prompt_route,
         nodeinfo_index_route,
         nodeinfo_route,
         webfinger_route,

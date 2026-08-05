@@ -1103,17 +1103,28 @@ def test_every_console_page_needs_a_session_once_the_hub_authenticates() -> None
             assert got.headers["location"].endswith("/login"), path
 
 
-def test_the_way_in_and_the_prompt_stay_open() -> None:
+def test_the_way_in_and_the_prompt_text_stay_open() -> None:
     """A gate that locks the door from the outside is not a gate.
 
     Sign-in, the health probe and the onboarding prompt are all needed *before* anyone
     can hold a session — the prompt especially, since it is how an agent is set up in
     the first place, and it holds nothing secret.
+
+    **`/prompts` — the page — is no longer in this list** (owner, 2026-08-05). The API
+    now serves the same document unauthenticated at `/prompts/<role>`, which is where an
+    unauthenticated document belongs; once it does, there is no reason for the console
+    to render a human's page to somebody who has not signed in. The plain-text routes
+    stay open because agents already point at them and an agent has no session by
+    definition.
     """
     client, _ = make(AuthenticatingHub())
     with client as c:
-        for path in ("/login", "/health", "/prompts", "/prompts/agent", "/prompts.txt"):
+        for path in ("/login", "/health", "/prompts/agent", "/prompts.txt"):
             assert c.get(path, follow_redirects=False).status_code == 200, path
+        # The change, asserted here as well as in `test_prompt_surface.py`, because this
+        # is the list somebody edits when adding a route and it must not drift back.
+        gated = c.get("/prompts", follow_redirects=False)
+        assert gated.status_code in (302, 303, 307), "the console page is open again"
 
 
 def test_a_trusted_lan_is_not_asked_to_sign_in(console: TestClient) -> None:
