@@ -39,6 +39,23 @@ class DeliveryRefused(MailboxError):
     code = "delivery_refused"
 
 
+class AlreadyDelivered(MailboxError):
+    """The peer had this activity already and did not deliver it a second time.
+
+    **Not an error, and not a success either.** The peer behaved correctly:
+    de-duplicating on activity id is what makes a retry safe. But the message did not
+    arrive *because of this call*, and recording it as `delivered` is how one message
+    addressed to two recipients on one hub reported success for both while reaching one
+    (issue #40).
+
+    Raised so the receipt says what happened. A caller that treats every 2xx as a
+    delivery cannot tell "arrived" from "was already here", and those differ exactly
+    when it matters — when we thought we were sending something new.
+    """
+
+    code = "already_delivered"
+
+
 def _candidate_origins(host: str) -> tuple[str, ...]:
     """Where to look for a hub named only by hostname.
 
@@ -163,7 +180,7 @@ def deliver(
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
-            response.read(64 * 1024)
+            answered = response.read(64 * 1024)
     except urllib.error.HTTPError as refused:
         detail = ""
         try:
@@ -181,3 +198,32 @@ def deliver(
         raise PeerUnreachable(
             f"could not reach {recipient.handle} — {unreachable}"
         ) from unreachable
+
+    # **A 200 is not the same as a delivery**, and this body was previously read and
+    # discarded. A peer that has seen this activity id before answers
+    # `{"delivered": false, "reason": "already seen"}` — which is honest, and which we
+    # were recording as success. That is how one message to two recipients on one hub
+    # came to report `delivered` twice while reaching one of them (issue #40).
+    #
+    # Per-recipient activity ids mean a *fresh* send can no longer collide with itself,
+    # so reaching this now means a genuine repeat: a retry of something already
+    # delivered, which is a no-op rather than a loss. It is still not a delivery, and
+    # saying so is what stops the next collision being silent.
+    if _said_already_seen(answered):
+        raise AlreadyDelivered(
+            f"{recipient.handle}'s hub has seen this activity before — "
+            "it was not delivered again"
+        )
+
+
+def _said_already_seen(body: bytes) -> bool:
+    """Whether the peer told us it had this already. Malformed bodies mean no.
+
+    A peer that answers something we cannot parse has still answered 2xx, and inventing
+    a failure from an unreadable body would turn a working delivery into a false alarm.
+    """
+    try:
+        answer = json.loads(body or b"{}")
+    except ValueError:
+        return False
+    return isinstance(answer, dict) and answer.get("delivered") is False

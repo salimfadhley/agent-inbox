@@ -33,6 +33,7 @@ from agent_inbox.api import build_api
 from agent_inbox.delivery import FederatedDelivery
 from agent_inbox.house import House
 from agent_inbox.mailbox import Mailbox
+from agent_inbox.outbound import AlreadyDelivered
 from agent_inbox.peers import identify, peer_origin
 from agent_inbox.store import InMemoryStore
 
@@ -399,7 +400,8 @@ class TestARetriedActivityArrivesOnce:
                 "summary": "the retry that was not needed",
             },
         }
-        outcome = [
+
+        def attempt() -> None:
             deliver(
                 who,
                 activity,
@@ -408,10 +410,15 @@ class TestARetriedActivityArrivesOnce:
                 settings=asyncio.run(alpha.house.mailbox.hub_settings()),
                 peers=asyncio.run(alpha.house.mailbox.peers()),
             )
-            for _ in range(2)
-        ]
 
-        assert len(outcome) == 2, "both attempts must have been made"
+        attempt()
+        # **The second attempt now says so rather than passing quietly.** It used to
+        # return like any success, which is how a genuine collision came to be recorded
+        # as `delivered` (issue #40). The peer answers
+        # `{"delivered": false, "reason": "already seen"}`; we no longer discard it.
+        with pytest.raises(AlreadyDelivered):
+            attempt()
+
         assert self._copies(beta, marker) == 1, (
             "a retried activity must not cost the recipient a second copy"
         )
@@ -451,21 +458,19 @@ class TestARetriedActivityArrivesOnce:
             "distinct activities must not be mistaken for a retry of one"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="issue #40 — one record, two recipients on one peer, one activity id",
-    )
     def test_two_recipients_on_one_peer_both_receive(self, hubs) -> None:
-        """What the de-duplication above costs, found while answering T015.
+        """Fixed in 0.59.0 — this was `xfail(strict=True)` and the marker did its job.
 
-        The activity id derives from the *record*, and one record can name several
-        remote recipients. Two of them on the same hub therefore arrive as the same
-        activity id, and the second is discarded as a retry of the first — while the
-        sender is told `delivered`. Silent loss, which this codebase already calls the
-        worst failure shape it has.
+        The activity id derived from the *record*, and one record can name several
+        remote recipients. Two of them on the same hub arrived as the same activity id,
+        the second was discarded as a retry of the first, and the sender was told
+        `delivered` for both. Silent loss, which this codebase calls the worst failure
+        shape it has.
 
-        Marked strict so it fails the day it starts passing: the fix belongs in how the
-        id is minted or how the activity is addressed, not in this package (T015).
+        The strict marker meant this test failed the day it started passing, which is
+        exactly what happened when the id gained a per-recipient suffix. That is worth
+        recording: the alarm was set by whoever found the bug and could not fix it
+        there, and it went off on its own.
         """
         alpha, beta = hubs
         asyncio.run(beta.house.join("bob"))

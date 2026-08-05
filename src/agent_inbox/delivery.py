@@ -14,6 +14,7 @@ succeeds and reaches nobody is the worst failure shape available.
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import quote
 
 from agent_inbox import outbound
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
@@ -190,9 +191,18 @@ class FederatedDelivery:
         peers = await self.mailbox.peers()
 
         name = resolved.handle.partition("@")[0]
+        # **One activity id per recipient, not per message.** `House.send` calls this
+        # once for each remote recipient with the same record, so an id minted from the
+        # record alone is identical across them. The receiving hub de-duplicates on
+        # activity id — correctly, that is what makes a retry safe — so the second
+        # recipient on a shared peer had their copy dropped, and the sender was told
+        # `delivered` for both (issue #40).
+        #
+        # That is the silent-success shape this codebase names as its worst failure.
+        # The receiver is not wrong; the sender was minting one id for two deliveries.
         activity: dict[str, object] = {
             "type": "Create",
-            "id": f"{self.public_url}/act/{record.id}",
+            "id": f"{self.public_url}/act/{record.id}/{quote(name, safe='')}",
             "actor": f"{self.public_url}/actors/{record.attributed_to}",
             "object": {
                 "type": "Note",
