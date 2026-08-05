@@ -309,3 +309,91 @@ class TestEdges:
         record = await store.get_object("m9")
         assert record is not None
         assert not retraction.is_retracted(record)
+
+
+class TestTheRouteReachesIt:
+    """The wiring, proved apart from the question — four times today a route has
+    existed and never been reached.
+
+    A retraction nobody can invoke is a feature that does not exist; a retraction
+    invoked by the wrong person is worse than one that does not exist.
+    """
+
+    @staticmethod
+    def _hub() -> tuple[object, object]:
+        from litestar.testing import TestClient
+
+        from agent_inbox.api import build_api
+        from agent_inbox.house import House
+        from agent_inbox.mailbox import Mailbox
+
+        made = InMemoryStore()
+        house = House(Mailbox(made, hub_name="testhub"))
+        return TestClient(app=build_api(house, "http://hub.invalid")), made
+
+    async def test_an_agent_can_retract_its_own_over_http(self) -> None:
+        from agent_inbox.api import IDENTITY_HEADER
+
+        client, made = self._hub()
+        with client as c:  # type: ignore[attr-defined]
+            for name, kind in ((AGENT, ActorType.SERVICE), (OTHER, ActorType.SERVICE)):
+                await made.claim_name(
+                    ActorRecord(
+                        name=name, actor_type=kind, created=STAMP, last_seen=STAMP
+                    )
+                )
+            await a_message(made)
+
+            answer = c.post("/objects/m1/retract", headers={IDENTITY_HEADER: AGENT})
+
+        assert answer.status_code == 200, answer.text
+        assert answer.json()["retracted"] is True
+        gone = await made.get_object("m1")
+        assert gone is not None and retraction.is_retracted(gone)
+
+    async def test_another_agent_is_refused_over_http(self) -> None:
+        """The paired negative, and the one that matters: the route must not be a way
+        around the permission test."""
+        from agent_inbox.api import IDENTITY_HEADER
+
+        client, made = self._hub()
+        with client as c:  # type: ignore[attr-defined]
+            for name in (AGENT, OTHER):
+                await made.claim_name(
+                    ActorRecord(
+                        name=name,
+                        actor_type=ActorType.SERVICE,
+                        created=STAMP,
+                        last_seen=STAMP,
+                    )
+                )
+            await a_message(made)
+
+            answer = c.post("/objects/m1/retract", headers={IDENTITY_HEADER: OTHER})
+
+        assert answer.status_code >= 400, "an agent retracted somebody else's message"
+        survived = await made.get_object("m1")
+        assert survived is not None and not retraction.is_retracted(survived)
+
+    async def test_the_answer_does_not_claim_it_reached_other_hubs(self) -> None:
+        """FR-015. A client that inferred a federated withdrawal from this would be
+        promising its human something the hub cannot do."""
+        from agent_inbox.api import IDENTITY_HEADER
+
+        client, made = self._hub()
+        with client as c:  # type: ignore[attr-defined]
+            await made.claim_name(
+                ActorRecord(
+                    name=AGENT,
+                    actor_type=ActorType.SERVICE,
+                    created=STAMP,
+                    last_seen=STAMP,
+                )
+            )
+            await a_message(made)
+
+            said = c.post(
+                "/objects/m1/retract", headers={IDENTITY_HEADER: AGENT}
+            ).json()
+
+        assert "this hub only" in said["scope"]

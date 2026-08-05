@@ -2059,6 +2059,39 @@ def build_api(
         return await api.view_object(object_id, caller)
 
     @post(
+        "/objects/{object_id:str}/retract",
+        # 200, not 201: withdrawing a body creates nothing.
+        status_code=200,
+        dependencies={"caller": Provide(provide_caller)},
+    )
+    async def retract_object(object_id: str, caller: str) -> dict[str, Any]:
+        """Withdraw a message's body, keeping its place in the conversation.
+
+        **The permission decision is not here.** `retraction.retract` owns it — an agent
+        may withdraw its own, a human may withdraw anything on this hub — and this route
+        does no more than say who is asking. A second answer to that question, anywhere,
+        would eventually disagree with the first, and the disagreement would be
+        somebody's words destroyed by a caller who should not have been able to.
+
+        `provide_caller`, not `provide_operator`: an agent retracting its own message is
+        an ordinary act, not an operator action, and the scope is settled below.
+
+        **Local only** (FR-015). A copy already delivered to a peer hub is not withdrawn
+        and nothing in this response says it was.
+        """
+        from agent_inbox import retraction
+
+        gone = await retraction.retract(house.mailbox.store, object_id, caller)
+        return {
+            "id": gone.id,
+            "retracted": True,
+            "by": retraction.retracted_by(gone),
+            # Said plainly, because the alternative is a client inferring that a
+            # retraction reached everywhere the message did.
+            "scope": "this hub only — copies delivered to peer hubs are not withdrawn",
+        }
+
+    @post(
         "/objects/{object_id:str}/read",
         # 200, not Litestar's default 201: consuming a message creates nothing.
         status_code=200,
@@ -2551,6 +2584,7 @@ def build_api(
         observe_object,
         observe_thread,
         read_object,
+        retract_object,
         thread,
     ]
     # The /auth/* routes exist only when auth is configured. With auth off, there is
