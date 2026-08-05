@@ -26,6 +26,8 @@ import logging
 import subprocess
 from pathlib import Path
 
+from agent_inbox.client import CONFIG_NAMES
+
 logger = logging.getLogger(__name__)
 
 #: How long to wait for git. It is a local, indexless query; a second is generous, and a
@@ -110,3 +112,98 @@ def _append(gitignore: Path, name: str) -> None:
     prefix = "" if not existing or existing.endswith("\n") else "\n"
     gitignore.write_text(f"{existing}{prefix}\n{_NOTE}\n{name}\n")
     logger.info("event=config.gitignore.added file=%s", name)
+
+
+#: Keys that make a file deployment-specific rather than merely configuration. A hub
+#: address names somebody's infrastructure; a token admits a machine to it. Either one
+#: in a shared repository is a disclosure, and `token` is the one that is also a
+#: credential.
+LOCATION_KEYS = ("hub", "token")
+
+#: How deep to look for identity files. An agent may be working several directories into
+#: a checkout, so the repository root is not always where the file is — but an unbounded
+#: walk of somebody's monorepo inside `doctor` is a cost nobody asked for.
+_MAX_DEPTH = 4
+
+
+def declares_location(path: Path) -> bool:
+    """Whether this file actually carries a hub or a token.
+
+    Read rather than assumed, because the whole warning rests on it: an empty or
+    placeholder config is not a disclosure, and crying wolf about one teaches the reader
+    to skip the line that matters.
+
+    Deliberately a cheap textual check rather than a TOML parse. A file that cannot be
+    parsed is exactly the case where we should still warn — malformed today, committed
+    all the same — and a parser would return False for it.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:  # noqa: PERF203 - unreadable is not evidence of safety, see below
+        # An unreadable file is not proof of anything, and this runs inside `doctor`
+        # where a crash costs the reader every check after it. Warn rather than claim
+        # safety: the failure this whole module exists to prevent is confident silence.
+        return True
+    return any(
+        line.lstrip().startswith(f"{key} ") or line.lstrip().startswith(f"{key}=")
+        for line in text.splitlines()
+        for key in LOCATION_KEYS
+    )
+
+
+def is_staged(path: Path, root: Path) -> bool:
+    """Whether *path* is staged for the next commit.
+
+    Reported separately from *tracked* because the remedies differ and so does the
+    urgency: a staged file has not been committed yet, so `git restore --staged` is the
+    whole fix. A tracked one is in the history, and somebody has to decide about that.
+    """
+    done = _git(["diff", "--cached", "--name-only", "--", str(path)], root)
+    return bool(done and done.returncode == 0 and done.stdout.strip())
+
+
+def exposed_configs(root: Path) -> list[tuple[Path, str]]:
+    """Identity files in this checkout that git is not protecting.
+
+    Each entry is the file and one of ``"staged"``, ``"tracked"`` or ``"unignored"``,
+    worst first — those are three different conversations and collapsing them into
+    "there is a problem" leaves the reader to work out which.
+
+    **Why this exists as a check rather than as advice.** `join` already adds an ignore
+    rule, but that only helps the project it ran in, at the moment it ran: a file may
+    predate the rule, or have been committed before anybody thought about it, or sit in
+    a sibling directory the rule does not reach. `parisa_murthy` and `igor_laszlo` each
+    found a repository whose `.gitignore` named the *pre-rename* file and read as done
+    on inspection. Attention does not scale; this asks git every time.
+
+    Empty when git is unavailable or this is not a repository — an honest "cannot say",
+    not a claim of safety. The caller says which.
+    """
+    if not in_a_repository(root):
+        return []
+    found: dict[Path, str] = {}
+    for name in CONFIG_NAMES:
+        for path in _candidates(root, name):
+            if not declares_location(path):
+                continue
+            if is_staged(path, root):
+                found[path] = "staged"
+            elif is_tracked(path, root):
+                found[path] = "tracked"
+            elif not is_ignored(path, root):
+                found[path] = "unignored"
+    order = {"staged": 0, "tracked": 1, "unignored": 2}
+    return sorted(found.items(), key=lambda pair: (order[pair[1]], str(pair[0])))
+
+
+def _candidates(root: Path, name: str) -> list[Path]:
+    """Every file called *name* within :data:`_MAX_DEPTH` of *root*, `.git` aside."""
+    hits = [root / name] if (root / name).is_file() else []
+    for depth in range(1, _MAX_DEPTH + 1):
+        pattern = "/".join(["*"] * depth) + f"/{name}"
+        hits.extend(
+            path
+            for path in root.glob(pattern)
+            if path.is_file() and ".git" not in path.parts
+        )
+    return hits

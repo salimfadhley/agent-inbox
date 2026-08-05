@@ -126,8 +126,12 @@ def python_is_too_old() -> str:
         f"this Python is {running} and agent-inbox needs {floor} or newer. An install "
         f"that does not pin a version will **succeed** here and silently leave you on "
         f"an older release — it resolves to the newest one your interpreter supports "
-        f"rather than failing. Install a newer Python (`uv python install {floor}`), "
-        f"then reinstall."
+        f"rather than failing. Install a newer Python and reinstall **pinned to it** "
+        f"— uv will not move a tool to a different interpreter on its own, so an "
+        f"unpinned reinstall lands you back here:\n"
+        f"       uv python install {floor}\n"
+        f"       uv tool install --python {floor} --refresh --force "
+        f"'agent-inbox[clients]'"
     )
 
 
@@ -146,7 +150,9 @@ def notice() -> str | None:
         f"Your agent-inbox client is {ours}; this hub runs {theirs}. Tools added since "
         f"{ours} will be missing from this session and will look like they do not "
         f"exist. To update: uv tool install --python {interpreter_pin()} "
-        f"--refresh --force 'agent-inbox[clients]' "
+        f"--refresh --force 'agent-inbox[clients]' — keep `--python`, because uv "
+        f"will not move a tool to a newer interpreter on its own and an unpinned "
+        f"upgrade can silently resolve to an older release "
         f"— then restart this session, because a running session keeps the tools it "
         f"started with."
     )

@@ -916,6 +916,56 @@ def test_doctor_hub_flag_contacts_the_hub_it_names(
     )
 
 
+def test_doctor_says_whether_the_identity_file_is_exposed_to_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Owner's request, 2026-08-05.
+
+    The module-level tests in `test_config_exposure.py` prove the *question* is answered
+    correctly. This proves `doctor` actually asks it — which is a separate failure, and
+    the one that leaves a working check nobody ever sees. A real repository, because a
+    stub would test the wiring against nothing.
+    """
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    class FakeHubClient:
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def hub_info(self) -> dict[str, Any]:
+            return {"name": "here", "version": "1.0.0"}
+
+        def remote_doctor(self) -> dict[str, Any]:
+            return {"you": {"token": "accepted"}, "verdict": "fine"}
+
+        def ping(self) -> dict[str, Any]:
+            return {"waiting": 0}
+
+        def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            return {"unread": 0, "items": [], "cursor": ""}
+
+    git("init", "-q")
+    (tmp_path / CONFIG_NAME).write_text(
+        'hub = "http://here:8080"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
+
+    main(["--engine", "claude", "doctor"])
+    out = capsys.readouterr().out
+
+    assert "config safety" in out, "doctor never asks whether the config is exposed"
+    assert "NOT IGNORED" in out, "it asked, and did not report the answer"
+
+
 def test_doctor_reports_both_versions_even_when_healthy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

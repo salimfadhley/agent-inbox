@@ -493,6 +493,62 @@ def _keep_it_out_of_git(path: Path) -> str:
         return ""
 
 
+def _report_exposure(ok: str, warn: str) -> None:
+    """Say whether an identity file is exposed to git, on every `doctor` run.
+
+    Owner's request, 2026-08-05. `join` adds an ignore rule, but that helps one project
+    at one moment: a file may predate the rule, sit in a sibling directory it does not
+    reach, or have been committed before anybody thought about it. Two agents found
+    repositories whose `.gitignore` named the *pre-rename* file — correctly commented,
+    one word out of date, so it read as done on inspection and was not.
+
+    `doctor` is what somebody runs when they want to know whether their setup is sound,
+    which makes it the right place to answer a question they cannot easily answer
+    themselves.
+
+    **Three states, not one.** Staged, tracked and merely unignored need different
+    actions and carry different urgency; "there is a problem" would leave the reader to
+    work that out.
+
+    Never fatal. A checkout that is not a repository, or a git that will not answer,
+    costs a safeguard — it must not cost the reader every check after this one.
+    """
+    from agent_inbox import ignores
+
+    try:
+        exposed = ignores.exposed_configs(Path.cwd())
+    except Exception:  # noqa: BLE001 - a safeguard must not break the command it guards
+        logger.debug("could not check whether the config is exposed", exc_info=True)
+        return
+    if not exposed:
+        # Deliberately quiet about *why* it is fine. Outside a repository there is
+        # nothing to protect against, and inside one the file is protected; either way
+        # the reader needs no advice.
+        click.echo(f"{ok} config safety   identity files are not exposed to git")
+        return
+    for path, state in exposed:
+        name = path.name
+        if state == "staged":
+            click.echo(
+                f"{warn} config safety   {name} is STAGED — it carries a hub address "
+                f"and may carry a device token. Undo with:\n"
+                f"       git restore --staged {path}"
+            )
+        elif state == "tracked":
+            click.echo(
+                f"{warn} config safety   {name} is TRACKED by git. An ignore rule "
+                f"will not help now:\n"
+                f"       git rm --cached {path}\n"
+                f"     and revoke any token it carried — it is in the history."
+            )
+        else:
+            click.echo(
+                f"{warn} config safety   {name} is NOT IGNORED — `git add -A` would "
+                f"stage it. Add it to .gitignore, or run `agent-inbox join` again "
+                f"in that project."
+            )
+
+
 def _install_wake_hook() -> str | None:
     """Register the hooks that let an arriving message wake an idle session.
 
@@ -1154,6 +1210,8 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
             f"{ok} identity        {config.name} "
             f"({config.role}, engine {config.engine or chosen} — {how})"
         )
+
+    _report_exposure(ok, warn)
 
     # `hub` became machine-wide by default on 2026-08-03: you have one mailbox and as
     # many identities as you have repositories. A project that still sets its own is not

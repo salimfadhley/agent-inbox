@@ -165,3 +165,45 @@ class TestItIsActuallyWiredIn:
 
         monkeypatch.setattr(mcp_client, "_resolve_project", no_project)
         assert await mcp_client._guard(lambda: {"ok": True}) == {"ok": True}
+
+
+class TestTheAdviceKeepsThePin:
+    """Owner, 2026-08-05: the out-of-date note must mention pinning the interpreter.
+
+    Both notices tell somebody to run an install command, and an install command without
+    `--python` is the one that silently does nothing — uv will not move a tool to a
+    different interpreter on its own. Advice that omits it sends the reader round the
+    loop they are already in.
+    """
+
+    def test_the_behind_notice_pins_and_says_why(self) -> None:
+        staleness.reset()
+        staleness.note_hub_version("999.0.0")
+
+        told = staleness.notice() or ""
+
+        assert f"--python {staleness.interpreter_pin()}" in told
+        # The reason, not only the flag: a bare flag in a command reads as noise and
+        # gets tidied away by the next person to touch the string.
+        assert "uv will not move a tool" in told
+        staleness.reset()
+
+    def test_the_too_old_interpreter_note_gives_the_pinned_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """This is the reader who most needs it — they are about to install a new
+        interpreter, and an unpinned reinstall leaves them on the old release anyway."""
+        import sys
+        from collections import namedtuple
+
+        # `python_is_too_old` does `import sys` locally, so this is the same object.
+        # It reads both `[:2]` and `.major`/`.minor`, so a bare tuple is not enough
+        # — found by running the test rather than by trusting it.
+        fake = namedtuple("fake_version", "major minor micro releaselevel serial")
+        monkeypatch.setattr(sys, "version_info", fake(3, 9, 0, "final", 0))
+
+        told = staleness.python_is_too_old()
+
+        assert told, "the premise failed: this interpreter was not treated as too old"
+        assert "uv tool install --python" in told, "no pinned command to run"
+        assert "uv python install" in told, "no way to get the interpreter"
