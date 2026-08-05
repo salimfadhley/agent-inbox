@@ -47,6 +47,7 @@ from agent_inbox.exceptions import MailboxError
 from agent_inbox.peers import identify
 from agent_inbox.prompts import bootstrap, onboarding, role_note
 from agent_inbox.relay import Relay
+from agent_inbox.rules import EVERYONE
 
 #: A browser form arrives URL-encoded, not as JSON. Naming the type once keeps the
 #: three POST handlers from each repeating the annotation.
@@ -1457,6 +1458,45 @@ def build_console(client: HubClient) -> Litestar:
                 pass  # the inbox will simply still show it; no page to break
         return Redirect("/inbox")
 
+    def _who_datalist(request: Request) -> str:
+        """Every name on this hub, offered as suggestions for the `To:` field.
+
+        Reported as a regression by the owner (2026-08-05); it was not one — the console
+        has never had this, and what they were seeing was the browser's own form
+        history, which is per-origin and was lost when the hub moved. It is a fair thing
+        to expect, so here it is.
+
+        **A `<datalist>` rather than script.** The console has no framework and no build
+        step, and the browser already does typeahead over a list better than anything
+        that would be written here. It also degrades honestly: with the list unavailable
+        the field is an ordinary text input, which is what it was yesterday.
+
+        `everyone` is offered alongside the names because it is the one address people
+        forget exists — and it is deliberately last, since a broadcast costs every
+        recipient a turn none of them can decline.
+
+        Best effort. A hub that will not answer costs the reader their suggestions and
+        must not cost them the page.
+        """
+        try:
+            actors = seen_by(request).list_agents().get("items", [])
+        except Exception:  # noqa: BLE001 - suggestions are a convenience, never the page
+            console_logger.debug(
+                "could not read the directory to suggest", exc_info=True
+            )
+            return '<datalist id="who"></datalist>'
+        names = sorted(
+            {
+                _leaf(a.get("preferredUsername") or a.get("id"))
+                for a in actors
+                if (a.get("preferredUsername") or a.get("id"))
+            }
+        )
+        options = "".join(
+            f'<option value="{html.escape(n)}">' for n in [*names, EVERYONE]
+        )
+        return f'<datalist id="who">{options}</datalist>'
+
     @get("/compose", media_type=MediaType.HTML, sync_to_thread=True)
     def compose_form(request: Request) -> Response:
         hub = hub_or_none()
@@ -1467,15 +1507,17 @@ def build_console(client: HubClient) -> Litestar:
             f"{sent}"
             '<form method="post" action="/compose/send">'
             '<label for="to">To (comma-separated, or <code>everyone</code>)</label>'
-            '<input type="text" id="to" name="to" placeholder="rosemary_nasrin">'
-            '<label for="subject">Subject</label>'
+            '<input type="text" id="to" name="to" list="who" '
+            'placeholder="rosemary_nasrin" autocomplete="off">'
+            + _who_datalist(request)
+            + '<label for="subject">Subject</label>'
             '<input type="text" id="subject" name="subject" placeholder="a short line">'
             '<label for="body">Message</label>'
             '<textarea id="body" name="body" rows="8"></textarea>'
             '<p style="margin-top:.8rem"><button type="submit">Send</button></p>'
             "</form>"
-            '<p class="dim">You send as this console\'s own identity — an ordinary '
-            "agent. Replies come back to your <a href='/inbox'>inbox</a>.</p>"
+            f'<p class="dim">You send as <code>{me}</code>. Replies come back to '
+            "your <a href='/inbox'>inbox</a>.</p>"
         )
         return Response(
             _page("Compose", body, hub, "/compose"), media_type=MediaType.HTML

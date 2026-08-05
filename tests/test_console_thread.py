@@ -247,3 +247,79 @@ class TestPressingTheReplyButtonActuallyWorks:
             )
 
         assert sent == []
+
+
+class TestComposeSuggestsNames:
+    """Reported by the owner as a regression, 2026-08-05. **It was not one** — the
+    console has never had this; `datalist` appears nowhere in the file's history and the
+    `To:` input has not changed since long before today. What they were seeing was the
+    browser's own form history, which is per-origin and was lost when the hub moved.
+
+    A fair thing to expect, so it exists now. A `<datalist>` rather than script: the
+    browser already does typeahead better than anything written here would, the console
+    has no build step, and with the list unavailable the field degrades to the ordinary
+    text input it was yesterday.
+    """
+
+    @staticmethod
+    def _console(actors: list[dict] | None = None, fail: bool = False) -> TestClient:
+
+        from agent_inbox.client import ClientError, Config, HubClient
+        from agent_inbox.console import build_console
+
+        class Stub(HubClient):
+            def __init__(self) -> None:
+                super().__init__(Config(hub=HUB, name="console"))
+
+            def hub_info(self) -> dict[str, Any]:
+                return {"name": "t", "version": "1.0.0", "authenticated": False}
+
+            def with_session(self, session: str | None) -> Stub:
+                return self
+
+            def acting_as(self, name: str, session: str) -> Stub:
+                return self
+
+            def whoami(self) -> str:
+                return HUMAN
+
+            def list_agents(self) -> dict[str, Any]:
+                if fail:
+                    raise ClientError("the hub is not answering")
+                return {"items": actors or []}
+
+        return TestClient(app=build_console(Stub()))
+
+    def test_every_name_on_the_hub_is_offered(self) -> None:
+        who = [
+            {"preferredUsername": AGENT, "type": "Service"},
+            {"preferredUsername": HUMAN, "type": "Person"},
+        ]
+
+        with self._console(who) as console:
+            page = console.get("/compose", cookies={SESSION_COOKIE: "s"}).text
+
+        assert 'list="who"' in page, "the field is not wired to a list"
+        assert f'<option value="{AGENT}">' in page
+        assert f'<option value="{HUMAN}">' in page, "humans are addressable too"
+
+    def test_everyone_is_offered_and_offered_last(self) -> None:
+        """The address people forget exists — and deliberately at the bottom, because a
+        broadcast costs every recipient a turn none of them can decline."""
+        with self._console([{"preferredUsername": AGENT}]) as console:
+            page = console.get("/compose", cookies={SESSION_COOKIE: "s"}).text
+
+        assert '<option value="everyone">' in page
+        assert page.index(f'value="{AGENT}"') < page.index('value="everyone"')
+
+    def test_a_hub_that_will_not_answer_costs_the_suggestions_not_the_page(
+        self,
+    ) -> None:
+        """The paired negative. Suggestions are a convenience; the compose form is not,
+        and a reader who cannot send mail because a nicety failed is worse off than one
+        typing a name in full."""
+        with self._console(fail=True) as console:
+            answer = console.get("/compose", cookies={SESSION_COOKIE: "s"})
+
+        assert answer.status_code == 200, "a failed lookup broke the compose page"
+        assert 'name="to"' in answer.text, "the field itself is gone"

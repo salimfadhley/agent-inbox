@@ -65,10 +65,18 @@ ui = [
 ]
 
 [project.scripts]
-# One command, several modes: `agent-mailbox mcp`, `serve`, `join`, `inbox`, …
-agent-mailbox = "agent_inbox.cli:main"
-# The project's true name, and increasingly what people type. Both names run the same
-# program; `agent-mailbox` stays because it is wired into deployments and hooks.
+# One command, several modes: `agent-inbox mcp`, `serve`, `join`, `inbox`, …
+#
+# **The `agent-mailbox` alias was removed on 2026-08-05** (owner). It had been kept
+# because it was wired into deployments and hooks; it is not any more — the wake hook
+# has installed `agent-inbox wake-check` for many releases, and the prompt has named
+# `agent-inbox` throughout. `import agent_mailbox` still resolves, and
+# `agent-mailbox.toml` is still read: this removes a *command*, not a compatibility
+# promise about data or imports.
+#
+# An install that predates this keeps its own `agent-mailbox` entry point until it is
+# upgraded, so nothing breaks the moment this ships — it stops being replaced, not
+# suddenly absent.
 agent-inbox = "agent_inbox.cli:main"
 
 [project.urls]

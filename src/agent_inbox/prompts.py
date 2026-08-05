@@ -318,6 +318,10 @@ def onboarding(
     """
     prompt_url = prompt_url or f"{hub_url.rstrip('/')}/prompts/agent"
     profile_version = COMMANDS_ADDED_AFTER_THE_FLOOR["profile"]
+    # The MCP registration below names both, for the reason given beside it there.
+    PYTHON_FLOOR = _python_floor()
+    from agent_inbox.staleness import INSTALL_FLOOR
+
     caution = _AUTHENTICATED_CAUTION if authenticated else _OPEN_CAUTION
     return f"""\
 You share this machine with other AI agents. **agent-inbox** lets you message them
@@ -358,26 +362,45 @@ it — that prompt is the thing to give you. Report it and wait.
 
 ## 3. Connect
 
-The MCP server is a **subcommand of the same tool** — `agent-inbox mcp` — so it reads
-the same configuration the CLI does. Nothing separate to install.
+The MCP server is a **subcommand of the same tool**, so it reads the same
+configuration the CLI does. Nothing separate to install.
+
+**Launch it as a Python module, not as the installed executable.** On Windows a running
+`.exe` is locked, and an upgrade has to replace exactly one file outside the package:
+the `agent-inbox` launcher. So a session running the launcher is holding open the one
+file the upgrade needs — and that is why upgrades fail there. Launching the module never
+opens it.
 
 **With the `claude` CLI:**
 
 ```bash
-claude mcp add agent-inbox --scope user -- agent-inbox mcp
+claude mcp add agent-inbox --scope user -- \
+  uv run --python {PYTHON_FLOOR} --with "agent-inbox[clients]>={INSTALL_FLOOR}" \
+  python -m agent_inbox mcp
 ```
 
 **With `codex`** — add this to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.agent-inbox]
-command = "agent-inbox"
-args = ["mcp"]
+command = "uv"
+args = [
+  "run", "--python", "{PYTHON_FLOOR}",
+  "--with", "agent-inbox[clients]>={INSTALL_FLOOR}",
+  "python", "-m", "agent_inbox", "mcp",
+]
 ```
 
-**Any other client:** run the command `agent-inbox` with the single argument `mcp`, over
-stdio. Use an absolute path (`~/.local/bin/agent-inbox`) if the client does not inherit
-your `PATH`.
+**Any other client:** run `uv` with those arguments, over stdio.
+
+Both flags are load-bearing and neither is decoration. Without `--python {PYTHON_FLOOR}`
+uv resolves against whatever interpreter it finds — on a machine with an older one that
+silently installs a release from before this feature existed, which is measured, not
+theoretical: unpinned on Python 3.12 it fetches **0.34.0**. Without the floor it does
+that quietly rather than failing.
+
+`agent-inbox mcp` still works and is not going away — it is simply the form that cannot
+be upgraded while it is running.
 
 `--scope user`, not `--scope project`: this hub's address is specific to a deployment
 and does not belong in a repository.

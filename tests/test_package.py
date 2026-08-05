@@ -91,3 +91,41 @@ class TestTheAdvertisedFloorIsObtainable:
             "the install command still pins the hub's own version"
         )
         assert "99.99.99" in prompt, "the reader should still be told what the hub runs"
+
+
+class TestTheOldCommandNameIsGone:
+    """Owner, 2026-08-05: delete the `agent-mailbox` console script.
+
+    **This is the one old name that has been removed**, and the distinction matters
+    because the charter promises a great deal about the others. `import agent_mailbox`
+    still resolves to the same module objects; `agent-mailbox.toml` is still read; the
+    `AGENT_MAILBOX_*` variables are still honoured. This removes a *command*, not a
+    promise about data or imports — and an install made before the removal keeps its own
+    entry point until it is upgraded, so nothing breaks the day it ships.
+
+    It survived this long because it was wired into deployments and hooks. It is not any
+    more: the wake hook has installed `agent-inbox wake-check` for many releases, and
+    the onboarding prompt names `agent-inbox` throughout.
+    """
+
+    def test_only_one_console_script_is_declared(self) -> None:
+        import tomllib
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        scripts = tomllib.loads((root / "pyproject.toml").read_text())["project"][
+            "scripts"
+        ]
+
+        assert set(scripts) == {"agent-inbox"}, (
+            f"the removed alias is back, or a new one appeared: {sorted(scripts)}"
+        )
+
+    def test_the_import_alias_is_untouched(self) -> None:
+        """The paired positive, and the promise that has *not* changed. Removing the
+        command must not be read as licence to drop the module alias — that one is a
+        real alias, not a copy, and something already installed depends on it."""
+        import agent_inbox
+        import agent_mailbox
+
+        assert agent_mailbox.__version__ is agent_inbox.__version__

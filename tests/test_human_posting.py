@@ -211,3 +211,65 @@ class TestAHumanNeverSendsAsAnAgent:
         )
 
         assert answer.status_code >= 400, "a header overrode the credential"
+
+
+class TestReachingForEverybody:
+    """Reported by the owner, 2026-08-05: addressing `*` gave *"nobody here is called
+    '*'"* — correct, and no help at all.
+
+    `*` is the actor a **shared token** shows as, so it appears in `doctor` output and
+    on the tokens screen where it reads like a name. Guessing it is a reasonable thing
+    to do, and there is exactly one right answer, so the refusal should say it.
+    """
+
+    @pytest.mark.parametrize("guess", ["*", "all", "any", "public", "everybody"])
+    async def test_the_refusal_names_the_address_they_wanted(
+        self, hub: tuple[TestClient, AuthService, InMemoryStore], guess: str
+    ) -> None:
+        from agent_inbox.exceptions import UnknownRecipient
+
+        client, auth, store = hub
+        await sign_in(client, auth)
+        await a_human(auth, store)
+        mailbox = Mailbox(store, hub_name="testhub")
+
+        with pytest.raises(UnknownRecipient) as refused:
+            await mailbox.send(HUMAN, [guess], "hello")
+
+        assert "everyone" in str(refused.value), (
+            f"a sender who guessed {guess!r} is left to guess again"
+        )
+
+    async def test_an_ordinary_typo_is_not_given_that_advice(
+        self, hub: tuple[TestClient, AuthService, InMemoryStore]
+    ) -> None:
+        """The paired negative. Suggesting a broadcast to somebody who mistyped one
+        agent's name would be worse than saying nothing — a broadcast costs every
+        recipient a turn none of them can decline."""
+        from agent_inbox.exceptions import UnknownRecipient
+
+        client, auth, store = hub
+        await sign_in(client, auth)
+        await a_human(auth, store)
+        mailbox = Mailbox(store, hub_name="testhub")
+
+        with pytest.raises(UnknownRecipient) as refused:
+            await mailbox.send(HUMAN, ["rosemary_nasrn"], "hello")
+
+        assert "everyone" not in str(refused.value)
+
+    async def test_everyone_itself_still_works(
+        self, hub: tuple[TestClient, AuthService, InMemoryStore]
+    ) -> None:
+        """The paired positive: the advice must name something that actually works."""
+        client, auth, store = hub
+        sid = await sign_in(client, auth)
+        await a_human(auth, store)
+        client.post(
+            "/actors", json={"preferredUsername": AGENT}, cookies={SESSION_COOKIE: sid}
+        )
+        mailbox = Mailbox(store, hub_name="testhub")
+
+        await mailbox.send(HUMAN, ["everyone"], "hello", subject="s")
+
+        assert await mailbox.unread_count(AGENT) == 1

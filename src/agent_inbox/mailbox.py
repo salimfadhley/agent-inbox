@@ -44,6 +44,29 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+#: Things somebody reaches for when they mean *everybody*. None of them is an address
+#: here, and one of them is actively misleading: ``*`` is what a **shared token** shows
+#: as its actor, so it appears in `doctor` output and in the tokens screen, where it
+#: reads like a name. The owner tried addressing it (2026-08-05) and got a refusal that
+#: was correct and unhelpful.
+#:
+#: `all`, `any` and `public` are reserved *names* — no agent may hold one — but none is
+#: a broadcast either, so a sender who guesses gets the same dead end.
+_MEANT_EVERYBODY = frozenset({"*", "all", "any", "public", "everybody", "broadcast"})
+
+
+def _did_you_mean_everyone(missing: Sequence[str]) -> str:
+    """Name the address they were reaching for, when it is obvious which one.
+
+    A refusal that says only "no such name" is correct and leaves the sender to guess
+    again. The one guess worth pre-empting is *everybody*, because there is exactly one
+    right answer and several plausible wrong ones.
+    """
+    if any(name.strip().lower() in _MEANT_EVERYBODY for name in missing):
+        return f"to reach everybody, address {rules.EVERYONE!r} — "
+    return ""
+
+
 class Mailbox:
     """Send, receive and read mail, over any :class:`MessageStore`.
 
@@ -342,7 +365,8 @@ class Mailbox:
         if missing:
             raise UnknownRecipient(
                 f"nobody here is called {', '.join(repr(m) for m in missing)} — "
-                "check the name, or call `directory` to see who has joined"
+                + _did_you_mean_everyone(missing)
+                + "check the name, or call `directory` to see who has joined"
             )
 
     @staticmethod
