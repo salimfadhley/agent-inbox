@@ -23,8 +23,8 @@ from dataclasses import dataclass
 
 from agent_inbox import __version__
 from agent_inbox.exceptions import ReleaseGateError
-from agent_inbox.prompts import MINIMUM_CLIENT, onboarding
-from agent_inbox.staleness import interpreter_pin
+from agent_inbox.prompts import onboarding
+from agent_inbox.staleness import INSTALL_FLOOR, interpreter_pin
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,10 +103,10 @@ def prompt_install_for_version(version: str) -> PromptInstall:
     prompt_install = extract_prompt_install(
         onboarding(PROMPT_HUB_URL, PROMPT_URL, version)
     )
-    if prompt_install.version != MINIMUM_CLIENT:
+    if prompt_install.version != INSTALL_FLOOR:
         raise ReleaseGateError(
-            "prompt package floor does not match MINIMUM_CLIENT: "
-            f"{prompt_install.version!r} != {MINIMUM_CLIENT!r}"
+            "prompt package floor does not match INSTALL_FLOOR: "
+            f"{prompt_install.version!r} != {INSTALL_FLOOR!r}"
         )
     return prompt_install
 

@@ -31,6 +31,7 @@ from agent_inbox.client import (
 )
 from agent_inbox.console import _freshness, build_console
 from agent_inbox.prompts import MINIMUM_CLIENT
+from agent_inbox.staleness import INSTALL_FLOOR
 
 HUB = "http://mailbox.invalid:8081"
 
@@ -595,10 +596,11 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     # Pinned to the floor, so a resolver that cannot reach it fails loudly instead of
     # silently installing 0.10.2 — the superseded package, with different commands.
     #
-    # The floor is MINIMUM_CLIENT, deliberately *not* the hub's own version. Pinning to
+    # The floor is the *install* floor, deliberately not the hub's own version and not
+    # the compatibility floor either — the two were separated on 2026-08-05. Pinning to
     # the newest release made every release briefly unsatisfiable, because PyPI's
     # install index trails a publish by minutes — three agents hit that window.
-    assert f'"agent-inbox[clients]>={MINIMUM_CLIENT}"' in text
+    assert f'"agent-inbox[clients]>={INSTALL_FLOOR}"' in text
     assert "clients]>=1.2.3" not in text
 
 
@@ -1680,15 +1682,23 @@ class TestThePromptDoesNotOverpromise:
                 f"command' and reads it as a broken install"
             )
 
-    def test_the_floor_itself_did_not_move(self) -> None:
+    def test_the_compatibility_floor_itself_did_not_move(self) -> None:
         """Raising it would lock out working clients to fix a documentation problem.
 
         The floor's own rule: move it when a row changes shape, not when a command is
         added. 0.17.1 still reads the current inbox format natively.
+
+        **This is not the floor the install command carries** — `igor_laszlo` found the
+        two conflated on 2026-08-05. The install command's floor is a downgrade guard
+        and has to sit above 0.34.0; this one is about what a client can still read, and
+        raising it costs somebody a working install. One constant was doing both jobs,
+        and could only ever do one of them right. See
+        `test_prompts.TestTheVersionFloorIsCalibratedNotChosen`.
         """
-        from agent_inbox.prompts import MINIMUM_CLIENT
+        from agent_inbox.staleness import INSTALL_FLOOR
 
         assert MINIMUM_CLIENT == "0.17.1"
+        assert INSTALL_FLOOR != MINIMUM_CLIENT, "the two floors have merged again"
 
     def test_the_prompt_says_the_floor_is_not_a_command_guarantee(self) -> None:
         from agent_inbox.prompts import onboarding

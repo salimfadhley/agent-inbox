@@ -52,6 +52,15 @@ rather than leaving a placeholder for someone to fill in wrongly.
 #: natively. Raise this when we change what a row *is* — not when we add commands.
 #:
 #: Re-run that check when raising it. ludmila_coe supplied the probe.
+#: The oldest client that still reads the current message format — a **compatibility**
+#: floor, and the version every "needs X" note in this prompt is measured against.
+#:
+#: Not the floor the install command carries. That one lives in
+#: :data:`agent_inbox.staleness.INSTALL_FLOOR` and answers a different question: the
+#: lowest release an out-of-date interpreter *cannot* resolve to. `igor_laszlo` found
+#: them conflated on 2026-08-05, when this single constant was doing both jobs — and
+#: doing the second one wrong, since 0.17.1 sits below the 0.34.0 that an old Python
+#: silently installs.
 MINIMUM_CLIENT = "0.17.1"
 
 #: Commands that arrived **after** the floor, and the version each needs.
@@ -101,11 +110,13 @@ def _install(version: str) -> str:
     if not version:
         # One line in the rendered prompt, deliberately: a `\`-continued shell command
         # is a paste hazard, and the reader is copying this into a terminal.
+        from agent_inbox.staleness import upgrade_command
+
         floor = _python_floor()
         return (
-            "```bash\nuv python list\nuv tool install --python "
-            + floor
-            + ' --refresh --no-cache --force "agent-inbox[clients]"\n```'
+            "```bash\nuv python list\n"
+            + upgrade_command()
+            + "\n```"
             + f"""
 
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
@@ -143,11 +154,9 @@ other kind, so it installs a second one alongside the {floor} you already have."
     # older one. Most readers already have a 3.14. Putting the fetch outside the block
     # makes the common path safe by default and costs the stuck reader one more line —
     # and the stuck reader is the one who is definitely reading.
-    INSTALL_COMMAND = (
-        "uv python list\n"
-        f"uv tool install --python {PYTHON_FLOOR} --refresh --no-cache --force "
-        f'"agent-inbox[clients]>={MINIMUM_CLIENT}"'
-    )
+    from agent_inbox.staleness import INSTALL_FLOOR, upgrade_command
+
+    INSTALL_COMMAND = "uv python list\n" + upgrade_command()
     return f"""\
 You may already have it. Ask, before installing anything:
 
@@ -157,7 +166,7 @@ agent-inbox --version
 
 **Install if that command fails for any reason** — not found, or an unrecognised option
 on a copy too old to have the flag — **or if it prints anything older than
-{MINIMUM_CLIENT}:**
+{INSTALL_FLOOR}:**
 
 ```bash
 {INSTALL_COMMAND}
@@ -186,7 +195,7 @@ is what older deployments and hooks call: they are the same program.)
 installed — which is exactly the case where you need it to act. There is no separate
 upgrade command.
 
-`>={MINIMUM_CLIENT}` so that a resolver which cannot reach it **fails and tells
+`>={INSTALL_FLOOR}` so that a resolver which cannot reach it **fails and tells
 you**, instead of quietly settling on an old release. Unpinned, this command has been
 observed installing 0.10.2 — a superseded package providing entirely different
 commands, with nothing about the install saying so.

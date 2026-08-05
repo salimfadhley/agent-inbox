@@ -89,6 +89,55 @@ def python_floor() -> str:
 FALLBACK_FLOOR = "3.14"
 
 
+#: The lowest release the install command will accept, calibrated against the index
+#: rather than chosen.
+#:
+#: **This is not the same thing as `prompts.MINIMUM_CLIENT`, and conflating them was the
+#: bug.** That one is a *compatibility* floor — the oldest client that still reads the
+#: current message format — and raising it would lock out working installs to solve a
+#: documentation problem. This one is a *downgrade guard*: the lowest version an old
+#: interpreter cannot reach. One constant was doing both jobs and could only do one.
+#:
+#: Every release from 0.35.0 declares `requires-python >=3.14`; every release up to and
+#: including **0.34.0** declares `>=3.12`. So a resolver on an old interpreter can still
+#: satisfy anything at or below 0.34.0, and *cannot* satisfy 0.35.0 or later — which is
+#: exactly the "fails and tells you" property this floor exists to provide.
+#:
+#: It used to be `0.17.1`, which sits **below 0.34.0** — the very version an old
+#: interpreter silently resolved to, and the incident that put the floor here in the
+#: first place. `igor_laszlo` noticed the arithmetic (2026-08-05) and said plainly he
+#: might be wrong about the floor's purpose; he was not. A guard set below the known-bad
+#: version is worse than none, because it looks like the case is handled.
+#:
+#: **Raise this only with the same evidence.** The right value is the first release that
+#: requires the current Python floor — read from the index, not picked. Pinning it near
+#: the newest release makes every publish briefly unsatisfiable, because the install
+#: index trails a publish by minutes.
+INSTALL_FLOOR = "0.35.0"
+
+
+def upgrade_command(*, cached: bool = False) -> str:
+    """The single install command, for the prompt *and* for every notice.
+
+    **One string, because two drifted.** `doctor` told a stale client to run
+    `uv tool install --refresh --force 'agent-inbox[clients]'` while the prompt gave the
+    pinned, floored form — so the command an agent got when it was already confused was
+    the unpinned one, which is precisely what silently resolves to an old release.
+    `igor_laszlo` found the discrepancy between the two texts (2026-08-05) and proposed
+    exactly this fix: *"generated from one string, the same way you fixed the two prompt
+    copies — otherwise this drifts again the next time the install advice changes, and
+    it changed four times today."*
+
+    ``cached`` keeps `--no-cache` off for a caller who has just been told the index is
+    the problem; everything else is identical, and nothing here is optional.
+    """
+    cache = "" if cached else "--no-cache "
+    return (
+        f"uv tool install --python {interpreter_pin()} --refresh {cache}--force "
+        f'"agent-inbox[clients]>={INSTALL_FLOOR}"'
+    )
+
+
 def interpreter_pin() -> str:
     """The interpreter every install instruction pins, e.g. ``"3.14"``.
 
@@ -219,10 +268,10 @@ def notice() -> str | None:
     return (
         f"Your agent-inbox client is {ours}; this hub runs {theirs}. Tools added since "
         f"{ours} will be missing from this session and will look like they do not "
-        f"exist. To update: uv tool install --python {interpreter_pin()} "
-        f"--refresh --force 'agent-inbox[clients]' — keep `--python`, because uv "
-        f"will not move a tool to a newer interpreter on its own and an unpinned "
-        f"upgrade can silently resolve to an older release "
+        f"exist. To update: {upgrade_command()} — every flag is load-bearing: "
+        f"`--python` because uv will not move a tool to a newer interpreter on its "
+        f"own, and the version floor because an old interpreter can otherwise resolve "
+        f"to a release from before this one and report success "
         f"— then restart this session, because a running session keeps the tools it "
         f"started with."
     )

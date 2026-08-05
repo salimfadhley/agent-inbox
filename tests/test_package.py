@@ -58,9 +58,16 @@ class TestTheAdvertisedFloorIsObtainable:
     """
 
     def test_the_floor_is_not_the_current_version(self) -> None:
+        """Both floors, since they were separated on 2026-08-05 — the reason to keep
+        each off the current version is the same for either."""
         from agent_inbox import __version__
         from agent_inbox.prompts import MINIMUM_CLIENT
+        from agent_inbox.staleness import INSTALL_FLOOR
 
+        assert INSTALL_FLOOR != __version__, (
+            "the install floor tracks the release again — every release will advertise "
+            "a version the install index cannot yet satisfy"
+        )
         assert MINIMUM_CLIENT != __version__, (
             "the floor tracks the release again — every release will advertise a "
             "version the install index cannot yet satisfy"
@@ -75,10 +82,11 @@ class TestTheAdvertisedFloorIsObtainable:
     # this prompt prints, against the surface an agent actually installs from.
 
     def test_the_prompt_advertises_the_floor_not_the_hub_version(self) -> None:
-        from agent_inbox.prompts import MINIMUM_CLIENT, onboarding
+        from agent_inbox.prompts import onboarding
+        from agent_inbox.staleness import INSTALL_FLOOR
 
         prompt = onboarding("http://hub.invalid", version="99.99.99")
-        assert f'"agent-inbox[clients]>={MINIMUM_CLIENT}"' in prompt
+        assert f'"agent-inbox[clients]>={INSTALL_FLOOR}"' in prompt
         assert "clients]>=99.99.99" not in prompt, (
             "the install command still pins the hub's own version"
         )

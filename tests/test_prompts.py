@@ -277,3 +277,95 @@ class TestEveryInstallInstructionPinsTheInterpreter:
         found = extract_prompt_install(_install("0.60.1"))
 
         assert found.command[:5] == ("uv", "tool", "install", "--python", "3.14")
+
+
+class TestTheVersionFloorIsCalibratedNotChosen:
+    """`igor_laszlo`, 2026-08-05: *"the `>=0.17.1` floor sits BELOW 0.34.0, the version
+    that caused the original silent-downgrade bug"*.
+
+    He was right, and said plainly he might be wrong about the floor's purpose. He was
+    not: the prompt states it is there so a resolver that cannot reach a current release
+    **fails and tells you**. `0.34.0 >= 0.17.1` is comfortably true, so the exact
+    resolution that produced the incident sailed through the guard.
+
+    **The right value is readable from the index rather than picked.** Every release up
+    to and including 0.34.0 declares `requires-python >=3.12`; 0.35.0 is the first to
+    declare `>=3.14`. So 0.35.0 is precisely the lowest floor an old interpreter cannot
+    satisfy — one version lower and the guard is decoration again.
+    """
+
+    #: The last release installable on an interpreter below our floor, confirmed against
+    #: PyPI on 2026-08-05, and the version `igor_laszlo`'s machine actually landed on.
+    LAST_OLD_PYTHON_RELEASE = (0, 34, 0)
+
+    @staticmethod
+    def _parts(version: str) -> tuple[int, ...]:
+        return tuple(int(n) for n in version.split(".")[:3])
+
+    def test_the_floor_excludes_the_version_the_incident_landed_on(self) -> None:
+        from agent_inbox.staleness import INSTALL_FLOOR
+
+        assert self._parts(INSTALL_FLOOR) > self.LAST_OLD_PYTHON_RELEASE, (
+            f"{INSTALL_FLOOR} still admits 0.34.0 — the guard is decoration"
+        )
+
+    def test_it_is_not_merely_high(self) -> None:
+        """The paired concern, and the reason not to 'fix' this by pinning to current.
+
+        A floor near the newest release makes every publish briefly unsatisfiable,
+        because the install index trails a publish by minutes. 0.35.0 is the boundary
+        and nothing above it buys anything.
+        """
+        from agent_inbox.staleness import INSTALL_FLOOR
+
+        assert self._parts(INSTALL_FLOOR) == (0, 35, 0)
+
+    def test_the_floor_reaches_the_prompt(self) -> None:
+        """It is a constant until something renders it."""
+        from agent_inbox.prompts import _install
+        from agent_inbox.staleness import INSTALL_FLOOR
+
+        assert f">={INSTALL_FLOOR}" in _install("0.71.0")
+
+
+class TestOneInstallCommandForEverySurface:
+    """`igor_laszlo` again: `doctor` printed the **unpinned** command while the prompt
+    gave the pinned, floored one — so an agent that ran `doctor` *because it was already
+    confused* was handed the exact form that silently resolves to an old release.
+
+    His proposed fix is this one: *"generated from one string, the same way you fixed
+    the two prompt copies — otherwise this drifts again the next time the install advice
+    changes, and it changed four times today."*
+    """
+
+    def test_the_notice_and_the_prompt_carry_the_same_command(self) -> None:
+        from agent_inbox import staleness
+        from agent_inbox.prompts import _install
+
+        staleness.reset()
+        staleness.note_hub_version("999.0.0")
+        told = staleness.notice() or ""
+        staleness.reset()
+
+        command = staleness.upgrade_command()
+
+        assert command in told, "doctor's advice is not the canonical command"
+        assert command in _install("0.71.0"), "the prompt's is not either"
+
+    def test_the_command_carries_every_flag_that_matters(self) -> None:
+        """Each of these was added because its absence cost somebody real work: the pin
+        (uv will not move a tool between interpreters), the floor (an old interpreter
+        resolves to a pre-3.14 release), `--force` (a plain install is a no-op when the
+        tool exists) and `--refresh` (a cached index predates the release you need)."""
+        from agent_inbox.staleness import (
+            INSTALL_FLOOR,
+            interpreter_pin,
+            upgrade_command,
+        )
+
+        command = upgrade_command()
+
+        assert f"--python {interpreter_pin()}" in command
+        assert f">={INSTALL_FLOOR}" in command
+        assert "--force" in command
+        assert "--refresh" in command

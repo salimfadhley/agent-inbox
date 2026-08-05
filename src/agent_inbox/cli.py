@@ -493,6 +493,32 @@ def _keep_it_out_of_git(path: Path) -> str:
         return ""
 
 
+def _markers() -> tuple[str, str, str, str]:
+    """The four status words `doctor` prints, coloured when a terminal is watching.
+
+    Owner, 2026-08-05: *"the doctor screen is intended to be human readable; can we
+    give it some colour so the OKs/Notes/Fails stand out."* A dozen aligned lines of
+    which one matters is the shape colour is for — the reader is scanning for the odd
+    one out, not reading top to bottom.
+
+    **The words carry the meaning; colour only makes them findable.** `FAIL` says FAIL
+    in a pipe, in a log, and to anybody who cannot distinguish red from green — which
+    is roughly one in twelve men, and this output is read by a human over somebody's
+    shoulder as often as by the agent that ran it. Colour is never the only signal,
+    and the widths are unchanged so the columns line up when it is absent.
+
+    `click.style` handles the absence of a terminal for us: it strips codes when stdout
+    is not a tty, and honours `NO_COLOR` and `--no-color`. So no branch here is needed
+    for the piped case, and one fewer branch is one fewer thing to get wrong.
+    """
+    return (
+        click.style("ok  ", fg="green"),
+        click.style("FAIL", fg="red", bold=True),
+        click.style("--  ", fg="cyan"),
+        click.style("note", fg="yellow"),
+    )
+
+
 def _report_interpreter(ok: str) -> None:
     """Name the interpreter and where it came from. A fact, never a warning.
 
@@ -1180,7 +1206,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     distinction is historical and carries no defined meaning: treat any non-zero as
     "something on this list is broken" and read the FAIL line to find out which.
     """
-    ok, bad, todo, warn = "ok  ", "FAIL", "--  ", "note"
+    ok, bad, todo, warn = _markers()
     where = find_config() or (project_root() / CONFIG_NAME)
 
     # 1. Configuration. Having none is the *normal* state before `join`, not an error:

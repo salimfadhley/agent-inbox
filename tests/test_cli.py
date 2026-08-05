@@ -1698,3 +1698,120 @@ class TestJoinArmsTheWake:
         )
 
         assert main(["join", "rosemary_nasrin", "--hub", "http://hub.invalid"]) == 0
+
+
+class TestDoctorIsReadableByAHuman:
+    """Owner, 2026-08-05: colour, so the odd line out is findable in a dozen aligned
+    ones.
+
+    The tests are about what colour must *not* cost: the words still mean what they say
+    without it, and the columns still line up.
+    """
+
+    def test_the_words_survive_having_the_colour_stripped(self) -> None:
+        """`FAIL` says FAIL in a pipe, in a log, and to a reader who cannot tell red
+        from green. Colour is a second signal, never the only one."""
+        import click
+
+        from agent_inbox.cli import _markers
+
+        assert [click.unstyle(m) for m in _markers()] == [
+            "ok  ",
+            "FAIL",
+            "--  ",
+            "note",
+        ]
+
+    def test_every_marker_is_the_same_visible_width(self) -> None:
+        """The columns are what make the screen scannable, and an escape sequence has
+        no width — so a marker that changed length would only misalign once colour was
+        *absent*, which is the case nobody looks at."""
+        import click
+
+        from agent_inbox.cli import _markers
+
+        assert {len(click.unstyle(m)) for m in _markers()} == {4}
+
+    def test_a_piped_doctor_carries_no_escape_codes(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The property an operator relies on when they redirect this into a file or
+        grep it — and the one that would break silently, since the author always runs it
+        in a terminal."""
+
+        class FakeHubClient:
+            def __init__(self, config: Config) -> None:
+                self.config = config
+
+            def hub_info(self) -> dict[str, Any]:
+                return {"name": "here", "version": "1.0.0"}
+
+            def remote_doctor(self) -> dict[str, Any]:
+                return {"you": {"token": "accepted"}, "verdict": "fine"}
+
+            def ping(self) -> dict[str, Any]:
+                return {"waiting": 0}
+
+            def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+                return {"unread": 0, "items": [], "cursor": ""}
+
+        (tmp_path / CONFIG_NAME).write_text(
+            'hub = "http://here:8080"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
+
+        main(["--engine", "claude", "doctor"])
+        out = capsys.readouterr().out
+
+        assert "\x1b[" not in out, "escape codes reached a non-terminal"
+        assert "ok  " in out, "and the words did not survive the stripping"
+
+
+class TestTheModuleEntryPoint:
+    """`python -m agent_inbox`, added at the owner's suggestion for Windows.
+
+    A running `.exe` is locked on Windows, and `uv tool install --force` must replace
+    `agent-inbox.exe` to upgrade — so an agent holding its MCP server open cannot be
+    upgraded cleanly. Launching the module instead avoids locking the shim.
+
+    **Whether it avoids the problem entirely is unverified**, and the module's docstring
+    says so: a uv tool venv has its own `python.exe`, which a process launched through
+    it holds just as firmly. This may move the failure rather than remove it. These
+    tests assert only that the entry point exists and behaves identically — the Windows
+    question needs a Windows machine, and two agents have one.
+    """
+
+    def test_the_module_can_be_run(self) -> None:
+        import subprocess
+        import sys
+
+        done = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "agent_inbox", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+        assert done.returncode == 0, done.stderr
+        assert "agent-inbox" in done.stdout or "agent_inbox" in done.stdout
+
+    def test_it_reports_failure_the_same_way_the_script_does(self) -> None:
+        """The two entry points must not drift in how they report an error, or a
+        harness switched from one to the other starts reading exit codes wrongly."""
+        import subprocess
+        import sys
+
+        done = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "agent_inbox", "no-such-command"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+        assert done.returncode != 0, "an unknown command exited cleanly"

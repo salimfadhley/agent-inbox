@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from agent_inbox.exceptions import ReleaseGateError
-from agent_inbox.prompts import MINIMUM_CLIENT
 from agent_inbox.release_gate import (
     extract_prompt_install,
     install_command,
@@ -15,16 +14,16 @@ from agent_inbox.release_gate import (
     verify_hub_version,
     verify_resolver,
 )
-from agent_inbox.staleness import interpreter_pin
+from agent_inbox.staleness import INSTALL_FLOOR, interpreter_pin
 
 
 def test_release_prompt_advertises_the_minimum_client_floor() -> None:
     install = prompt_install_for_version("1.2.3")
 
-    assert install.version == MINIMUM_CLIENT
-    assert install.requirement == f"agent-inbox[clients]>={MINIMUM_CLIENT}"
+    assert install.version == INSTALL_FLOOR
+    assert install.requirement == f"agent-inbox[clients]>={INSTALL_FLOOR}"
     assert install.command == install_command(
-        f"agent-inbox[clients]>={MINIMUM_CLIENT}", interpreter_pin()
+        f"agent-inbox[clients]>={INSTALL_FLOOR}", interpreter_pin()
     ), "the gate must run the pinned command the prompt actually gives agents"
 
 
