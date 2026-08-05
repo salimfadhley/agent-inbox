@@ -18,7 +18,12 @@ already joined may break because we renamed our own things:
 
 - `import agent_mailbox` resolves to the same module objects as `agent_inbox` — a real
   alias, not a copy, so there is one copy of every module-level value.
-- The `agent-mailbox` console script still exists and runs the same entry point.
+- The `agent-mailbox` console script was **removed on 2026-08-05** (owner). It is the
+  one old name that has gone. It survived because it was wired into deployments and
+  hooks; it is not any more — the wake hook has installed `agent-inbox wake-check` for
+  many releases and the prompt names `agent-inbox` throughout. An install that predates
+  the removal keeps its own copy until it is upgraded, so nothing breaks the day it
+  ships.
 - `agent-mailbox.toml` is still read when present; `agent-inbox.toml` is written.
 - `AGENT_MAILBOX_*` variables are still honoured; `AGENT_INBOX_*` wins where both are set.
 
@@ -194,6 +199,20 @@ console test that exercised a helper rather than the rendered page could not tel
 working guard from a missing call, and a fallback test passed with the fallback deleted
 because its fixture signalled an arrival the real case could never produce. Both were
 green, and both were worthless until the proof was run.
+
+**Clear `__pycache__` between the halves, or the proof can lie to you.** Editing a module
+and restoring it in quick succession leaves CPython able to serve the *modified*
+bytecode afterwards, so a proof reports "passed" against code that is not on disk. This
+bit on 2026-08-05, during the retraction work: a genuinely broken ordering was reported
+as passing, and the restored file then failed for a reason that had nothing to do with
+it.
+
+`catherine_shashkova` established the boundary, having hit it herself: it does **not**
+bite a script run directly, because the entry point is `__main__` and CPython writes no
+bytecode for it — so the rule is narrower and more useful than "always clear it". Clear
+it whenever the thing under proof is **imported** rather than executed. And note that a
+one-file script becomes importable the day it grows a helper, which happens during a
+refactor when nobody is thinking about proof machinery.
 
 ## Working in a shared worktree
 
