@@ -92,7 +92,8 @@ looking at.
 | FR-011 | A retracted message is retracted for everyone. It does not stay readable for some recipients. | proposed |
 | FR-012 | Replies to a retracted message survive and remain legible. | proposed |
 | FR-013 | The standing `admin` drop box keeps working: mail already sent there remains reachable by whoever holds the account. | proposed |
-| FR-014 | **Only humans retract.** No agent may retract any message, including its own, by any surface — asserted as a negative test rather than left to the console not offering a button. | proposed |
+| FR-014 | **An agent may retract its own messages, and only its own.** Retracting another agent's message is refused on every surface — asserted as a negative test, not left to a console that happens to offer no button. | proposed |
+| FR-016 | A human may retract any message on their hub, including an agent's. The two powers are different acts with different scopes, and the refusal in FR-014 names which one the caller lacks. | proposed |
 | FR-015 | A retraction is **local**. A copy already delivered to a peer hub is not withdrawn, and nothing claims it was. This is what Lemmy does and what federation can honestly deliver. | proposed |
 
 ## Non-functional requirements
@@ -114,16 +115,37 @@ looking at.
 
 ## Answered, 2026-08-05
 
-### Who may retract: **any human, anything on their own hub. No agent, ever.**
+### Who may retract: **an agent its own; a human anything on their hub**
 
-A human may retract any message on the hub they operate. **Agents cannot retract at
-all** — not their own messages, not anyone's. That keeps retraction an operator act and
-keeps it outside anything a message could ask for, which matters because a message that
-could cause a retraction would be a message with authority (C-001).
+Revised by the owner on 2026-08-05, having first said agents could not retract at all.
 
-It also decouples this mission from [#5](https://github.com/salimfadhley/agent-inbox/issues/5):
-there are no per-role limits to design, because the line is not between roles but
-between humans and agents.
+- An **agent** may retract **its own** messages. Not another agent's, not a human's.
+- A **human** may retract **anything** on the hub they operate.
+
+**This lands exactly on the two acts Lemmy already has**, which the earlier version only
+half-matched:
+
+| Lemmy | here | who | scope |
+|---|---|---|---|
+| `delete` | an agent retracting its own | the author | their own message |
+| `remove` | a human retracting anything | the operator | anything on this hub |
+
+Arriving at a convention the fediverse settled years ago, from a different direction, is
+the outcome C-003 of the parent federation work is asking for. The first version — no
+author-deletion at all — would have been a departure, and a silent one.
+
+**It does not weaken C-001.** An agent retracting its own message is not authority over
+anyone; it is the same class of act as sending. A message *asking* an agent to retract
+something is still just a message, and the agent choosing to act on it is choosing, as
+with any request. What no message can do is cause a retraction of somebody else's mail,
+because no agent may perform one.
+
+**Nor does it hide anything.** C-003 keeps the audit entry: a retraction destroys the
+body, never the record, so an agent cannot send something and erase that it did.
+
+Retraction is still not a per-role setting, so this stays decoupled from
+[#5](https://github.com/salimfadhley/agent-inbox/issues/5): the scopes are a property of
+being a human or an agent, not of a role somebody was granted.
 
 ### What the fediverse does, checked rather than recalled
 
@@ -170,6 +192,12 @@ distinguishing a human correspondent from an LLM one.
 already owns every question about what crosses a hub boundary. Splitting that decision
 across two missions is how the two come to disagree.
 
+One consequence of the revised retraction rule belongs there too, and is recorded here
+so it is not lost: Lemmy's author-`delete` **does** eventually federate, as an edit, while
+admin-`remove` does not. So "an agent retracts its own message" is the case where
+propagating a retraction is defensible — it is the author's own words — and FR-015's
+local-only rule may deserve an exception it does not have today. Not decided here.
+
 ## Open questions
 
 None outstanding. All three raised during discovery were answered on 2026-08-05.
@@ -181,6 +209,6 @@ None outstanding. All three raised during discovery were answered on 2026-08-05.
 | Reactions, votes, karma | Engagement mechanics are out by charter |
 | Editing a message | Retraction is not editing; an edited history is a different promise |
 | Human-to-human mail | This is about humans and agents in a thread |
-| Per-role retraction limits | Not needed: the line is between humans and agents, not between roles |
+| Per-role retraction limits | Not needed: the scopes follow from being a human or an agent, not from a role |
 | Waking a human | Deliberate not-yet; a human is not an interruptible session |
 | The human/agent marker on the wire | Belongs to `federated-identity-and-trust`, which owns what crosses a hub boundary |
