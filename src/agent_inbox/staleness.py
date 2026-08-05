@@ -104,6 +104,52 @@ def interpreter_pin() -> str:
     return python_floor() or FALLBACK_FLOOR
 
 
+#: How an interpreter's path betrays where it came from. Ordered: the first match wins,
+#: and `uv` is checked before the rest because a uv-managed Python can sit under a home
+#: directory that also matches nothing else.
+#:
+#: Matched case-insensitively against the path, with both separators normalised, so one
+#: table serves Windows and POSIX.
+_ORIGINS: tuple[tuple[str, str], ...] = (
+    ("/uv/python/", "uv"),
+    ("/scoop/", "scoop"),
+    # Before Homebrew: a miniconda installed *by* Homebrew lives under its Caskroom and
+    # would otherwise be reported as Homebrew's. Both answers give the same practical
+    # advice, but the specific one is the true one, and a reader comparing this against
+    # `uv python list` would notice the difference.
+    ("/miniconda", "conda"),
+    ("/anaconda", "conda"),
+    ("/.pyenv/", "pyenv"),
+    ("/cellar/", "Homebrew"),
+    ("/homebrew/", "Homebrew"),
+    ("/appdata/local/programs/python", "python.org"),
+    ("/chocolatey/", "chocolatey"),
+    ("/windowsapps/", "the Microsoft Store"),
+)
+
+
+def interpreter_origin(executable: str | None = None) -> str:
+    """Where the interpreter running this client came from — ``"uv"``, ``"scoop"``, …
+
+    ``""`` when it cannot be told — an honest answer, and commoner than the table
+    suggests: a distribution package, a hand-built Python or a container all land there.
+
+    **Why a client cares.** `uv python install` counts *only* uv-managed interpreters.
+    A perfectly good 3.14 from scoop or Homebrew satisfies `--python 3.14` while being
+    invisible to the fetch, so running the fetch anyway installs a second one — on
+    Windows today a strictly older one. `igor_laszlo` found that shape; this is what
+    lets `doctor` say which case a reader is in rather than leave them to work it out.
+    """
+    import sys
+
+    path = (executable if executable is not None else sys.executable or "").lower()
+    path = path.replace("\\", "/")
+    for fragment, name in _ORIGINS:
+        if fragment in path:
+            return name
+    return ""
+
+
 def python_is_too_old() -> str:
     """A sentence naming the mismatch, or ``""`` when this interpreter is fine.
 

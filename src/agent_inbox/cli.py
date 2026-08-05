@@ -493,6 +493,33 @@ def _keep_it_out_of_git(path: Path) -> str:
         return ""
 
 
+def _report_interpreter(ok: str) -> None:
+    """Name the interpreter and where it came from. A fact, never a warning.
+
+    A non-uv Python is not a fault — it satisfies the pin perfectly well. What it
+    changes is whether `uv python install` will see it, and that is the sentence a
+    reader needs before running an upgrade that appears to do nothing or installs a
+    duplicate.
+    """
+    import sys
+
+    running = (
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
+    origin = staleness.interpreter_origin()
+    if not origin:
+        click.echo(f"{ok} interpreter     {running}")
+        return
+    note = (
+        ""
+        if origin == "uv"
+        # The whole reason this line exists. Said only when it is true, so it does not
+        # become furniture that a reader learns to skip.
+        else " — `uv python install` will not count this one"
+    )
+    click.echo(f"{ok} interpreter     {running}, from {origin}{note}")
+
+
 def _report_exposure(ok: str, warn: str) -> None:
     """Say whether an identity file is exposed to git, on every `doctor` run.
 
@@ -1322,6 +1349,13 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     # either number is the other one. A fact, not a warning: no advice attached, and the
     # notice below still owns saying whether the difference matters.
     click.echo(f"{ok} versions        client {__version__}, hub {info.get('version')}")
+    # **Which Python this client runs on, and where it came from.** Asked for by the
+    # owner after `igor_laszlo` found that `uv python install` counts only uv-managed
+    # interpreters: a 3.14 from scoop or Homebrew satisfies `--python 3.14` while being
+    # invisible to the fetch, so an agent told to "install 3.14" installs a second one.
+    # Saying which case a reader is in is cheaper than letting them work it out from a
+    # command that succeeds and changes nothing.
+    _report_interpreter(ok)
 
     # We are holding both versions at this point and used to discard the comparison.
     # An agent whose client is behind sees new commands as "No such command", which is

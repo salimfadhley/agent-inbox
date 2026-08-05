@@ -916,6 +916,49 @@ def test_doctor_hub_flag_contacts_the_hub_it_names(
     )
 
 
+def test_doctor_names_the_interpreter_and_where_it_came_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Owner's question, 2026-08-05. The module tests prove the *detection*; this proves
+    `doctor` reports it — a separate failure, and the one that has bitten three times
+    today (the API prompt route, the reply button, the console inbox).
+    """
+    import sys
+
+    class FakeHubClient:
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def hub_info(self) -> dict[str, Any]:
+            return {"name": "here", "version": "1.0.0"}
+
+        def remote_doctor(self) -> dict[str, Any]:
+            return {"you": {"token": "accepted"}, "verdict": "fine"}
+
+        def ping(self) -> dict[str, Any]:
+            return {"waiting": 0}
+
+        def check_inbox(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            return {"unread": 0, "items": [], "cursor": ""}
+
+    (tmp_path / CONFIG_NAME).write_text(
+        'hub = "http://here:8080"\n\n[agents.claude]\nname = "nicole_ruzickova"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("agent_inbox.cli.HubClient", FakeHubClient)
+    monkeypatch.setattr(
+        sys, "executable", r"C:\Users\x\scoop\apps\python\current\python.exe"
+    )
+
+    main(["--engine", "claude", "doctor"])
+    out = capsys.readouterr().out
+
+    assert "interpreter" in out, "doctor does not say which Python it runs on"
+    assert "scoop" in out, "it does not say where that Python came from"
+    # The sentence that makes the line worth printing at all.
+    assert "will not count this one" in out
+
+
 def test_doctor_says_whether_the_identity_file_is_exposed_to_git(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

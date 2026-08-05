@@ -207,3 +207,46 @@ class TestTheAdviceKeepsThePin:
         assert told, "the premise failed: this interpreter was not treated as too old"
         assert "uv tool install --python" in told, "no pinned command to run"
         assert "uv python install" in told, "no way to get the interpreter"
+
+
+class TestWhereTheInterpreterCameFrom:
+    """Owner's question, 2026-08-05: *"Can doctor tell if python was installed via
+    scoop (not uv)?"* It can, and it now says so.
+
+    It matters because `uv python install` counts **only** uv-managed interpreters. A
+    3.14 from scoop or Homebrew satisfies `--python 3.14` perfectly and is invisible to
+    the fetch, so an agent told to install 3.14 installs a redundant second one — on
+    Windows a strictly older one. `igor_laszlo` found that shape from a scoop machine.
+    """
+
+    @pytest.mark.parametrize(
+        ("path", "origin"),
+        [
+            (r"C:\Users\SFadhley\scoop\apps\python\current\python.exe", "scoop"),
+            ("/opt/homebrew/Cellar/python@3.14/3.14.2/bin/python3.14", "Homebrew"),
+            ("/home/x/.local/share/uv/python/cpython-3.14.2/bin/python3.14", "uv"),
+            ("/opt/homebrew/Caskroom/miniconda/base/bin/python3.12", "conda"),
+            (
+                r"C:\Users\x\AppData\Local\Programs\Python\Python314\python.exe",
+                "python.org",
+            ),
+            ("/home/x/.pyenv/versions/3.14.2/bin/python", "pyenv"),
+        ],
+    )
+    def test_a_path_names_its_source(self, path: str, origin: str) -> None:
+        assert staleness.interpreter_origin(path) == origin
+
+    def test_an_unrecognised_path_says_nothing_rather_than_guessing(self) -> None:
+        """The paired negative, and the honest answer for a distribution package, a
+        hand-built Python or a container. Naming a source we cannot see would be worse
+        than silence — a reader would act on it."""
+        assert staleness.interpreter_origin("/usr/bin/python3") == ""
+        assert staleness.interpreter_origin("") == ""
+
+    def test_windows_separators_are_understood(self) -> None:
+        """The case that matters most: scoop is a Windows package manager, so a table
+        that only matched forward slashes would miss the one it was written for."""
+        assert (
+            staleness.interpreter_origin(r"C:\Users\x\scoop\shims\python3.exe")
+            == "scoop"
+        )

@@ -1401,11 +1401,17 @@ def build_console(client: HubClient) -> Litestar:
 
     @get("/inbox", media_type=MediaType.HTML, sync_to_thread=True)
     def inbox(request: Request) -> Response:
-        """The console's *own* mail — this is the one mailbox it may consume.
+        """**The signed-in human's own mail** — the one mailbox this console consumes.
 
-        Everything else on this console watches without touching. Here the operator is
-        an ordinary participant reading their own inbox, which needs no special power
-        and marks messages read exactly as any agent would.
+        Everything else here watches without touching. This is the operator reading
+        their own inbox, which needs no special power and marks messages read exactly
+        as any agent's would.
+
+        It used to be the console's own mailbox, and the sentence saying so outlived
+        the change: since the namespace merge an operator account *is* a mailbox, so
+        `acting_for` resolves the signed-in human and this shows their mail. With no
+        session — an open hub — it still falls back to the console's own identity, which
+        is the only case the old wording still describes.
         """
         hub = hub_or_none()
         acting, me = acting_for(request)
