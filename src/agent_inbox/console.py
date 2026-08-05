@@ -1104,12 +1104,7 @@ def build_console(client: HubClient) -> Litestar:
                 api=client.config.base,
                 signed_in=_signed_in(request),
             )
-        body = (
-            "<h2>Realtime</h2>"
-            '<p class="dim">Everything crossing this hub, as it happens. Subjects and '
-            "senders only — never a message body. Looking does not consume.</p>"
-            + _feed(seed=items)
-        )
+        body = "<h2>Realtime</h2>" + _feed(seed=items)
         return Response(
             _page("Realtime", body, hub, "/realtime"), media_type=MediaType.HTML
         )
