@@ -389,6 +389,11 @@ def reset_admin(username: str) -> int:
     is_flag=True,
     help="do not record this machine's hostname and checkout in the profile",
 )
+@click.option(
+    "--no-wake-hook",
+    is_flag=True,
+    help="do not install the hooks that wake this session when mail arrives",
+)
 @click.pass_context
 def join(
     ctx: click.Context,
@@ -399,6 +404,7 @@ def join(
     force: bool,
     token: str | None,
     no_machine_facts: bool,
+    no_wake_hook: bool,
 ) -> int:
     """Claim a name and configure this engine. Omit NAME to be issued one."""
     # `--engine` on the command still works and wins; otherwise the root option, then
@@ -435,6 +441,7 @@ def join(
         hub_url, granted, engine=engine, role=role, force=force, token=given or None
     )
     recorded = {} if no_machine_facts else _record_machine_facts(client, granted)
+    woken = None if no_wake_hook else _install_wake_hook()
     _print(
         {
             "name": granted,
@@ -442,9 +449,45 @@ def join(
             "engine": engine,
             "config": str(path),
             **({"machine": recorded} if recorded else {}),
+            **({"wake_hook": woken} if woken else {}),
         }
     )
+    if woken:
+        click.echo(
+            "Wake hooks installed — restart your session and mail will reach you "
+            "when it arrives, rather than when you next look.",
+            err=True,
+        )
     return 0
+
+
+def _install_wake_hook() -> str | None:
+    """Register the hooks that let an arriving message wake an idle session.
+
+    **On by default since 0.55.0** (owner, 2026-08-05: *"by default, the CLI should be
+    able to wake the agent"*). A mailbox nobody is told about is a mailbox nobody reads:
+    the machinery shipped weeks ago and the onboarding prompt never mentioned it, so it
+    worked in exactly one project — the one whose author configured it by hand.
+
+    **This writes to somebody else's config**, which is why it was opt-in and why it
+    is careful rather than merely enabled. `hookconfig` merges instead of replacing,
+    adds only entries carrying its own marker, removes only those on uninstall, and is
+    idempotent — so a second join doubles nothing, and hooks another tool put there
+    survive. `agent-inbox uninstall-hook` reverses it.
+
+    Best effort, and silent on failure. The join has already succeeded; a harness that
+    is not Claude Code, or a settings file we may not write, costs the agent a
+    convenience and must not cost it the identity it just claimed.
+    """
+    from agent_inbox import hookconfig
+
+    try:
+        return str(hookconfig.install(project_root(), rewake=True))
+    except Exception as exc:  # noqa: BLE001 - the join already happened and is durable
+        # Not every harness has hooks, and not every checkout is writable. Neither is a
+        # reason to make a successful join look like a failed one.
+        logger.debug("could not install the wake hook: %s", exc)
+        return None
 
 
 def _record_machine_facts(client: HubClient, name: str) -> dict[str, str]:

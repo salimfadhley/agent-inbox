@@ -91,6 +91,16 @@ def a_client() -> HubClient:
     return HubClient(Config(hub="http://hub.invalid", name="jed_smith", token="tok"))
 
 
+def instantly() -> float:
+    """No jitter. Backoff timing is not what these tests are about.
+
+    Left to the real generator, a delay is uniform between zero and a ceiling that grows
+    to thirty seconds — so a test waiting a fixed five for a state three retries away
+    fails roughly one run in three. Observed, on a test written the same day.
+    """
+    return 0.0
+
+
 async def next_update(queue: asyncio.Queue[Update], kind: str) -> Update:
     """The next update of one kind, ignoring the other."""
     async with asyncio.timeout(PATIENCE):
@@ -233,10 +243,15 @@ class TestTheLineSaysWhatItIsDoing:
     async def test_repeated_failure_becomes_lost(self) -> None:
         """`reconnecting` for ever is a lie told once a second."""
         failures = [OSError("no route") for _ in range(ATTEMPTS_BEFORE_LOST + 2)]
-        relay = Relay(a_client(), connect=Upstreams(*failures))
-        relay.start(asyncio.get_running_loop())
+        relay = Relay(a_client(), connect=Upstreams(*failures), rand=instantly)
         try:
+            # **Subscribed before starting**, deliberately. With the jitter removed the
+            # retries take microseconds, so a subscriber that arrives after `start()`
+            # can miss every transition and see only whatever state the relay settled
+            # in. The real jitter used to hide that race by being slow — which is how
+            # this test came to fail one run in three rather than every run.
             with relay.subscribe() as queue:
+                relay.start(asyncio.get_running_loop())
                 await state_becomes(queue, State.LOST)
         finally:
             relay.close()

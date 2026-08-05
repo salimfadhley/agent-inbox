@@ -1436,3 +1436,108 @@ class TestSeeingAndAmendingWhatTheHubHolds:
         assert main(["profile", "set", '{"project": "billing"}']) == 0
 
         assert self._Hub.stored == {"project": "billing"}
+
+
+class TestJoinArmsTheWake:
+    """A mailbox nobody is told about is a mailbox nobody reads.
+
+    The waiter shipped weeks ago and the onboarding prompt never mentioned it, so it ran
+    in exactly one project — the one whose author configured it by hand. On by default
+    since 0.55.0 (owner: *"by default, the CLI should be able to wake the agent"*).
+    """
+
+    class _Hub:
+        def __init__(self, config: Config) -> None:
+            self.config = config
+
+        def join(self, name: str | None) -> dict[str, Any]:
+            return {"preferredUsername": name or "rosemary_nasrin"}
+
+        def whois(self, name: str) -> dict[str, Any]:
+            return {"preferredUsername": name, "profile": {}}
+
+        def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+            return {"profile": profile}
+
+    @pytest.fixture(autouse=True)
+    def _repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / ".git").mkdir()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setattr("agent_inbox.cli.HubClient", self._Hub)
+        return tmp_path
+
+    def _settings(self, root: Path) -> dict[str, Any]:
+        path = root / ".claude" / "settings.json"
+        return json.loads(path.read_text()) if path.is_file() else {}
+
+    def test_joining_arms_the_wake(self, _repo: Path) -> None:
+        assert main(["join", "rosemary_nasrin", "--hub", "http://hub.invalid"]) == 0
+
+        hooks = self._settings(_repo).get("hooks", {})
+        assert "Stop" in hooks, "an arriving message cannot wake this session"
+        assert "wake-check" in json.dumps(hooks)
+
+    def test_the_waiter_is_the_kind_that_wakes_an_idle_session(
+        self, _repo: Path
+    ) -> None:
+        """`--rewake`, not the one-shot check.
+
+        A one-shot Stop hook notices mail that arrived while the agent worked. Only the
+        waiter reaches an agent already asleep, which is the case the owner cares about
+        — waking a sleeping agent costs nothing, interrupting a working one does.
+        """
+        main(["join", "rosemary_nasrin", "--hub", "http://hub.invalid"])
+
+        assert "--wait" in json.dumps(self._settings(_repo))
+
+    def test_the_flag_declines_it(self, _repo: Path) -> None:
+        assert (
+            main(
+                [
+                    "join",
+                    "rosemary_nasrin",
+                    "--hub",
+                    "http://hub.invalid",
+                    "--no-wake-hook",
+                ]
+            )
+            == 0
+        )
+
+        assert self._settings(_repo) == {}, "--no-wake-hook installed hooks anyway"
+
+    def test_it_keeps_hooks_somebody_else_put_there(self, _repo: Path) -> None:
+        """It writes to the agent's own harness config, which is not ours to trample."""
+        claude = _repo / ".claude"
+        claude.mkdir()
+        (claude / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {"hooks": [{"type": "command", "command": "echo mine"}]}
+                        ]
+                    },
+                    "other": "kept",
+                }
+            )
+        )
+
+        main(["join", "rosemary_nasrin", "--hub", "http://hub.invalid"])
+
+        after = json.dumps(self._settings(_repo))
+        assert "echo mine" in after, "somebody else's hook was evicted"
+        assert "kept" in after
+        assert "wake-check" in after
+
+    def test_a_failure_to_install_does_not_fail_the_join(
+        self, _repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The name is claimed and the config written before this runs."""
+        monkeypatch.setattr(
+            "agent_inbox.hookconfig.install",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")),
+        )
+
+        assert main(["join", "rosemary_nasrin", "--hub", "http://hub.invalid"]) == 0

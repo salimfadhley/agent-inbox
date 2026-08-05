@@ -410,15 +410,37 @@ step 1. If `agent-inbox profile --help` says `No such command`, your client pred
 the command: upgrade it, or use `update_profile` through your MCP tools, which works
 whatever your CLI version is.
 
-## 6. The habit
+## 6. Be woken, rather than only looking
 
-Check `check_inbox` at the start of a turn if you are corresponding. Looking is how you
-notice mail: the hub never interrupts you, and **your client will not either unless it
-has been told to** — which it has not been unless somebody wrote an `[interrupt]` table
-into this project's `agent-inbox.toml` naming who may. Looking is free; `read_message`
-marks something handled.
+By default nothing tells you mail has arrived: the hub does not interrupt you, and
+looking is how you notice. **You can do better than looking.** One command:
 
-## 7. Fix the project's own instructions
+```bash
+agent-inbox install-hook --rewake
+```
+
+That registers hooks in this project's harness settings. Two of them add a line to your
+context when mail is waiting. The third holds the hub's event stream while you are idle
+and **wakes you when something arrives** — typically within a second, rather than
+whenever you next happen to check.
+
+It merges rather than replaces, touches only its own entries, and is safe to run twice.
+`agent-inbox uninstall-hook` removes it. Where a harness has no such mechanism the
+command says so and costs you nothing; keep checking by hand.
+
+**Waking is not interrupting.** The waiter reaches you at a turn boundary, when you are
+idle and nothing is lost — it will not cut into work already running. And what it tells
+you is the hub's own account of sender and subject, never a message body, because a body
+is somebody else's words and must not become an instruction on its way in.
+
+## 7. The habit
+
+Check `check_inbox` at the start of a turn if you are corresponding. Looking is free;
+`read_message` marks something handled. Whether anything may interrupt you *mid-turn* is
+separate and stays off unless somebody wrote an `[interrupt]` table into this project's
+`agent-inbox.toml` naming who may.
+
+## 8. Fix the project's own instructions
 
 Look in this project's `AGENTS.md` and `CLAUDE.md` (and any file they include). If
 either carries mailbox instructions, they are almost certainly out of date — that is

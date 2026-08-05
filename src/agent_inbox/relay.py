@@ -112,6 +112,7 @@ class Relay:
         *,
         connect: Callable[[str, dict[str, str]], Any] = _open_stream,
         loop: asyncio.AbstractEventLoop | None = None,
+        rand: Callable[[], float] | None = None,
     ) -> None:
         # Address and credential come from the client, once. Assembling them here is how
         # a stream ends up authenticating differently from every other call months after
@@ -120,6 +121,13 @@ class Relay:
         self._headers = client.stream_headers()
         self._connect = connect
         self._loop = loop
+        # Injected so a test can make the backoff deterministic, exactly as
+        # `ArrivalStream` does. The delay is *fully* jittered — uniform between zero and
+        # the ceiling — so a real one can be thirteen seconds while its neighbour is a
+        # quarter of one. A test that waits a fixed time for a state reached after three
+        # retries is therefore racing the jitter, and fails about one run in three. It
+        # did; this is that fix.
+        self._rand = rand
         self._subscribers: set[asyncio.Queue[Update]] = set()
         self._lock = threading.Lock()
         self._state = State.RECONNECTING
@@ -209,9 +217,14 @@ class Relay:
             self._publish_state(
                 State.LOST if attempt >= ATTEMPTS_BEFORE_LOST else State.RECONNECTING
             )
-            if self._stopped.wait(reconnect_delay(attempt)):
+            if self._stopped.wait(self._delay(attempt)):
                 return
             attempt += 1
+
+    def _delay(self, attempt: int) -> float:
+        if self._rand is None:
+            return reconnect_delay(attempt)
+        return reconnect_delay(attempt, rand=self._rand)
 
     def _read_one_connection(self) -> float:
         """Hold one upstream connection until it ends."""
