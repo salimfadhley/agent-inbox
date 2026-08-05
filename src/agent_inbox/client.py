@@ -254,13 +254,13 @@ DEFAULT_TIMEOUT = 10.0
 #: How long to keep trying a hub that is refusing connections because it is starting.
 #:
 #: A hub scaled to zero, or restarting mid-deploy, refuses for a second or two and then
-#: answers. Treating that identically to "no such hub" is what makes the first call after
-#: a quiet period fail for everybody, every time (issue #34).
+#: answers. Treating that as "no such hub" is what made the first call after a quiet
+#: period fail for everybody, every time (issue #34).
 #:
 #: **Short on purpose.** An agent that waits a minute inside one tool call has had its
-#: turn silently consumed, which is a worse failure than a fast error — so this is a
-#: handful of seconds, not a patient retry loop. A hub that is genuinely down still says
-#: so quickly.
+#: turn silently consumed, which is worse than a fast error — so this is a handful of
+#: seconds, not a patient retry loop. A hub that is genuinely down still says so
+#: quickly.
 STARTUP_GRACE = 6.0
 
 #: How long to wait between those attempts. Fixed and small: this is a local service

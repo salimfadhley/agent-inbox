@@ -123,9 +123,9 @@ def test_only_a_refused_connection_is_retried(
 ) -> None:
     """**The safety rule, and the reason this is narrow.**
 
-    A timeout or a reset may mean the hub received the request and acted on it. Replaying
-    a send in that state produces a second message — a worse outcome than the error it
-    would be hiding. A DNS failure is a misconfiguration, and retrying it just delays the
+    A timeout or a reset may mean the hub received the request and acted on it.
+    Replaying a send in that state produces a second message — worse than the error it
+    would be hiding. A DNS failure is a misconfiguration; retrying only delays the
     answer.
     """
     opener = Opener(failures=10_000, reason=reason)
