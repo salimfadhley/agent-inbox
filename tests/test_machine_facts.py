@@ -221,7 +221,7 @@ def test_checkout_of_a_shallow_root_says_what_it_can(tmp_path: Path) -> None:
     assert checkout(root).endswith("solo")
 
 
-def test_facts_carry_only_the_two_keys_promised(repo: Path) -> None:
+def test_facts_carry_only_the_keys_promised(repo: Path) -> None:
     facts = machine_facts(start=repo, env={})
     assert set(facts) <= FACT_KEYS
     # The paired positive: without this the disclosure assertions above would pass on
@@ -261,6 +261,24 @@ def test_the_agents_own_word_wins(repo: Path) -> None:
 
 def test_a_blank_existing_value_is_a_gap_not_a_statement(repo: Path) -> None:
     addition = merged_into(
-        {"host": "   ", "root": ""}, machine_facts(start=repo, env={})
+        {"host": "   ", "root": "", "client": ""}, machine_facts(start=repo, env={})
     )
-    assert set(addition) == {"host", "root"}
+    assert set(addition) == {"host", "root", "client"}
+
+
+def test_the_client_version_is_recorded(repo: Path) -> None:
+    """So an operator can see who is on an old client.
+
+    Added after `igor_laszlo` found that an install on an interpreter older than our
+    floor silently resolves to an old release rather than failing — two agents sat on
+    0.34.0 unable to be woken, and nothing anywhere recorded which client an agent was
+    using, so it was invisible from the hub.
+    """
+    facts = machine_facts(start=repo, env={})
+
+    assert facts["client"], "nothing records which client this agent runs"
+
+
+def test_the_client_version_is_suppressed_with_the_others(repo: Path) -> None:
+    """The paired negative: opting out means all of it, not most of it."""
+    assert machine_facts(start=repo, env={OPT_OUT_VARS[0]: "1"}) == {}

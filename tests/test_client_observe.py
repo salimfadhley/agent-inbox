@@ -114,3 +114,56 @@ class TestTheHubWideStreamAddress:
 
         assert headers["Authorization"] == "Bearer secret-xyz"
         assert headers["Accept"] == "text/event-stream"
+
+
+class TestTheClientSaysWhatItIs:
+    """The header must actually go out, not merely be defined.
+
+    Written after a removal proof deleted the `add_header` call and **nothing failed**:
+    every other test injected a client version into stub data rather than watching a
+    real request carry one. A header nobody sends and no test misses is the same as no
+    header at all.
+    """
+
+    def test_every_call_carries_the_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_inbox.client import CLIENT_HEADER
+
+        sent: dict[str, str] = {}
+
+        class _Reply:
+            headers = {"Content-Type": "application/json"}
+
+            def read(self) -> bytes:
+                return b"{}"
+
+            def __enter__(self) -> "_Reply":  # noqa: UP037
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+        def capture(request: object, timeout: float = 0) -> _Reply:
+            sent.update(getattr(request, "headers", {}))
+            return _Reply()
+
+        monkeypatch.setattr("urllib.request.urlopen", capture)
+        HubClient(Config(hub="http://hub.invalid", name="jed_smith")).hub_info()
+
+        # urllib title-cases header names on the way in.
+        carried = {key.lower(): value for key, value in sent.items()}
+        assert carried.get(CLIENT_HEADER.lower()), "no client version was sent"
+
+    def test_the_held_stream_carries_it_too(self) -> None:
+        """The stream authenticates like every other call, and identifies itself alike.
+
+        A version observed only on short requests would go quiet for exactly the agents
+        holding a connection open — the ones being woken, which is the feature whose
+        absence started this.
+        """
+        from agent_inbox.client import CLIENT_HEADER
+
+        client = HubClient(Config(hub="http://hub.invalid", name="jed_smith"))
+
+        assert client.stream_headers()[CLIENT_HEADER]

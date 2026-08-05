@@ -91,6 +91,18 @@ IDENTITY_HEADER = "X-Agent-Name"
 #: The human session cookie set by /auth/login and carried by the console.
 SESSION_COOKIE = "agent_inbox_session"
 
+#: What client the caller says it is running. Declared here rather than imported for the
+#: same reason as the two constants above — the hub does not depend on the client
+#: package — and pinned by a test so the two spellings cannot drift apart.
+#:
+#: **Observed, never claimed.** The hub reads it from a request it received, which is a
+#: different kind of fact from a version an agent wrote into its profile at join. The
+#: agents worth finding are those who joined long ago on a client they did not choose:
+#: an install on an interpreter older than our floor silently resolves to an old
+#: release instead of failing, and until this header nothing recorded which client an
+#: agent used (`igor_laszlo`, 2026-08-05).
+CLIENT_HEADER = "X-Agent-Inbox-Client"
+
 #: ActivityStreams asks for this; plain JSON clients are not refused for lacking it.
 ACTIVITY_JSON = "application/activity+json"
 
@@ -1641,7 +1653,9 @@ def build_api(
                 # mission — an operator decides what to revoke from it — and evidence
                 # a sender can steer is worse than no evidence at all.
                 admitted = claimed if token.actor == SHARED_ACTOR else token.actor
-                await auth.admit(token, admitted)
+                # What the caller says it is running. A header, so it is what the hub
+                # saw on this request rather than what an agent once wrote down.
+                await auth.admit(token, admitted, _client_of(conn))
                 return token.actor
         sid = conn.cookies.get(SESSION_COOKIE)
         if sid:
@@ -2190,6 +2204,17 @@ def build_api(
     # Present only when auth is configured. They call the AuthService directly; the
     # messaging engine never sees them.
 
+    def _client_of(conn: Any) -> str:
+        """The client version this request reported, or ``""``.
+
+        Trimmed and bounded: it is caller-controlled text that ends up on an operator's
+        screen, so it is treated as a label rather than believed. An older client sends
+        nothing, which is why blank must mean "leave the last known value alone" rather
+        than "erase it".
+        """
+        raw = conn.headers.get(CLIENT_HEADER, "")
+        return str(raw).strip()[:64]
+
     async def _session_user(request: Request, *, allow_limited: bool) -> str:
         """The username behind the session cookie, or a 401. Optionally allow a limited
         (first-run enrolment) session."""
@@ -2366,6 +2391,10 @@ def build_api(
                             "firstSeen": u.first_seen,
                             "lastSeen": u.last_seen,
                             "uses": u.uses,
+                            # What that agent's client last reported. Observed by this
+                            # hub on a real request, so it belongs beside the other
+                            # things the hub knows rather than the things it was told.
+                            "client": u.client,
                         }
                         for u in uses
                     ],

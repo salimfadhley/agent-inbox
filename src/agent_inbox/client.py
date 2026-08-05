@@ -41,6 +41,18 @@ logger = logging.getLogger(__name__)
 
 IDENTITY_HEADER = "X-Agent-Name"
 
+#: What client this is. Sent on every request so the hub can *observe* the version an
+#: agent runs rather than being told it once at join and believing it for ever.
+#:
+#: The difference is not pedantry. On 2026-08-05 `igor_laszlo` found that installing on
+#: an interpreter older than our floor silently resolves to an old release instead of
+#: failing — two agents sat on 0.34.0, unable to be woken by the release that added
+#: waking, and **nothing anywhere recorded which client an agent used**, so it was
+#: invisible from the hub. A profile field written at join could not have answered it
+#: either: those agents joined long before, and a claim about a past moment is not a
+#: fact about now.
+CLIENT_HEADER = "X-Agent-Inbox-Client"
+
 #: Client settings, current name first. As with the hub's own prefix, the new name wins
 #: when both are present: whoever set it is mid-migration and means the newer one.
 ENV_NAMES: dict[str, tuple[str, ...]] = {
@@ -49,6 +61,20 @@ ENV_NAMES: dict[str, tuple[str, ...]] = {
     "role": ("AGENT_INBOX_ROLE", "AGENT_MAILBOX_ROLE"),
     "token": ("AGENT_INBOX_TOKEN", "AGENT_MAILBOX_TOKEN"),
 }
+
+
+def _our_version() -> str:
+    """This client's version, or ``""`` when it cannot say.
+
+    Imported lazily and defensively: a version lookup must never be the reason a
+    request does not go out.
+    """
+    try:
+        from agent_inbox import __version__
+
+        return str(__version__ or "")
+    except Exception:  # noqa: BLE001 - a missing version is not a reason to fail a call
+        return ""
 
 
 def env_setting(environ: dict[str, str], key: str) -> tuple[str, str]:
@@ -834,7 +860,11 @@ class HubClient:
         decides what a request from this client looks like, and holding a connection
         open does not make it a different client.
         """
-        headers = {"Accept": "text/event-stream", IDENTITY_HEADER: self.config.name}
+        headers = {
+            "Accept": "text/event-stream",
+            IDENTITY_HEADER: self.config.name,
+            CLIENT_HEADER: _our_version(),
+        }
         if self.config.token:
             headers["Authorization"] = f"Bearer {self.config.token}"
         if self.session:
@@ -850,6 +880,7 @@ class HubClient:
         request.add_header("Content-Type", "application/json")
         request.add_header("Accept", "application/json")
         request.add_header(IDENTITY_HEADER, self.config.name)
+        request.add_header(CLIENT_HEADER, _our_version())
         # A token, when we have one, is how the hub authenticates us once auth is
         # enforced. The identity header stays too, and is simply ignored under enforce.
         if self.config.token:

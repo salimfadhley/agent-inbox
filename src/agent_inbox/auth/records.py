@@ -108,6 +108,10 @@ class TokenUse:
     #: minute — so this counts the minutes in which the token was used, not the calls.
     #: A number that looks like a request count and is not would be worse than none.
     uses: int = 0
+    #: The client version last *observed* on a request from this actor — read from a
+    #: request header, never from a profile the agent wrote. Blank means we have not
+    #: heard from a client new enough to say, which is itself worth knowing.
+    client: str = ""
 
 
 @dataclass(frozen=True, slots=True)

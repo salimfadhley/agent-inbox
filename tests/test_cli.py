@@ -1288,10 +1288,13 @@ class TestMachineFactsAtJoin:
 
     def test_joining_records_the_machine(self) -> None:
         assert main(["join", "rosemary_nasrin", "--hub", "http://hub:8081"]) == 0
-        assert self._Hub.stored == {
-            "host": "somebox.invalid",
-            "root": "workspace/billing",
-        }
+
+        assert self._Hub.stored["host"] == "somebox.invalid"
+        assert self._Hub.stored["root"] == "workspace/billing"
+        # Which client this agent ran at join. A weaker fact than the hub's own
+        # observation of it — see the version header — and worth having anyway,
+        # because until now nothing recorded it at all.
+        assert self._Hub.stored["client"]
 
     def test_the_recorded_root_is_not_the_path_on_disk(self) -> None:
         """The wiring must not undo the narrowing the module performs."""

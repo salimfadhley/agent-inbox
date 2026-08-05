@@ -1,9 +1,9 @@
 """What this machine can honestly say about itself, for an agent's profile.
 
-Two facts, and only two: which box this is, and which checkout it is working in. Both
-are things the client can *read* rather than be told, which is why they are here and
-the model is not — nothing in the environment names the model, so an agent that wants
-its model on its profile writes it there itself.
+Three facts: which box this is, which checkout it is working in, and which client is
+running. All are things the client can *read* rather than be told, which is why they are
+here and the model is not — nothing in the environment names the model, so an agent that
+wants its model on its profile writes it there itself.
 
 Everything produced here lands in the free-form ``profile`` dict, so it is still a
 **claim**: the hub stores it and verifies none of it. The console renders it as such.
@@ -45,7 +45,7 @@ ROOT_SEGMENTS = 2
 MIN_REDACTED_NAME = 3
 
 #: The keys written. Named here so a test can assert on the set rather than on prose.
-FACT_KEYS: frozenset[str] = frozenset({"host", "root"})
+FACT_KEYS: frozenset[str] = frozenset({"host", "root", "client"})
 
 
 def opted_out(env: dict[str, str] | None = None) -> bool:
@@ -171,8 +171,31 @@ def machine_facts(
     """
     if opted_out(env):
         return {}
-    facts = {"host": hostname(), "root": checkout(start)}
+    facts = {"host": hostname(), "root": checkout(start), "client": client_version()}
     return {key: value for key, value in facts.items() if value}
+
+
+def client_version() -> str:
+    """Which agent-inbox this agent is running.
+
+    **Recorded at join, and therefore a claim about a moment rather than a fact about
+    now.** It goes stale the instant the agent upgrades, and the console renders it in
+    the self-declared panel for that reason.
+
+    It is worth having anyway. On 2026-08-05 `igor_laszlo` found that an install on an
+    interpreter older than our floor silently resolves to an old release rather than
+    failing — two agents on one machine sat on 0.34.0 without knowing, unable to be
+    woken by the release that added waking. Nobody could see that from the hub, because
+    nothing anywhere recorded which client an agent was using.
+
+    A stale answer is more than none, and an agent that re-joins corrects it. The
+    version the hub *observes* on every call would be strictly better and is a larger
+    piece of work: it needs a request header, a place to put it, and a write on a path
+    that currently has none.
+    """
+    from agent_inbox import __version__
+
+    return str(__version__ or "")
 
 
 def merged_into(profile: Mapping[str, object], facts: dict[str, str]) -> dict[str, str]:

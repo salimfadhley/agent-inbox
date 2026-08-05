@@ -933,7 +933,7 @@ def build_console(client: HubClient) -> Litestar:
         )
         return Response(_page(f"{name}", body, hub, ""), media_type=MediaType.HTML)
 
-    def _admitted_by(request: Request, name: str) -> str:
+    def _admitted_by(request: Request, name: str) -> tuple[str, str]:
         """Which token let this agent onto the hub, from `auth_token_use`.
 
         **Observed, not claimed** — the hub writes this row itself on every successful
@@ -955,18 +955,23 @@ def build_console(client: HubClient) -> Litestar:
         try:
             status, body, _ = client.auth_call("GET", "/auth/tokens", session=sid)
         except ClientError, MailboxError:
-            return ""
+            return "", ""
         if status >= 400 or not isinstance(body, dict):
-            return ""
-        labels = [
-            str(token.get("label") or token.get("id") or "")
-            for token in body.get("items", [])
-            if any(
-                str(use.get("name") or "") == name
-                for use in (token.get("admitted") or [])
-            )
-        ]
-        return ", ".join(html.escape(label) for label in labels if label)
+            return "", ""
+        labels: list[str] = []
+        seen_client = ""
+        for token in body.get("items", []):
+            for use in token.get("admitted") or []:
+                if str(use.get("name") or "") != name:
+                    continue
+                labels.append(str(token.get("label") or token.get("id") or ""))
+                # Whichever token saw it most recently wins. The hub returns uses
+                # newest-first, so the first non-empty answer is the freshest.
+                seen_client = seen_client or str(use.get("client") or "")
+        return (
+            ", ".join(html.escape(label) for label in labels if label),
+            html.escape(seen_client),
+        )
 
     def _feed(
         subject: str = "",
@@ -1120,7 +1125,12 @@ def build_console(client: HubClient) -> Litestar:
             ("Received", str(len(received))),
             ("Sent", str(len(sent))),
         ]
-        admitted = _admitted_by(request, name)
+        admitted, seen_client = _admitted_by(request, name)
+        if seen_client:
+            # Above "Admitted by" because it answers a question people actually ask.
+            # An agent on an old client cannot be woken and cannot run newer commands,
+            # and until the hub started observing this there was no way to see it.
+            observed.append(("Client seen", f"<code>{html.escape(seen_client)}</code>"))
         if admitted:
             observed.append(("Admitted by", admitted))
         profile = info.get("profile") or {}

@@ -378,7 +378,11 @@ class TestWhichTokenAdmittedIt:
     def test_it_is_an_observed_fact_not_a_claimed_one(self, hub: StubHub) -> None:
         """The hub writes this row itself, so it belongs in the first panel."""
         hub.token_items = [
-            {"id": "t1", "label": "laptop", "admitted": [{"name": ROSEMARY}]}
+            {
+                "id": "t1",
+                "label": "laptop",
+                "admitted": [{"name": ROSEMARY, "client": "0.34.0"}],
+            }
         ]
         with TestClient(app=build_console(hub)) as console:
             text = console.get(f"/agent/{ROSEMARY}").text
@@ -472,3 +476,59 @@ class TestTheSetupPromptPointsSomewhereReal:
             text = console.post("/tokens/mint", data={"label": "laptop"}).text
 
         assert f"join --hub {HUB}" in text
+
+
+class TestTheClientVersionTheHubSaw:
+    """Observed on a request, not written into a profile at join.
+
+    The distinction is the whole value. An install on an interpreter older than our
+    floor silently resolves to an old release rather than failing, so the agents worth
+    finding are precisely those who joined long ago on a client they did not choose —
+    and a profile field records what was true at join, which for them is either absent
+    or wrong (`igor_laszlo`, 2026-08-05).
+    """
+
+    def test_it_shows_the_version_the_hub_last_saw(self, hub: StubHub) -> None:
+        hub.token_items = [
+            {
+                "id": "t1",
+                "label": "laptop",
+                "admitted": [{"name": ROSEMARY, "client": "0.34.0"}],
+            }
+        ]
+        with TestClient(app=build_console(hub)) as console:
+            text = console.get(f"/agent/{ROSEMARY}").text
+
+        assert "0.34.0" in text, "the page does not say which client this agent runs"
+
+    def test_it_is_observed_not_claimed(self, hub: StubHub) -> None:
+        """It must sit with what the hub recorded, never with what the agent said.
+
+        A version in the self-declared panel would be exactly as trustworthy as an agent
+        remembering to update it — which is the failure this replaces.
+        """
+        hub.token_items = [
+            {
+                "id": "t1",
+                "label": "laptop",
+                "admitted": [{"name": ROSEMARY, "client": "0.34.0"}],
+            }
+        ]
+        with TestClient(app=build_console(hub)) as console:
+            text = console.get(f"/agent/{ROSEMARY}").text
+
+        observed = text.split('class="panel claimed"', 1)[0]
+        assert "0.34.0" in observed, "the observed client version fell into claims"
+
+    def test_an_agent_the_hub_has_not_heard_from_shows_nothing(
+        self, hub: StubHub
+    ) -> None:
+        """The paired negative. Blank means "we have not heard", not "it is current",
+        and inventing a version would be worse than leaving the row out."""
+        hub.token_items = [
+            {"id": "t1", "label": "laptop", "admitted": [{"name": ROSEMARY}]}
+        ]
+        with TestClient(app=build_console(hub)) as console:
+            text = console.get(f"/agent/{ROSEMARY}").text
+
+        assert "Client seen" not in text

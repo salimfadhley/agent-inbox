@@ -75,8 +75,16 @@ class AuthStore(Protocol):
     async def touch_token(self, token_id: str, when: str) -> None: ...
     async def revoke_token(self, token_id: str) -> bool: ...
     async def all_tokens(self) -> tuple[DeviceToken, ...]: ...
-    async def record_use(self, token_id: str, actor: str, when: str) -> None:
-        """Note that ``token_id`` admitted ``actor``, setting first-seen only once."""
+    async def record_use(
+        self, token_id: str, actor: str, when: str, client: str = ""
+    ) -> None:
+        """Note that ``token_id`` admitted ``actor``, setting first-seen only once.
+
+        ``client`` is the version the caller reported on *this* request, so it is the
+        hub's own observation rather than a claim recorded once at join. Blank leaves
+        whatever was last seen alone: an older client that sends no header must not
+        erase a version we already know.
+        """
         ...
 
     async def uses_for(self, token_id: str) -> tuple[TokenUse, ...]: ...
@@ -178,11 +186,17 @@ class InMemoryAuthStore:
     async def all_tokens(self) -> tuple[DeviceToken, ...]:
         return tuple(sorted(self._tokens.values(), key=lambda t: t.created))
 
-    async def record_use(self, token_id: str, actor: str, when: str) -> None:
+    async def record_use(
+        self, token_id: str, actor: str, when: str, client: str = ""
+    ) -> None:
         seen = self._uses.get((token_id, actor))
         self._uses[(token_id, actor)] = TokenUse(
             token_id=token_id,
             actor=actor,
+            # Blank leaves the last known version alone. A client too old to send the
+            # header must not erase what a newer one told us — "we stopped hearing"
+            # and "it downgraded" are different facts and only one of them is true.
+            client=client or (seen.client if seen else ""),
             # Set once and never moved. "First seen" is the fact an operator uses to
             # tell a credential that has always been shared from one that started
             # leaking last week, and an upsert that rewrote it would erase exactly that.
@@ -262,6 +276,9 @@ _SCHEMA = (
         -- Buckets, not requests: recording is coarse, so this counts the minutes in
         -- which the token was used rather than the calls it served.
         uses       INTEGER NOT NULL DEFAULT 0,
+        -- The client version last observed on a request from this actor. Observed,
+        -- never claimed: it is read from a request header the hub itself received.
+        client     TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (token_id, actor)
     )
     """,
@@ -364,6 +381,15 @@ class SqliteAuthStore:
         ):
             if column not in columns:
                 await self._execute(f"ALTER TABLE auth_users ADD COLUMN {ddl}")
+        # Same additive pattern for a store that predates the client column. An
+        # existing deployment keeps its rows and starts recording versions on the next
+        # request each agent makes.
+        cursor = await self._execute("PRAGMA table_info(auth_token_use)")
+        used = {row["name"] for row in await cursor.fetchall()}
+        if "client" not in used:
+            await self._execute(
+                "ALTER TABLE auth_token_use ADD COLUMN client TEXT NOT NULL DEFAULT ''"
+            )
         await self._db.commit()
 
     @property
@@ -530,23 +556,29 @@ class SqliteAuthStore:
         )
         return tuple(_to_token(row) for row in await cursor.fetchall())
 
-    async def record_use(self, token_id: str, actor: str, when: str) -> None:
+    async def record_use(
+        self, token_id: str, actor: str, when: str, client: str = ""
+    ) -> None:
         # `first_seen` is written by the INSERT and never by the UPDATE. It is the fact
         # that separates a credential which has always been shared from one that started
         # leaking last week, and an upsert that refreshed it would erase exactly that.
         await self._execute(
-            "INSERT INTO auth_token_use (token_id, actor, first_seen, last_seen, uses) "
-            "VALUES (?, ?, ?, ?, 1) "
+            "INSERT INTO auth_token_use "
+            "(token_id, actor, first_seen, last_seen, uses, client) "
+            "VALUES (?, ?, ?, ?, 1, ?) "
             "ON CONFLICT(token_id, actor) DO UPDATE SET "
-            "last_seen=excluded.last_seen, uses=uses+1",
-            (token_id, actor, when, when),
+            "last_seen=excluded.last_seen, uses=uses+1, "
+            # `NULLIF` so a blank leaves the stored version alone: an older client that
+            # sends no header must not erase one a newer client reported.
+            "client=COALESCE(NULLIF(excluded.client, ''), auth_token_use.client)",
+            (token_id, actor, when, when, client),
         )
         await self._db.commit()
 
     async def uses_for(self, token_id: str) -> tuple[TokenUse, ...]:
         cursor = await self._execute(
-            "SELECT token_id, actor, first_seen, last_seen, uses FROM auth_token_use "
-            "WHERE token_id = ? ORDER BY last_seen DESC",
+            "SELECT token_id, actor, first_seen, last_seen, uses, client "
+            "FROM auth_token_use WHERE token_id = ? ORDER BY last_seen DESC",
             (token_id,),
         )
         return tuple(
@@ -556,6 +588,7 @@ class SqliteAuthStore:
                 first_seen=row[2],
                 last_seen=row[3],
                 uses=int(row[4]),
+                client=str(row[5] or ""),
             )
             for row in await cursor.fetchall()
         )

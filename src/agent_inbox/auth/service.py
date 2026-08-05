@@ -565,7 +565,7 @@ class AuthService:
             raise TokenRevoked("this token has been revoked")
         return token
 
-    async def admit(self, token: DeviceToken, actor: str) -> None:
+    async def admit(self, token: DeviceToken, actor: str, client: str = "") -> None:
         """Note that this token let this agent in — at most once per bucket.
 
         Coarse on purpose (FR-009). Authentication is the most-called path here and it
@@ -576,6 +576,13 @@ class AuthService:
         The bucket is checked *before* the write, not wrapped around one that already
         happened. In-memory and per process: a restart writes once more than it needed
         to, which costs nothing and needs no persistence.
+
+        ``client`` is the version this request reported. Recording it here rather than
+        anywhere else is deliberate: this is the only write that already happens on the
+        authenticated path, so an observed version costs nothing extra — and being
+        *observed* is the point. A version an agent wrote into its profile at join is a
+        claim about a past moment, and the agents this exists to find are precisely the
+        ones who joined long ago on a client they did not choose.
         """
         if not actor:
             return  # nothing to record against; an unnamed caller is not an agent
@@ -588,7 +595,7 @@ class AuthService:
         # whole mission is trying not to repeat elsewhere.
         self._admitted = {b for b in self._admitted if b[2] == bucket[2]}
         self._admitted.add(bucket)
-        await self._store.record_use(token.id, actor, now)
+        await self._store.record_use(token.id, actor, now, client)
         await self._store.touch_token(token.id, now)
 
     # -- helpers -----------------------------------------------------------

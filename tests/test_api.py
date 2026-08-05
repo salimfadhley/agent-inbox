@@ -1795,3 +1795,17 @@ class TestTheEnvironmentGoverns:
         version = client.get("/hub/settings").json()["version"]
         r = client.put("/hub", json={"title": "The Salt Club", "version": version})
         assert r.status_code == 200, r.text
+
+
+def test_the_client_header_is_spelled_the_same_on_both_sides() -> None:
+    """Declared twice, deliberately — so pin it, or the hub stops hearing.
+
+    `api.py` does not import from the client package, which is why `IDENTITY_HEADER`
+    and `SESSION_COOKIE` are declared in both. A header whose two spellings drift does
+    not raise: the hub records nothing, and every agent appears to be on an unknown
+    client — which looks exactly like nobody having upgraded.
+    """
+    from agent_inbox.api import CLIENT_HEADER as hub_side
+    from agent_inbox.client import CLIENT_HEADER as client_side
+
+    assert hub_side == client_side
