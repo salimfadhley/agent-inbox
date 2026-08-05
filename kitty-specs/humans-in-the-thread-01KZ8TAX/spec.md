@@ -2,7 +2,7 @@
 
 - Mission: `humans-in-the-thread-01KZ8TAX`
 - Raised by: the owner, 2026-08-05, from the message screen
-- Status: **specified during discovery; three open questions recorded below**
+- Status: **specified, no open questions, ready to plan.**
 
 ## What this is
 
@@ -92,6 +92,8 @@ looking at.
 | FR-011 | A retracted message is retracted for everyone. It does not stay readable for some recipients. | proposed |
 | FR-012 | Replies to a retracted message survive and remain legible. | proposed |
 | FR-013 | The standing `admin` drop box keeps working: mail already sent there remains reachable by whoever holds the account. | proposed |
+| FR-014 | **Only humans retract.** No agent may retract any message, including its own, by any surface — asserted as a negative test rather than left to the console not offering a button. | proposed |
+| FR-015 | A retraction is **local**. A copy already delivered to a peer hub is not withdrawn, and nothing claims it was. This is what Lemmy does and what federation can honestly deliver. | proposed |
 
 ## Non-functional requirements
 
@@ -110,18 +112,67 @@ looking at.
 | C-003 | Retraction destroys the body, not the record. An audit entry survives it. |
 | C-004 | No deployment-specific hostnames, IPs, organisation names or secrets. |
 
-## Open questions — for the owner, before planning
+## Answered, 2026-08-05
 
-1. **Who may retract what?** Own messages only, anything in a thread you can see, or
-   admin-only? Entangled with [#5](https://github.com/salimfadhley/agent-inbox/issues/5)
-   (role has no real concept of a role) and
-   [#53](https://github.com/salimfadhley/agent-inbox/issues/53) (token kinds), both
-   unbuilt.
-2. **Are humans woken?** They now have an inbox, and the wake machinery exists for
-   agents. A human is not a session that can be interrupted in the same way.
-3. **Does a human identity federate?** A human addressable from another hub is a
-   different disclosure question from an agent, and lands on
-   `federated-identity-and-trust`, which is planned and unstarted.
+### Who may retract: **any human, anything on their own hub. No agent, ever.**
+
+A human may retract any message on the hub they operate. **Agents cannot retract at
+all** — not their own messages, not anyone's. That keeps retraction an operator act and
+keeps it outside anything a message could ask for, which matters because a message that
+could cause a retraction would be a message with authority (C-001).
+
+It also decouples this mission from [#5](https://github.com/salimfadhley/agent-inbox/issues/5):
+there are no per-role limits to design, because the line is not between roles but
+between humans and agents.
+
+### What the fediverse does, checked rather than recalled
+
+C-003 of the parent federation work says to do the normal fediverse thing and to
+*verify* rather than remember. Lemmy distinguishes **two acts** that this spec had been
+treating as one:
+
+- **delete** — by the **author**. Soft: hidden, and after thirty days hard-cleared by
+  federating an *edit* that changes the content to "Deleted".
+- **remove** — by a **mod or admin**. Local, and it does **not** reliably federate out:
+  [LemmyNet/lemmy#4118](https://github.com/LemmyNet/lemmy/issues/4118) records content
+  removal for local communities failing to federate when banning remote users, so the
+  content "will stay up" elsewhere.
+
+**What we are building is `remove`, and Lemmy's behaviour is the behaviour we want.**
+A local retraction is local. A remote hub's copy is not ours to destroy, and pretending
+otherwise would promise something federation cannot deliver.
+
+**Where we agree without having meant to:** the `[deleted]` tombstone is what Lemmy
+converges on — its hard-clear is an edit that replaces the content, not a removal of the
+record. Two designs arriving separately at the same shape is worth more than either.
+
+**Where we depart, recorded rather than silent:** we tombstone immediately rather than
+after thirty days. Lemmy's delay exists to let an author change their mind; a retraction
+here is an operator act on somebody else's message, and a grace period would leave a
+message the operator believes is gone readable for a month.
+
+### Humans are not woken — for now
+
+They have an inbox; the wake machinery stays for agents. A human is not a session that
+can be interrupted at a turn boundary, and inventing a notification channel is a
+different mission. Recorded as a deliberate not-yet rather than an oversight.
+
+### A human federates like an agent, with one marker — and it is deferred
+
+From a remote hub a human and an agent should look **almost** the same: both are actors,
+both are addressable, and nothing about a human needs a second identity model.
+
+Almost, because a remote reader benefits from knowing which side of the machine a
+message came from — the same reason FR-006 exists locally. So the wire carries a marker
+distinguishing a human correspondent from an LLM one.
+
+**Deferred to `federated-identity-and-trust`**, which is planned and unstarted and
+already owns every question about what crosses a hub boundary. Splitting that decision
+across two missions is how the two come to disagree.
+
+## Open questions
+
+None outstanding. All three raised during discovery were answered on 2026-08-05.
 
 ## Out of scope
 
@@ -130,4 +181,6 @@ looking at.
 | Reactions, votes, karma | Engagement mechanics are out by charter |
 | Editing a message | Retraction is not editing; an edited history is a different promise |
 | Human-to-human mail | This is about humans and agents in a thread |
-| Per-role retraction limits | Open question 1; belongs with #5 |
+| Per-role retraction limits | Not needed: the line is between humans and agents, not between roles |
+| Waking a human | Deliberate not-yet; a human is not an interruptible session |
+| The human/agent marker on the wire | Belongs to `federated-identity-and-trust`, which owns what crosses a hub boundary |
