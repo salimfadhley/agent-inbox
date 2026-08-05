@@ -16,6 +16,8 @@ comes back as a sentence saying what to do.
 import json
 import logging
 import os
+import sys
+import time
 import tomllib
 import urllib.error
 import urllib.parse
@@ -248,6 +250,23 @@ UNNAMED = "unnamed"
 #: so the stdlib client stays free of any dependency on the Litestar app module.
 SESSION_COOKIE = "agent_inbox_session"
 DEFAULT_TIMEOUT = 10.0
+
+#: How long to keep trying a hub that is refusing connections because it is starting.
+#:
+#: A hub scaled to zero, or restarting mid-deploy, refuses for a second or two and then
+#: answers. Treating that identically to "no such hub" is what makes the first call after
+#: a quiet period fail for everybody, every time (issue #34).
+#:
+#: **Short on purpose.** An agent that waits a minute inside one tool call has had its
+#: turn silently consumed, which is a worse failure than a fast error — so this is a
+#: handful of seconds, not a patient retry loop. A hub that is genuinely down still says
+#: so quickly.
+STARTUP_GRACE = 6.0
+
+#: How long to wait between those attempts. Fixed and small: this is a local service
+#: coming up, not a contended remote one, so there is no herd to spread and nothing to
+#: gain from backing off.
+STARTUP_RETRY_EVERY = 0.75
 
 #: Which engine am I? Markers checked most-specific first.
 #:
@@ -838,7 +857,7 @@ class HubClient:
         if self.session:
             request.add_header("Cookie", f"{SESSION_COOKIE}={self.session}")
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with self._open(request) as response:
                 raw = response.read()
                 if not raw:
                     return None
@@ -855,6 +874,46 @@ class HubClient:
                 f"the mailbox at {self.config.base} did not answer within "
                 f"{self.timeout:g}s. It may be starting up or unreachable."
             ) from exc
+
+    def _open(self, request: urllib.request.Request) -> Any:
+        """Open the request, giving a hub that is *starting* a few seconds to finish.
+
+        A hub scaled to zero, or restarting mid-deploy, refuses connections for a second
+        or two and then serves normally. Without this the first call after any quiet
+        period fails — for every agent, every time — and looks identical to a hub that
+        is not there at all (issue #34).
+
+        **Only `ConnectionRefusedError`, and that is the whole safety argument.** A
+        refused connection is the one failure where we know the request never reached
+        the hub, so replaying it cannot duplicate anything. A timeout is not that: the
+        hub may have received the request, acted on it, and been slow to answer — and a
+        retried send that already arrived is a second message, which is a worse outcome
+        than the error it would be hiding. So timeouts, resets and DNS failures are
+        raised as they always were.
+
+        Bounded at :data:`STARTUP_GRACE`, deliberately short. An agent that waits a
+        minute inside one tool call has had its turn spent on our behalf.
+        """
+        deadline = time.monotonic() + STARTUP_GRACE
+        said = False
+        while True:
+            try:
+                return urllib.request.urlopen(request, timeout=self.timeout)  # noqa: S310
+            except urllib.error.URLError as exc:
+                if not isinstance(exc.reason, ConnectionRefusedError):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                if not said:
+                    # Once, and to stderr: a client that appears hung is the complaint
+                    # this would otherwise cause. Not repeated, because a line per
+                    # attempt is noise in an agent's transcript.
+                    print(
+                        f"waiting for the mailbox at {self.config.base} to start…",
+                        file=sys.stderr,
+                    )
+                    said = True
+                time.sleep(STARTUP_RETRY_EVERY)
 
     def _decode(self, raw: bytes, content_type: str) -> Any:
         """The body as JSON, or a sentence naming what arrived instead.
