@@ -161,11 +161,23 @@
 
     var subject = document.createElement("p");
     subject.className = "feed-subject";
-    if (event.subject) {
-      subject.textContent = event.subject;
-    } else {
+    var words = event.subject;
+    if (!words) {
       subject.className += " none";
-      subject.textContent = "no subject";
+      words = "no subject";
+    }
+    /* The subject opens the message, exactly as it does in a server-seeded row. This
+       was missed when the seed rows were added and the two halves drifted: a row that
+       arrived while you were watching was the one row you could not click, which is
+       the opposite of what a live feed is for. `id` is on the wire (`Arrival.as_event`)
+       — but a frame without one gets plain text rather than a link to nowhere. */
+    if (event.id) {
+      var open = document.createElement("a");
+      open.href = "/message/" + encodeURIComponent(event.id);
+      open.textContent = words;
+      subject.appendChild(open);
+    } else {
+      subject.textContent = words;
     }
 
     body.appendChild(meta);

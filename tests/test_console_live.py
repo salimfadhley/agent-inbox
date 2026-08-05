@@ -578,3 +578,50 @@ class TestNamesInTheFeedAreClickable:
             ]
 
         assert 'href="/agent/—"' not in feed
+
+
+class TestASubjectOpensItsMessageInBothHalves:
+    """Reported by the owner, 2026-08-05: a row that arrived while you were watching
+    could not be clicked.
+
+    The exact drift both docstrings warn about, and it survived the class above because
+    that one pinned the *name* link and this feed has two. A live feed whose only
+    unclickable rows are the ones that just arrived is the opposite of the point.
+    """
+
+    def test_a_seeded_row_opens_its_message(self, console: TestClient) -> None:
+        feed = console.get("/realtime").text.split('class="feed-rows"', 1)[1]
+
+        assert 'href="/message/' in feed, "nothing in the seeded feed opens a message"
+
+    def test_the_live_half_builds_the_same_link(self) -> None:
+        """Pinned against the script, since no browser runs in this suite.
+
+        Removal proof: delete the anchor branch in `Feed.prototype.add` and this fails;
+        the seeded test above keeps passing, which is precisely how the drift went
+        unnoticed in the first place.
+        """
+        from agent_inbox.console import STATIC_DIR
+
+        script = (STATIC_DIR / "feed.js").read_text()
+        add = script.split("Feed.prototype.add", 1)[1].split("Feed.prototype.apply", 1)[
+            0
+        ]
+
+        assert '"/message/"' in add, "a live row does not open its message"
+        assert "encodeURIComponent(event.id)" in add, "an id is not url-safe by nature"
+
+    def test_the_id_the_script_needs_is_actually_on_the_wire(self) -> None:
+        """The premise, asserted rather than assumed.
+
+        A link built from `event.id` is a link to `/message/undefined` if the hub never
+        sends one — green in the test above and broken on the page, which is the failure
+        shape this project keeps meeting.
+        """
+        from agent_inbox.notify import Arrival
+
+        frame = Arrival(
+            id="m-99", sender=ROSEMARY, subject="hello", published="2026-08-05"
+        ).as_event()
+
+        assert frame["id"] == "m-99"
