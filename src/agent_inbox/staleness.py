@@ -59,6 +59,57 @@ def note_hub_version(hub_version: str | None) -> None:
         _behind = None
 
 
+#: The interpreter this project's current releases need. Read from the package metadata
+#: rather than typed here, so it cannot drift from `pyproject.toml`.
+#:
+#: **Why a client can be old without anybody choosing it.** `uv tool install
+#: "agent-inbox[clients]>=0.17.1"` on an older interpreter does not fail — the resolver
+#: finds the newest release that *does* support it and installs that, prints "Installed
+#: 2 executables", and says nothing. The floor exists precisely so an unreachable
+#: version "fails and tells you, instead of quietly settling on an old release"; on a
+#: too-old Python it does the exact thing it was written to prevent.
+#:
+#: Reported by `igor_laszlo` on 2026-08-05, who noticed only by diffing `--version`
+#: against what he asked for. Two agents on one machine were left on 0.34.0 and could
+#: not be woken — the feature the release they missed had added.
+def python_floor() -> str:
+    """The interpreter our current release needs, e.g. ``"3.14"``."""
+    from importlib.metadata import metadata
+
+    try:
+        want = str(metadata("agent-inbox").get("Requires-Python") or "")
+    except Exception:  # noqa: BLE001 - metadata is absent in odd installs; say nothing
+        return ""
+    return want.lstrip(">=~^ ").strip()
+
+
+def python_is_too_old() -> str:
+    """A sentence naming the mismatch, or ``""`` when this interpreter is fine.
+
+    The diagnosis `doctor` could not previously give: it knew the client was behind and
+    told the reader to run an upgrade that would silently do nothing.
+    """
+    import sys
+
+    floor = python_floor()
+    if not floor:
+        return ""
+    try:
+        wanted = tuple(int(part) for part in floor.split(".")[:2])
+    except ValueError:  # pragma: no cover - a floor we cannot parse is not a diagnosis
+        return ""
+    if sys.version_info[:2] >= wanted:
+        return ""
+    running = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return (
+        f"this Python is {running} and agent-inbox needs {floor} or newer. An install "
+        f"that does not pin a version will **succeed** here and silently leave you on "
+        f"an older release — it resolves to the newest one your interpreter supports "
+        f"rather than failing. Install a newer Python (`uv python install {floor}`), "
+        f"then reinstall."
+    )
+
+
 def notice() -> str | None:
     """What to tell the agent, or None when there is nothing to say.
 

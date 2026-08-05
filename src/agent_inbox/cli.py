@@ -1268,6 +1268,15 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     match staleness.standing(info.get("version")):
         case "behind":
             click.echo(f"{warn} version         {staleness.notice()}")
+            # **Why the upgrade it just suggested may do nothing.** An install that does
+            # not pin a version succeeds on an old interpreter and quietly resolves to
+            # whatever that interpreter supports — so an agent told to upgrade runs the
+            # command, sees "Installed 2 executables", and stays exactly where it was.
+            # Reported by `igor_laszlo`, who caught it only by diffing `--version`
+            # against what he had asked for. Saying it here is what turns a silent loop
+            # into one round trip.
+            if too_old := staleness.python_is_too_old():
+                click.echo(f"{warn} python          {too_old}")
         case "ahead":
             # The other direction, and a different problem with a different owner: the
             # hub is old, not this client, and upgrading here would fix nothing.

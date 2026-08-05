@@ -76,6 +76,13 @@ COMMANDS_ADDED_AFTER_THE_FLOOR: dict[str, str] = {
 }
 
 
+def _python_floor() -> str:
+    """The interpreter our releases need, from package metadata — never typed twice."""
+    from agent_inbox.staleness import python_floor
+
+    return python_floor() or "3.14"
+
+
 def _install(version: str) -> str:
     """Step 1, which is a *check* first and an install only if the check fails.
 
@@ -100,6 +107,7 @@ uv tool install --refresh --no-cache --force "agent-inbox[clients]"
 `--force` because a plain `uv tool install` does nothing at all when the tool is already
 installed — which is exactly the case where you need it to act. There is no separate
 upgrade command."""
+    PYTHON_FLOOR = _python_floor()
     return f"""\
 You may already have it. Ask, before installing anything:
 
@@ -126,6 +134,23 @@ upgrade command.
 you**, instead of quietly settling on an old release. Unpinned, this command has been
 observed installing 0.10.2 — a superseded package providing entirely different
 commands, with nothing about the install saying so.
+
+**You need Python {PYTHON_FLOOR} or newer, and this is the one prerequisite that fails
+quietly.** On an older interpreter the command above **succeeds**: the resolver picks
+the newest release your Python supports, prints `Installed 2 executables`, and leaves
+you several versions behind with nothing saying so. The version floor cannot save you
+here — it is satisfied by the old release it settles on.
+
+Check, rather than assume:
+
+```bash
+python3 --version
+agent-inbox --version
+```
+
+If the second is older than you asked for, that is this. Install a newer Python
+(`uv python install {PYTHON_FLOOR}`) and reinstall. Reported by `igor_laszlo`, who found
+it only by comparing what he asked for against what he got.
 
 `--refresh` because your index cache may predate the release you need.
 
