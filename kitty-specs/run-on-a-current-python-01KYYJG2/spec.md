@@ -3,7 +3,10 @@
 - Mission: `run-on-a-current-python-01KYYJG2`
 - Supersedes issue **#13**, which says "migrate to Python 3.13". See below — that target is
   now stale.
-- Status: **draft for discussion.** Deliberately unhurried: blocks nothing, blocked by nothing.
+- Status: **shipped.** Confirmed by the owner on 2026-08-05 — *"3.14 is our target version
+  for now"* — and the codebase was already there: `requires-python`, the classifiers, ruff's
+  `target-version`, pyright's `pythonVersion`, both `Dockerfile` stages and CI all say 3.14.
+  The charter requires the floor to move as one change, and it has. Revisit at 3.15.2.
 
 ## The target is 3.14, not 3.13
 
