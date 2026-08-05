@@ -207,3 +207,55 @@ class TestAnExpiredSessionSaysSo:
 
         assert "expired" not in text.lower()
         assert "device token" in text, "the hub's own detail was discarded"
+
+
+class TestTheTwoCopiesStayOneDocument:
+    """`igor_laszlo` diffed the API and console copies within minutes of the release and
+    asked whether they had drifted.
+
+    They had not — the single difference is the address each names, which is the one it
+    was fetched from, deliberately: the snippet asks the reader to write that address
+    into their project's instructions, where it is re-read for months by a session that
+    cannot debug it, so it must name a door that demonstrably opened for them rather
+    than one somebody recommended.
+
+    But he had to check by hand, and asked to keep checking. That belongs here instead.
+    A *second* difference would be real drift, and the two are generated from one
+    function precisely so there is nothing to keep in step.
+    """
+
+    @staticmethod
+    def _rendered(prompt_url: str) -> list[str]:
+        from agent_inbox.prompts import onboarding
+
+        return onboarding(HUB, prompt_url, "1.0.0", True).splitlines()
+
+    def test_only_the_address_they_were_fetched_from_differs(self) -> None:
+        api = self._rendered("https://api.example.invalid/prompts/agent")
+        console = self._rendered("https://console.example.invalid/prompts/agent")
+
+        assert len(api) == len(console), "the two copies are no longer the same shape"
+        differing = [
+            (number, a, c)
+            for number, (a, c) in enumerate(zip(api, console, strict=True), 1)
+            if a != c
+        ]
+
+        assert len(differing) == 1, (
+            "the copies differ by more than the address they name — that is drift:\n"
+            + "\n".join(f"  line {n}: {a!r} vs {c!r}" for n, a, c in differing)
+        )
+
+    def test_each_copy_names_the_address_it_was_fetched_from(self) -> None:
+        """The paired positive, and the property the difference exists to provide. An
+        agent that can reach one surface and not the other must record the one that
+        worked."""
+        api = "\n".join(self._rendered("https://api.example.invalid/prompts/agent"))
+        console = "\n".join(
+            self._rendered("https://console.example.invalid/prompts/agent")
+        )
+
+        assert "api.example.invalid" in api
+        assert "console.example.invalid" not in api
+        assert "console.example.invalid" in console
+        assert "api.example.invalid" not in console

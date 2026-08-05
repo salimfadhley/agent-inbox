@@ -1781,7 +1781,7 @@ def build_api(
         """Unauthenticated, as WebFinger is everywhere. Silent unless federating."""
         return await api.webfinger(resource)
 
-    @get("/prompts/{role:str}", media_type=MediaType.TEXT, sync_to_thread=False)
+    @get("/prompts/{role:str}", media_type=MediaType.TEXT)
     async def prompt_route(role: str) -> str:
         """The onboarding prompt, as plain text, from the API itself.
 
