@@ -74,7 +74,12 @@ from agent_inbox.inbound import InboundRefused, parse_activity, read_create
 from agent_inbox.keys import SigningKey
 from agent_inbox.naming import validate_hub_name
 from agent_inbox.notify import TooManyListeners
-from agent_inbox.peers import fetch_actor_document, insecure_federation, peer_origin
+from agent_inbox.peers import (
+    ALLOWED_SCHEMES,
+    fetch_actor_document,
+    insecure_federation,
+    peer_origin,
+)
 from agent_inbox.prompts import onboarding
 from agent_inbox.signatures import parse_signature, verify_request
 from agent_inbox.wire import (
@@ -392,6 +397,72 @@ class Api:
             ),
             "policies": [getattr(p, "name", "?") for p in self.house.policies],
             "federates": federates(await mailbox.hub_settings()),
+        }
+
+    async def federation_descriptor(self) -> dict[str, Any]:
+        """What another hub needs to know before talking to this one. Unauthenticated.
+
+        **Deliberately not NodeInfo, and deliberately not `GET /`.**
+
+        NodeInfo is the fediverse's server-descriptor convention and this hub already
+        serves it — but its schema *requires* `usage.users`, and FR-010 forbids counts
+        here. A descriptor that must carry a number it is not allowed to carry is the
+        wrong document, so this is a second one rather than a bent one.
+
+        `GET /` is the *local* descriptor: it names the hub, lists its policies, and
+        says whether an admin password override is set. Every one of those is an
+        operator's business and none of it is a peer's.
+
+        **No hub `name`, and that is the part easiest to get wrong** because it feels
+        like identity. Decision `01KYMQ4GNS4B1PRD6WJ6W75DRG`: federated identity is the
+        **domain**. The name is local and friendly, and keeping it off every federated
+        surface is exactly what keeps renaming free — a hub that renamed itself and
+        thereby became a different peer would have a name it could never change.
+
+        Honest about the mode, including when the answer is `disabled`. A compatibility
+        check that cannot be trusted is worse than one reporting a state the caller does
+        not like.
+        """
+        mailbox = self.house.mailbox
+        stored = await mailbox.hub_settings()
+        resolved = resolve_hub_settings(stored, default_name=mailbox.hub_name)
+        # Presentation only, and omitted rather than empty — an unset title is absent,
+        # `""` is a value somebody chose, and the two stay distinguishable.
+        presentation = {
+            key: resolved[key].value
+            for key in ("title", "description")
+            if resolved[key].value is not None
+        }
+        return {
+            "software": {"name": "agent-inbox", "version": __version__},
+            # The address, which *is* the federated identity.
+            "id": self.wire.base,
+            **presentation,
+            "federation": resolved["federation"].value,
+            "protocols": ["activitypub"],
+            "capabilities": {
+                # What a peer can actually rely on today. Said plainly rather than
+                # implied by our silence, so a peer never has to probe to find out.
+                "inbox": True,
+                "webfinger": True,
+                "signedDelivery": True,
+                # Nothing is bridged, and no relay is supported. Empty is the honest
+                # answer, not a gap somebody should fill in later.
+                "relay": False,
+            },
+            "schemes": list(ALLOWED_SCHEMES),
+            # Said out loud for the same reason `authenticated` is on `GET /`: a
+            # peer deciding whether to trust us is entitled to know we would accept
+            # unencrypted federation, and a posture invisible from outside is the
+            # worst kind.
+            **({"insecureTransport": True} if insecure_federation() else {}),
+            "publicKey": {
+                # Where to fetch the key, not the key itself. A peer that needs it to
+                # verify a signature is already fetching the actor document that carries
+                # it, and publishing a second copy here creates two things to rotate.
+                "keyId": f"{self.wire.base}#main-key",
+                "owner": self.wire.base,
+            },
         }
 
     async def hub_settings(self) -> dict[str, Any]:
@@ -1892,6 +1963,12 @@ def build_api(
         descriptor["setupRequired"] = setup_required
         return descriptor
 
+    @get("/federation")
+    async def federation_descriptor_route() -> dict[str, Any]:
+        """What a peer needs before talking to this hub. Unauthenticated by design —
+        the caller is a stranger and this is what strangers are entitled to."""
+        return await api.federation_descriptor()
+
     @get("/.well-known/nodeinfo")
     async def nodeinfo_index_route() -> dict[str, Any]:
         """Unauthenticated, as every fediverse server serves it."""
@@ -2716,6 +2793,7 @@ def build_api(
         hub,
         health,
         prompt_route,
+        federation_descriptor_route,
         nodeinfo_index_route,
         nodeinfo_route,
         webfinger_route,
