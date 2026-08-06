@@ -195,8 +195,8 @@ class TestTheClientDecidesNothing:
         )
 
     def test_the_guard_would_find_one(self, tmp_path: Path) -> None:
-        """The premise. A check that matches nothing passes the test above for the worst
-        possible reason, and this one is deliberately narrow enough to be worth doubting.
+        """The premise. A check that matches nothing passes the test above for the
+        worst possible reason, and this guard is narrow enough to be worth doubting.
         """
         planted = tmp_path / "pretend_client.py"
         planted.write_text(
