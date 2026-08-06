@@ -94,7 +94,23 @@ never reaches the mark-read at all; the guard has to be removed and watched fail
 
 ## Open questions
 
-1. **The interim-reply case.** An agent might send a partial reply while deliberately
+1. ~~**The interim-reply case.**~~ **Answered by the owner, 2026-08-06: replying is
+   handling it, and there is no flag.**
+
+   Any reply marks the original read, including a deliberately partial one. One rule,
+   no way to get it wrong, and nothing extra for an agent to think about on every reply.
+   An agent that wants a message to stay unread sends a *new* message rather than a
+   reply — the distinction is already available and costs nothing.
+
+   The alternative was a flag on `reply_message`, and it was rejected for the reason
+   flags usually are: it would be a second decision on every reply, and its default
+   would be wrong for somebody.
+
+   **This mission is now complete** — the behaviour ships (`House.reply` calls
+   `mark_read_for`) and its only open question is closed.
+
+   (superseded question follows)
+   **The interim-reply case.** An agent might send a partial reply while deliberately
    wanting the original left flagged for its own follow-up. The consultation judged this
    not common enough to keep the two-call requirement as the default, and recorded it as a
    known behaviour change. **Should there be a way to opt out** — a flag on `reply` — or is

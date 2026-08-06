@@ -136,7 +136,20 @@ assertion the send tests run through, so a future audience rule cannot regress s
    sender-stripping? If yes it belongs in the acceptance test. If no, ludmila's advice —
    which I agree with — is to write the API-boundary assertion generically anyway, so a
    later empty group cannot regress silently.
-2. **Should self-send deliver instead of failing?** Recommended answer: no, not in this
+2. ~~**Should self-send deliver instead of failing?**~~ **Answered by what shipped:
+   yes, it delivers.** The recommendation at the time was "no, not in this mission", and
+   the mission that did it went the other way — deliberately, and the MCP documentation
+   says why: *"You may write to yourself, and it arrives. Naming yourself is treated as
+   deliberate — a note that outlives this session, or mail you need to actually exist
+   for a test."*
+
+   Addressing a *group* you belong to still excludes you, so nobody is handed back what
+   they just said. What counts is the name typed, not who it resolved to. Verified in
+   use on 2026-08-05, when a self-addressed message was the proof that the live event
+   stream worked.
+
+   (superseded question follows)
+   **Should self-send deliver instead of failing?** Recommended answer: no, not in this
    mission. Recorded so the decision is explicit rather than assumed.
 3. **Priority against the rest of ludmila's list**, in particular the auth-aware live
    smoke suite. Her ranking put this first, but was made before the evidence showed it was
