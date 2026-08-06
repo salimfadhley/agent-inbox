@@ -140,3 +140,61 @@ class TestReadingABadStoredValue:
             visibility.read({visibility.KEY: "discoverable"})
 
         assert not [r for r in caplog.records if "visibility" in r.getMessage()]
+
+
+class TestTheHubSaysWhatItUnderstood:
+    """`igor_laszlo`, 2026-08-06: he set `visibility: local` on a client four releases
+    old, watched it round-trip through `profile show`, and had **no way to tell whether
+    the hub was treating it as a privacy setting or keeping an arbitrary string next to
+    `works_on`.**
+
+    His setting was in fact active — I checked the stored profile and the hub's own
+    reader against it. The gap was *confirmability*, and that is its own defect: an
+    owner who cannot check is one step from a privacy setting that does not do what they
+    believe, and they will not know they are.
+
+    So the actor document reports visibility **as the hub understood it**, at the top
+    level, separate from the free-form profile it was written into. Any client old
+    enough to print an actor document can now see the difference between recognised and
+    merely stored.
+    """
+
+    @staticmethod
+    def _document(profile: dict[str, object]) -> object:
+        from agent_inbox.records import ActorRecord, ActorType
+        from agent_inbox.wire import Renderer
+
+        return Renderer("https://us.example").actor(
+            ActorRecord(
+                name="igor_laszlo",
+                actor_type=ActorType.SERVICE,
+                profile=profile,
+                created="2026-08-06",
+                last_seen="2026-08-06",
+            )
+        )
+
+    def test_a_recognised_setting_is_reported(self) -> None:
+        assert self._document({"visibility": "local"}).visibility == "local"
+
+    def test_it_is_outside_the_free_form_profile(self) -> None:
+        """The distinction that closes the gap. Inside `profile` it is indistinguishable
+        from `works_on`; outside it, the hub is saying "I understood this"."""
+        document = self._document({"visibility": "local", "works_on": "billing"})
+
+        assert document.visibility == "local"
+        assert document.profile["works_on"] == "billing"
+
+    def test_an_actor_that_never_set_it_reports_the_default(self) -> None:
+        """The paired positive: a field that was always empty would tell nobody
+        anything."""
+        assert self._document({"works_on": "billing"}).visibility == "normal"
+
+    def test_an_unparseable_value_reports_the_safest_level_not_the_written_one(
+        self,
+    ) -> None:
+        """The case that makes this worth having. An owner who wrote nonsense sees
+        `local` rather than their own typo echoed back — which tells them the write did
+        not take, instead of reassuring them that it did.
+        """
+        assert self._document({"visibility": "extremely private"}).visibility == "local"

@@ -21,6 +21,7 @@ from typing import Any
 
 import msgspec
 
+from agent_inbox import visibility
 from agent_inbox.records import ActorRecord, ObjectRecord
 from agent_inbox.vocabulary import AS2_CONTEXT
 
@@ -116,6 +117,22 @@ class Actor(
     profile: dict[str, Any] = {}
     inbox: str = ""
     outbox: str = ""
+    #: How findable this actor has asked to be, **as the hub understands it** — not as
+    #: it was written. Echoed at the top level rather than left inside `profile` so that
+    #: a reader can tell the setting was *recognised* from a setting that was merely
+    #: stored.
+    #:
+    #: Reported by `igor_laszlo` on 2026-08-06: he set `visibility: local` on a client
+    #: four releases old, saw it round-trip through `profile show`, and had no way to
+    #: tell whether the hub was treating it as a privacy setting or keeping an arbitrary
+    #: string next to `works_on`. **He was one step from a privacy setting that did not
+    #: do what its owner believed, and would not have known.** His setting was in fact
+    #: active; the gap was confirmability, which is its own defect.
+    #:
+    #: Derived through `visibility.read`, so a value the hub cannot parse shows here as
+    #: the safest level — which is the honest thing to display, and tells the owner
+    #: their write did not take.
+    visibility: str = "normal"
     #: When this actor was last seen acting. There is no heartbeat and no "online"
     #: flag — presence is inferred from recency by whoever reads this, because a
     #: stored boolean would lie the moment a process died without saying goodbye.
@@ -229,6 +246,7 @@ class Renderer:
             preferred_username=record.name,
             type=record.actor_type.value,
             summary=str(record.profile.get("purpose") or "") or None,
+            visibility=visibility.read(record.profile).value,
             profile=dict(record.profile),
             inbox=f"{uri}/inbox",
             outbox=f"{uri}/outbox",
