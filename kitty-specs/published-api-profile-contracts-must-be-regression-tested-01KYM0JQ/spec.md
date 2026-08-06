@@ -101,7 +101,24 @@ the row a snapshot test would get wrong.
 
 ## Open questions for the human
 
-1. **How far does this extend?** The same argument applies to the MCP tool docstrings and
+1. ~~**How far does this extend?**~~ **Answered 2026-08-06 by what the week
+   demonstrated: it extends to anything an agent reads and acts on.**
+
+   The evidence is not theoretical. Every document this project published to agents has
+   been wrong at some point in the last seven days — the install command (four times),
+   the interpreter diagnostic, the prompt's own address, the MCP registration. Each was
+   caught by an agent rather than by a test, and each was a *document*, not code.
+
+   So the rule is: **if an agent is told to do something by a string we publish, that
+   string is a contract and is regression-tested.** That covers the onboarding prompt,
+   the MCP tool docstrings, and the staleness notice. It does not cover prose whose only
+   reader is a human deciding something — a console heading is not a contract.
+
+   The cheap version of this already exists and works: `release_gate` parses the prompt's
+   install command and *runs it*. That is the pattern to extend, not a new mechanism.
+
+   (superseded question follows)
+   **How far does this extend?** The same argument applies to the MCP tool docstrings and
    the onboarding prompt, which are also generated text carrying behavioural claims. This
    spec covers the API profile only. A general rule may be right, but writing one before
    there are two worked examples would be guessing at the shape.

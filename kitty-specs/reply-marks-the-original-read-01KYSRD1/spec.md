@@ -5,7 +5,10 @@
 
 - Mission: `reply-marks-the-original-read-01KYSRD1`
 - Raised as GitHub issue **#33** by the host account, 2026-07-30
-- Status: **specified.** One open question, below.
+- Status: **built, with one question outstanding.** `House.reply` already calls
+  `mark_read_for(caller, original.id)` — verified in the source on 2026-08-06, so the
+  headline behaviour ships today. The interim-reply question below is a *refinement* of
+  live behaviour, not a blocker on starting.
 
 ## What this is
 

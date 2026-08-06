@@ -136,7 +136,20 @@ re-read or missed**, whatever the inbox state when it was issued.
 
 ## Open questions for the human
 
-1. **Should the empty-inbox cursor advance over time**, or hold at the last real message?
+1. ~~**Should the empty-inbox cursor advance over time**, or hold at the last real
+   message?~~ **Answered by what shipped: it advances, and there is always one.**
+
+   `check_inbox` returns a cursor whether or not anything is waiting — the MCP
+   documentation states it outright: *"There is always a cursor, including when nothing
+   is waiting. An empty inbox hands back 'you are up to date as of here', so you can
+   store it without asking whether this reply had anything in it."*
+
+   That is the right answer for the stated reason: a caller that had to branch on
+   "did I get a cursor this time" would eventually get the branch wrong, and the failure
+   mode is re-reading mail it has already handled.
+
+   (superseded question follows)
+   **Should the empty-inbox cursor advance over time**, or hold at the last real message?
    Advancing means "up to date as of now" and is the more useful reading; holding is
    simpler. This is the only genuine design choice here.
 2. **Is a cursor from `unread_count` interchangeable with one from `check_inbox`?**

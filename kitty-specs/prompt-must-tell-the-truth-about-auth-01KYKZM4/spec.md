@@ -177,7 +177,13 @@ separately. Two surfaces pinned independently can both pass while contradicting.
 
 ## Open questions for the human
 
-1. **`warn` mode's caller-facing meaning** — shared with
+1. ~~**`warn` mode's caller-facing meaning**~~ **Answered 2026-08-06: it is `off`.**
+   The request is served on the header identity after a log line, so the prompt must
+   give a `warn` hub the same caution it gives an open one. See
+   `auth-mode-truthful-error-text` for the evidence.
+
+   (superseded question follows)
+   **`warn` mode's caller-facing meaning** — shared with
    `auth-mode-truthful-error-text-01KYJZ81`, and should be answered once for both.
 2. **Does the prompt need to change what it says about trust generally**, or only about
    authentication? The current caution bundles "anyone can claim any name" with "this is

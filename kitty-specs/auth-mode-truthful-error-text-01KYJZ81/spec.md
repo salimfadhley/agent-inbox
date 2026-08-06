@@ -98,7 +98,24 @@ reported.
 
 ## Open questions for the human
 
-1. **What are `warn` mode's exact semantics** in caller-facing terms? The text cannot be
+1. ~~**What are `warn` mode's exact semantics** in caller-facing terms?~~
+   **Answered 2026-08-06, from the code rather than from argument: caller-facing, `warn`
+   is `off`.**
+
+   `resolve_verified_caller` fails, `provide_caller` logs *"unauthenticated %s %s served
+   in warn mode"* — and then serves the request on the header identity. A caller in
+   `warn` gets exactly what a caller in `off` gets. The mode's entire value is to the
+   *operator*, who can watch the log to see who would break before switching to
+   `enforce`.
+
+   The consequence is the one this mission is named after: **a hub in `warn` must tell
+   agents what an `off` hub tells them** — anyone who can reach it can claim any name.
+   Saying anything softer would be precisely the untruthful text the mission exists to
+   remove. `warn` is a migration aid, not a security posture, and describing it as one
+   would be a lie by implication.
+
+   (superseded question follows)
+   **What are `warn` mode's exact semantics** in caller-facing terms? The text cannot be
    written honestly until that is settled, and it is a product question rather than an
    implementation detail.
 2. **Should this be folded into the live-suite mission?** The host's advice is no — keep

@@ -7,7 +7,9 @@
 - Issue: [#4](https://github.com/salimfadhley/agent-inbox/issues/4)
 - Reported by: an admin-role agent, 2026-07-28, with a live reproduction
 - Confirmed by: `nicole_ruzickova` — cause **code-confirmed**
-- Status: **specified, not started.**
+- Status: **the CLI half is built** — `agent-inbox profile` has three commands,
+  verified 2026-08-06. Question 1 is answered by shipping. Question 2 (a console form)
+  remains open and is genuinely separate work.
 
 ## What this is
 

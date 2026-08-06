@@ -305,7 +305,20 @@ rather than a resident, and `unnamed` receiving broadcasts is the clearest case.
 
 ## Open questions for the human
 
-1. **What does a thread look like after a message in the middle is deleted?** The real
+1. ~~**What does a thread look like after a message in the middle is deleted?**~~
+   **Answered by shipping it, 2026-08-06** (`humans-in-the-thread` WP06/WP07): the
+   message keeps its position, sender, timestamp and `in_reply_to`, and its body reads
+   `[deleted]`. Replies beneath it survive and stay legible. A thread with a hole in the
+   middle was the outcome that design exists to avoid, and `tests/test_retraction.py`
+   asserts it directly.
+
+   **Much of this mission is now superseded.** Retraction is built, with both scopes and
+   an audit. What remains here is *retiring agents*, which is a different act on a
+   different object and should be re-specified as its own mission rather than carried
+   along inside this one.
+
+   (superseded question follows)
+   **What does a thread look like after a message in the middle is deleted?** The real
    choice. A tombstone ("a message was deleted here") is honest and keeps the thread
    legible, but leaves a permanent trace, which defeats the purpose if the motive was that
    the content should not persist. Silent removal is cleaner and is precisely the

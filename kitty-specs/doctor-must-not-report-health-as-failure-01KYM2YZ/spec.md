@@ -165,7 +165,25 @@ The first row must be watched failing before the fix, since it is the whole miss
 
 ## Open questions for the human
 
-1. **Should `doctor` gain a `--quiet` or machine-readable mode?** Out of scope, but the
+1. ~~**Should `doctor` gain a `--quiet` or machine-readable mode?**~~ **Answered
+   2026-08-06: no, and the reason has strengthened since the question was asked.**
+
+   `doctor` has grown three readers' worth of content this week — both version numbers,
+   the interpreter and its source, config-safety, the hub's verdict — and every addition
+   was made because a *human or an agent* could not tell two situations apart. It is a
+   diagnostic for somebody who is confused, and the shape that serves them is prose.
+
+   A machine-readable mode would be a second surface saying the same things, and the two
+   would drift the moment one gained a line: the project has spent this week fixing
+   exactly that failure in the prompt copies, the install command and the staleness
+   notice. A caller that wants a machine answer has `GET /doctor`, which is already
+   JSON and is what the CLI itself reads.
+
+   Revisit only if something outside this repository needs to parse the CLI's output —
+   and the answer then is still probably "call the API".
+
+   (superseded question follows)
+   **Should `doctor` gain a `--quiet` or machine-readable mode?** Out of scope, but the
    reason this exit code matters is that scripts consume it, and a script parsing the
    human text is the next problem along. Worth knowing whether that is wanted before
    someone builds it by accident.
