@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from agent_inbox import addressing, naming, rules
+from agent_inbox import addressing, naming, rules, visibility
 from agent_inbox.addressing import LOCAL
 from agent_inbox.exceptions import (
     DeliversToNobody,
@@ -212,7 +212,18 @@ class Mailbox:
     async def update_profile(
         self, caller: str, profile: dict[str, object]
     ) -> ActorRecord:
-        """Replace the caller's profile — the mutable half of identity (ADR 0003)."""
+        """Replace the caller's profile — the mutable half of identity (ADR 0003).
+
+        **A visibility written here is validated, never coerced.** An unrecognised value
+        is refused by name: silently falling back to the default would weaken a privacy
+        setting the actor believed it had just set, at the moment it was paying most
+        attention. Reading is deliberately more forgiving — see `visibility.read`.
+        """
+        if visibility.KEY in profile:
+            # Raises `BadVisibility`, which the error layer maps to a 4xx. Not caught
+            # and defaulted: this is a write, and a write that quietly did something
+            # else is the failure this whole field exists to avoid.
+            visibility.parse(profile[visibility.KEY])
         actor = await self._require_actor(caller)
         updated = ActorRecord(
             name=actor.name,

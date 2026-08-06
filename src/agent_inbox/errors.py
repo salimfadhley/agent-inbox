@@ -27,6 +27,8 @@ STATUS_BY_CODE: dict[str, int] = {
     # the caller wrote something malformed
     "malformed_address": 400,
     "name_unavailable": 409,
+    # 422: the actor asked for something we understood and cannot honour.
+    "bad_visibility": 422,
     # 403, not 404: the operator asked a legitimate question and is being refused,
     # and pretending the peer does not exist would send them looking for a typo.
     "peer_blocked": 403,
