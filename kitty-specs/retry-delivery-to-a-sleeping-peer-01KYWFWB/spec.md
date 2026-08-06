@@ -2,7 +2,17 @@
 
 - Mission: `retry-delivery-to-a-sleeping-peer-01KYWFWB`
 - Federation **Step 7**. Sketch: `doc/federation-step-7.md`. Prerequisite: Step 6, shipped.
-- Status: **specified.** Three prior open questions are answered here; one new one is raised.
+- Status: **shipped.** Verified against the built code on 2026-08-06 rather than
+  rebuilt: `Receipt.queued`/`waiting()`/`state`, the `reached_nobody` table, `retry.py`
+  with its allow-list `is_retryable`, and `aclose` all exist and are tested. Every
+  invariant the work packages ask to be confirmed by grep was confirmed — `retry.py`
+  never calls `outbound.deliver`, and `_Waiting` holds no `settings` or `peers`.
+
+  What was **added** is the case the two federation missions create between them and
+  neither tested: a peer blocked *while a message waits* is refused on the next attempt.
+  See `tests/test_retry_respects_a_new_block.py`.
+
+  Three prior open questions are answered here; one new one is raised.
 
 ## What this is
 
