@@ -39,7 +39,7 @@ from litestar.handlers.base import BaseRouteHandler
 from litestar.openapi import OpenAPIConfig
 from litestar.response import ServerSentEvent, ServerSentEventMessage
 
-from agent_inbox import __version__, addressing, rules
+from agent_inbox import __version__, addressing, rules, visibility
 from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
 from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
@@ -571,7 +571,18 @@ class Api:
             "services": {"inbound": [], "outbound": []},
             # Whether an agent may join unasked — what auth mode decides.
             "openRegistrations": not self.authenticated,
-            "usage": {"users": {"total": len(tuple(actors))}},
+            # **A public number counts only actors willing to be public.** Counting a
+            # `local` actor here would leak that somebody is there without naming them,
+            # which is a smaller disclosure than a name and is still one.
+            "usage": {
+                "users": {
+                    "total": sum(
+                        1
+                        for a in actors
+                        if visibility.read(a.profile) is not visibility.Visibility.LOCAL
+                    )
+                }
+            },
             "metadata": metadata,
         }
 
@@ -604,7 +615,15 @@ class Api:
             raise NoSuchWebfingerResource(f"{host!r} is not this hub")
 
         record = await mailbox.whois(name)
-        if record is None:
+        # **One refusal, one wording.** A `local` actor and a name nobody holds produce
+        # the identical error — deliberately, and asserted by a test that compares the
+        # two responses. A differently-worded refusal is an oracle: ask for a thousand
+        # names and the one that is "hidden" rather than "unknown" has told you it
+        # exists, which is the whole thing visibility is for (T013, NFR-004).
+        if (
+            record is None
+            or visibility.read(record.profile) is visibility.Visibility.LOCAL
+        ):
             raise NoSuchWebfingerResource(f"no account {name!r} here")
 
         return {
@@ -806,6 +825,18 @@ class Api:
             return None
         return owner
 
+    async def _resolvable_or_absent(self, name: str) -> None:
+        """Refuse a `local` actor exactly as an unknown name is refused.
+
+        Shared by every outward-facing path so the wording cannot drift between them —
+        two refusals that differ by a word are the oracle this exists to close.
+        """
+        record = await self.house.whois(self.wire.name_from(name))
+        if record is None or visibility.read(record.profile) is (
+            visibility.Visibility.LOCAL
+        ):
+            raise HTTPException(status_code=404, detail=f"no actor named {name!r}")
+
     async def thin_actor(self, name: str) -> dict[str, Any]:
         """The barebones actor document a stranger gets.
 
@@ -856,8 +887,28 @@ class Api:
         actor = await self.house.join(requested)
         return self.wire.actor(actor)
 
-    async def directory(self) -> Collection:
+    async def directory(self, *, listed_only: bool = False) -> Collection:
+        """Who is here.
+
+        ``listed_only`` is the **federated** view: `discoverable` actors and nothing
+        else. That is the middle level doing its job — `normal` is addressable but
+        unlisted, so somebody who knows the name can reach it while the directory does
+        not advertise it.
+
+        **A verified local caller still sees everyone**, and that is a deliberate
+        reading of T010 rather than an oversight. Visibility governs exposure *outward*:
+        an agent must be able to find the other agents on its own machine or the product
+        does not work, and `list_agents` is how the console, the CLI and every agent do
+        that. If this reading is wrong the fix is one argument at the call site, and the
+        tests say plainly which behaviour they pin.
+        """
         actors = await self.house.directory()
+        if listed_only:
+            actors = tuple(
+                a
+                for a in actors
+                if visibility.read(a.profile) is visibility.Visibility.DISCOVERABLE
+            )
         return self.wire.collection([self.wire.actor(a) for a in actors])
 
     async def actor(self, name: str) -> Actor:
@@ -2018,8 +2069,23 @@ def build_api(
     # to prevent, and it is what let the console's Tokens page render to a stranger.
     # Under off/warn the guard is a no-op, so nothing changes for a trusted LAN.
     @get("/actors", guards=[guard_enforce])
-    async def directory() -> Collection:
-        return await api.directory()
+    async def directory(request: Request) -> Collection:
+        """Who is here — everyone to a verified local caller, `discoverable` only to
+        anyone else.
+
+        **Filtered only when the hub federates**, which is T012's evaluation order —
+        hub mode first — and not a convenience. On a hub that does not federate there is
+        no outside to withhold from: the directory is a local tool, agents find each
+        other with it, and hiding half of them would break the product to protect
+        against a stranger who cannot reach the port anyway.
+
+        The first version of this gated on *verification* instead, and broke every
+        `AUTH_MODE=off` deployment — where nobody is verified by definition, so the
+        directory went empty. Two existing tests caught it.
+        """
+        federating = federates(await api.house.mailbox.hub_settings())
+        verified = enforcing and await resolve_verified_caller(request) is not None
+        return await api.directory(listed_only=federating and not verified)
 
     @get("/actors/{name:str}")
     async def actor(name: str, request: Request) -> Any:
@@ -2030,15 +2096,25 @@ def build_api(
         gets only what addressing requires (`thin_actor`). Anyone else, on a hub that
         does not federate, is refused exactly as before.
 
-        The gate is deliberately the hub-level federation switch rather than per-actor
-        visibility, which is a later step: until it exists, a hub that has not chosen to
-        federate discloses nobody, and one that has, discloses only barebones.
+        **Visibility is a ceiling, never a grant** (FR-016), and the evaluation order
+        is hub mode, then peering, then visibility. A `discoverable` actor on a hub with
+        federation off is still unreachable — asking to be found does not override the
+        operator's decision not to federate at all. The field can only ever withhold.
+
+        A `local` actor is refused to everybody who is not a verified caller on this
+        hub, in the same words an unknown name gets.
         """
         federating = federates(await api.house.mailbox.hub_settings())
         verified = enforcing and await resolve_verified_caller(request) is not None
 
         if verified:
             return await api.actor(name)
+        # Everything below this line is somebody who is not a verified local caller, so
+        # visibility applies to all of it. Checked once, here, rather than in each of
+        # the three branches — three copies of a disclosure rule is how one of them
+        # ends up a word different from the others.
+        if federating or await api.verified_peer(request) is not None:
+            await api._resolvable_or_absent(name)  # noqa: SLF001 - same module, one rule
         if federating and await api.verified_peer(request) is not None:
             # A peer that proved which hub it is gets what a local agent gets. This is
             # what the thin/rich split was built for: without signatures there was no
