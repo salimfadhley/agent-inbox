@@ -8,7 +8,10 @@
 - Parent: [`manual-activitypub-federation-v1-01KYJY10`](../manual-activitypub-federation-v1-01KYJY10/spec.md),
   issue [#15](https://github.com/salimfadhley/agent-inbox/issues/15)
 - Raised by: the operator, 2026-07-28
-- Status: **specified, no open questions, ready to plan.**
+- Status: **shipped 2026-08-06.** All six work packages built, tested and released
+  (v0.76.0 – v0.80.1). FR-020 was found **already satisfied** and closed with evidence
+  rather than re-satisfied: neither `501` nor the superseded mission numbers appear in
+  `api.py`, and the federation inbox already refuses with a reason.
 
 ## What this is
 

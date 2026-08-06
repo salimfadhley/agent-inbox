@@ -39,7 +39,7 @@ from litestar.handlers.base import BaseRouteHandler
 from litestar.openapi import OpenAPIConfig
 from litestar.response import ServerSentEvent, ServerSentEventMessage
 
-from agent_inbox import __version__, addressing, rules, visibility
+from agent_inbox import __version__, addressing, fedaudit, rules, visibility
 from agent_inbox.auth.exceptions import AuthError, NotAuthenticated, TooManyAttempts
 from agent_inbox.auth.records import SHARED_ACTOR
 from agent_inbox.auth.service import INSECURE_ADMIN_WARNING, AuthService
@@ -775,6 +775,10 @@ class Api:
         # sending it a request tells it we tried, which is worse than not blocking it.
         verdict = await may_exchange(self.house.mailbox.store, origin)
         if not verdict:
+            # Recorded even though nobody typed it. An operator asking "why did that
+            # peer not get my mail" is asking about exactly this, and an audit of only
+            # deliberate acts cannot answer them.
+            fedaudit.record("peer.add.refused", origin, reason=verdict.reason)
             raise PeerBlocked(verdict.reason)
         note = str(data.get("note", "")).strip()
         added = datetime.now(UTC).date().isoformat()
@@ -813,9 +817,7 @@ class Api:
         note = str(data.get("note", "")).strip()
         added = datetime.now(UTC).date().isoformat()
         await self.house.mailbox.store.add_block(origin, added, note)
-        api_logger.warning(
-            "event=federation.blocked origin=%s note=%s", origin, note or "(none)"
-        )
+        fedaudit.record("block.add", origin, reason=note or "no reason given")
         return {"origin": origin, "blocked": True}
 
     async def remove_block(self, origin: str) -> dict[str, Any]:
@@ -826,7 +828,7 @@ class Api:
         except MailboxError as refused:
             raise HTTPException(status_code=422, detail=str(refused)) from refused
         await self.house.mailbox.store.remove_block(normalised)
-        api_logger.warning("event=federation.unblocked origin=%s", normalised)
+        fedaudit.record("block.remove", normalised)
         return {"origin": normalised, "blocked": False, "trusted": False}
 
     async def remove_peer(self, origin: str) -> dict[str, Any]:

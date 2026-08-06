@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import quote
 
-from agent_inbox import outbound
+from agent_inbox import fedaudit, outbound
 from agent_inbox.federation import may_exchange
 from agent_inbox.keys import PRIVATE_KEY_SETTING, SigningKey, generate
 from agent_inbox.records import ObjectRecord
@@ -197,6 +197,14 @@ class FederatedDelivery:
         # disagree — which for a blocklist means a blocked hub gets talked to (C-006).
         verdict = await may_exchange(self.mailbox.store, resolved.origin)
         if not verdict:
+            fedaudit.record(
+                "delivery.refused",
+                resolved.origin,
+                reason=verdict.reason,
+                # The message id, never its content — enough to trace which send was
+                # refused without the audit becoming a copy of everyone's mail.
+                detail={"message_id": record.id},
+            )
             raise outbound.DeliveryRefused(verdict.reason)
 
         # Read immediately before the call and handed straight in, so `outbound.deliver`
