@@ -1911,3 +1911,180 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+@cli.group(cls=AliasedGroup, invoke_without_command=False)
+def federation() -> None:
+    """Whether this hub talks to other hubs, and which ones.
+
+    **Every command here asks the hub and reports what it said.** None of them decides
+    anything: whether federation may be enabled, whether a peer is blocked, what a mode
+    permits — all of it is the hub's, and a client that recomputed any of it would be a
+    second implementation of a trust decision (C-006). That is the one bug in this area
+    nobody thinks to look for, because the client looks like it is only displaying.
+    """
+
+
+@federation.command("status")
+@click.pass_context
+def federation_status(ctx: click.Context) -> int:
+    """What this hub is set to, and **who controls each setting**.
+
+    Reported with a source, the way `config list` already does it, so an operator
+    learns one way of being told "the environment governs this" rather than two
+    (FR-019).
+    """
+    settings = _client(ctx).hub_settings()
+    rows = settings.get("settings", settings) if isinstance(settings, dict) else {}
+    if not rows:
+        click.echo("the hub said nothing about its settings")
+        return 1
+    for key in sorted(rows):
+        entry = rows[key]
+        value = entry.get("value") if isinstance(entry, dict) else entry
+        source = entry.get("source", "") if isinstance(entry, dict) else ""
+        shown = "(unset)" if value in (None, "") else str(value)
+        click.echo(f"{key:<14} {shown:<24} {source}")
+    return 0
+
+
+@federation.command("enable")
+@click.pass_context
+def federation_enable(ctx: click.Context) -> int:
+    """Turn federation on.
+
+    The rule about *whether it may be enabled* lives in the hub
+    (`check_may_enable_federation`) and is not repeated here (FR-002). A refusal comes
+    back with its reason — no public URL, or a hub still called `local` — and is printed
+    as the hub worded it, because a client paraphrasing a refusal is how the two come to
+    disagree about what the rule is.
+    """
+    try:
+        _client(ctx).set_hub_settings(federation="enabled")
+    except ClientError as refused:
+        _err(f"federation was not enabled: {refused}")
+        return 1
+    click.echo("federation enabled")
+    return 0
+
+
+@federation.command("disable")
+@click.pass_context
+def federation_disable(ctx: click.Context) -> int:
+    """Turn federation off. Takes effect on the next exchange — authorization is decided
+    per attempt and never carried (FR-050)."""
+    try:
+        _client(ctx).set_hub_settings(federation="disabled")
+    except ClientError as refused:
+        _err(f"federation was not disabled: {refused}")
+        return 1
+    click.echo("federation disabled")
+    return 0
+
+
+@cli.group(cls=AliasedGroup, invoke_without_command=False)
+def peers() -> None:
+    """The hubs this one trusts. Operator-only, on the hub's side."""
+
+
+@peers.command("list")
+@click.pass_context
+def peers_list(ctx: click.Context) -> int:
+    """Who this hub trusts, and when each was added."""
+    items = _client(ctx).peers().get("items", [])
+    if not items:
+        click.echo("no peers — this hub trusts nobody yet")
+        return 0
+    for item in items:
+        click.echo(f"{item.get('origin', '?'):<40} added {item.get('added', '?')}")
+    return 0
+
+
+@peers.command("add")
+@click.argument("origin")
+@click.option("--note", default="", help="why this hub is trusted, for the audit")
+@click.pass_context
+def peers_add(ctx: click.Context, origin: str, note: str) -> int:
+    """Trust a hub, by origin.
+
+    A refusal is printed as the hub worded it. A **blocked** origin is refused here
+    rather than added and quietly ignored, because "added" for something that can never
+    be reached is the silent-success shape this project treats as its worst failure.
+    """
+    try:
+        answer = _client(ctx).add_peer(origin, note)
+    except ClientError as refused:
+        _err(f"not added: {refused}")
+        return 1
+    click.echo(f"trusting {answer.get('origin', origin)}")
+    return 0
+
+
+@peers.command("remove")
+@click.argument("origin")
+@click.pass_context
+def peers_remove(ctx: click.Context, origin: str) -> int:
+    """Stop trusting a hub. It is not thereby blocked — that is a separate statement."""
+    try:
+        _client(ctx).remove_peer(origin)
+    except ClientError as refused:
+        _err(f"not removed: {refused}")
+        return 1
+    click.echo(f"no longer trusting {origin}")
+    return 0
+
+
+@cli.group(cls=AliasedGroup, invoke_without_command=False)
+def blocklist() -> None:
+    """Hubs this one refuses, whatever the mode says.
+
+    **Stored only, with no environment equivalent**, by decision
+    `01KYMQ6PTT9J16PCA5H8FF66QX`: precedence applies to scalars, and lists do not have
+    it. A blocklist half in the environment and half in the store would need a rule for
+    which wins, and any such rule is one somebody eventually gets wrong in the direction
+    of letting a blocked hub through.
+    """
+
+
+@blocklist.command("list")
+@click.pass_context
+def blocklist_list(ctx: click.Context) -> int:
+    """Who this hub refuses, and why."""
+    items = _client(ctx).blocks().get("items", [])
+    if not items:
+        click.echo("no blocks")
+        return 0
+    for item in items:
+        note = item.get("note") or ""
+        click.echo(f"{item.get('origin', '?'):<40} {note}")
+    return 0
+
+
+@blocklist.command("add")
+@click.argument("origin")
+@click.option("--note", default="", help="why, for whoever reads this in six months")
+@click.pass_context
+def blocklist_add(ctx: click.Context, origin: str, note: str) -> int:
+    """Refuse a hub. Beats the mode, and beats an existing peering."""
+    try:
+        answer = _client(ctx).add_block(origin, note)
+    except ClientError as refused:
+        _err(f"not blocked: {refused}")
+        return 1
+    click.echo(f"blocking {answer.get('origin', origin)}")
+    return 0
+
+
+@blocklist.command("remove")
+@click.argument("origin")
+@click.pass_context
+def blocklist_remove(ctx: click.Context, origin: str) -> int:
+    """Stop refusing a hub. **It is not thereby trusted** — say so, because an operator
+    who assumes otherwise has restored a peering they did not intend."""
+    try:
+        _client(ctx).remove_block(origin)
+    except ClientError as refused:
+        _err(f"not unblocked: {refused}")
+        return 1
+    click.echo(f"no longer blocking {origin} — it is not trusted either")
+    return 0

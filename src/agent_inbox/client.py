@@ -795,7 +795,53 @@ def _from_older_hub(page: Any, *, view: str, asked_since: bool) -> dict[str, Any
     return translated
 
 
-class HubClient:
+class _FederationClient:
+    """Federation reads and writes, as thin as every other client surface.
+
+    **Nothing here decides anything** (NFR-003, C-006). Each method turns a call into a
+    request and hands back what the hub said. Whether a peer may be added, whether a
+    block applies, what a mode permits — all of that is the hub's, and a client that
+    recomputed any of it would be the second implementation nobody thinks to look at,
+    which is precisely the shape C-006 warns about.
+
+    Mixed into :class:`HubClient` rather than standing alone so that callers keep one
+    object with one credential and one timeout.
+    """
+
+    _call: Any
+
+    def peers(self) -> Any:
+        return self._call("GET", "/observe/peers")
+
+    def add_peer(self, origin: str, note: str = "") -> Any:
+        return self._call("POST", "/observe/peers", {"origin": origin, "note": note})
+
+    def remove_peer(self, origin: str) -> Any:
+        return self._call(
+            "DELETE", f"/observe/peers?origin={urllib.parse.quote(origin, safe='')}"
+        )
+
+    def blocks(self) -> Any:
+        return self._call("GET", "/observe/blocks")
+
+    def add_block(self, origin: str, note: str = "") -> Any:
+        return self._call("POST", "/observe/blocks", {"origin": origin, "note": note})
+
+    def remove_block(self, origin: str) -> Any:
+        return self._call(
+            "DELETE", f"/observe/blocks?origin={urllib.parse.quote(origin, safe='')}"
+        )
+
+    def hub_settings(self) -> Any:
+        """Each setting with its value **and its source** — the shape `config list`
+        already uses, so an operator learns one way of being told what governs what."""
+        return self._call("GET", "/hub/settings")
+
+    def set_hub_settings(self, **settings: str) -> Any:
+        return self._call("PUT", "/hub", dict(settings))
+
+
+class HubClient(_FederationClient):
     """One hub, over HTTP.
 
     Deliberately uses the standard library. A client that an agent installs should not
