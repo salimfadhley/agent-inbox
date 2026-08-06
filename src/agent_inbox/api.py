@@ -2304,6 +2304,37 @@ def build_api(
         }
 
     @post(
+        "/objects/{object_id:str}/retract-thread",
+        status_code=200,
+        dependencies={"caller": Provide(provide_caller)},
+    )
+    async def retract_thread_route(
+        object_id: str, caller: str, request: Request
+    ) -> dict[str, Any]:
+        """Retract every message in this thread that the caller has the power to.
+
+        **A partial outcome is the normal answer, not an error.** A human takes the
+        whole conversation; an agent takes its own turns and is refused the rest. Both
+        lists come back, because "done" would hide what stayed — and an operator who
+        believes a conversation is gone when it is not will act on that belief.
+
+        The thread is computed here, from the same walk the reader saw, so the set
+        retracted is the set they were looking at rather than one assembled differently.
+        """
+        from agent_inbox import threads
+
+        turns = await house.mailbox.thread(caller, object_id)
+        done = await threads.retract_thread(
+            house.mailbox.store, [t.id for t in turns], caller
+        )
+        return {
+            "retracted": list(done.retracted),
+            "refused": [{"id": r.object_id, "reason": r.reason} for r in done.refused],
+            "partial": done.partial,
+            "scope": "this hub only — copies delivered to peer hubs are not withdrawn",
+        }
+
+    @post(
         "/objects/{object_id:str}/read",
         # 200, not Litestar's default 201: consuming a message creates nothing.
         status_code=200,
@@ -2833,6 +2864,7 @@ def build_api(
         observe_thread,
         read_object,
         retract_object,
+        retract_thread_route,
         thread,
     ]
     # The /auth/* routes exist only when auth is configured. With auth off, there is

@@ -323,3 +323,146 @@ class TestComposeSuggestsNames:
 
         assert answer.status_code == 200, "a failed lookup broke the compose page"
         assert 'name="to"' in answer.text, "the field itself is gone"
+
+
+class TestWithdrawingFromTheConsole:
+    """Retraction shipped with an API and no control; the owner asked for both, with a
+    confirmation step.
+
+    The tests are about the three ways this could be wrong: the button not being wired
+    (which has happened four times in this codebase), a withdrawn message still showing
+    its body, and the control appearing where it should not.
+    """
+
+    @staticmethod
+    def _console(turns: list[dict], sink: list[tuple[str, str]] | None = None):
+
+        from agent_inbox.client import Config, HubClient
+        from agent_inbox.console import build_console
+
+        class Stub(HubClient):
+            def __init__(self) -> None:
+                super().__init__(Config(hub=HUB, name="console"))
+
+            def hub_info(self) -> dict[str, Any]:
+                return {"name": "t", "version": "1.0.0", "authenticated": False}
+
+            def observe_thread(self, object_id: str) -> dict[str, Any]:
+                return {"items": turns}
+
+            def observe_object(self, object_id: str) -> dict[str, Any]:
+                return {"readBy": []}
+
+            def list_agents(self) -> dict[str, Any]:
+                return {"items": []}
+
+            def with_session(self, session: str) -> Stub:
+                return self
+
+            def acting_as(self, name: str, session: str) -> Stub:
+                return self
+
+            def whoami(self) -> str:
+                return HUMAN
+
+            def retract_message(self, object_id: str) -> dict[str, Any]:
+                if sink is not None:
+                    sink.append(("message", object_id))
+                return {"retracted": True}
+
+            def retract_thread(self, object_id: str) -> dict[str, Any]:
+                if sink is not None:
+                    sink.append(("thread", object_id))
+                return {"retracted": [object_id], "refused": []}
+
+        return TestClient(app=build_console(Stub()))
+
+    def test_pressing_withdraw_reaches_the_hub(self) -> None:
+        """The wiring, proved separately from the rendering — a control that renders and
+        does nothing has shipped from this project four times."""
+        sink: list[tuple[str, str]] = []
+        with self._console([turn("a", AGENT, None, "1")], sink) as c:
+            answer = c.post(
+                "/message/a/retract",
+                cookies={SESSION_COOKIE: "s"},
+                follow_redirects=False,
+            )
+
+        assert answer.status_code == 303, answer.status_code
+        assert sink == [("message", "a")]
+
+    def test_pressing_withdraw_the_thread_reaches_the_hub(self) -> None:
+        sink: list[tuple[str, str]] = []
+        with self._console([turn("a", AGENT, None, "1")], sink) as c:
+            answer = c.post(
+                "/message/a/retract-thread",
+                cookies={SESSION_COOKIE: "s"},
+                follow_redirects=False,
+            )
+
+        assert answer.status_code == 303
+        assert sink == [("thread", "a")]
+
+    def test_a_withdrawn_message_shows_no_body(self) -> None:
+        """The point of the whole feature. If the body survives the tombstone, the
+        retraction happened and the console undid it."""
+        gone = turn("a", AGENT, None, "1", body="the words that were withdrawn")
+        gone["retracted"] = {"by": HUMAN, "at": "2026-08-06"}
+
+        with self._console([gone]) as c:
+            page = c.get("/message/a", cookies={SESSION_COOKIE: "s"}).text
+
+        assert "the words that were withdrawn" not in page
+        # Asserted on the rendered *body element*, not on the page. The first version
+        # searched the whole document and passed with the tombstone renderer deleted,
+        # because the confirmation prose contains the word `[deleted]` too — caught by
+        # the removal proof, which is the only reason it is not still passing.
+        body = page.split('class="b gone">', 1)
+        assert len(body) == 2, "the body was not rendered as withdrawn"
+        assert body[1].startswith("[deleted]")
+
+    def test_an_ordinary_message_still_shows_its_body(self) -> None:
+        """The paired positive: a renderer that hid every body would pass the test
+        above."""
+        with self._console([turn("a", AGENT, None, "1", body="perfectly fine")]) as c:
+            page = c.get("/message/a", cookies={SESSION_COOKIE: "s"}).text
+
+        assert "perfectly fine" in page
+
+    def test_a_body_that_merely_reads_deleted_is_not_marked_withdrawn(self) -> None:
+        """The mark is on the record, not in the text — somebody writing `[deleted]` as
+        a joke has not retracted anything, and must not be shown as having done so."""
+        joker = turn("a", AGENT, None, "1", body="[deleted]")
+
+        with self._console([joker]) as c:
+            page = c.get("/message/a", cookies={SESSION_COOKIE: "s"}).text
+
+        assert "gone" not in page.split('class="b')[1][:40], (
+            "an ordinary message was styled as withdrawn"
+        )
+
+    def test_the_control_is_gone_once_the_message_is(self) -> None:
+        """Offering to withdraw something already withdrawn is an invitation to wonder
+        whether the first one worked."""
+        gone = turn("a", AGENT, None, "1")
+        gone["retracted"] = {"by": HUMAN, "at": "2026-08-06"}
+
+        with self._console([gone]) as c:
+            page = c.get("/message/a", cookies={SESSION_COOKIE: "s"}).text
+
+        assert "/message/a/retract'" not in page
+
+    def test_nothing_is_offered_to_somebody_not_signed_in(self) -> None:
+        with self._console([turn("a", AGENT, None, "1")]) as c:
+            page = c.get("/message/a").text
+
+        assert "/retract" not in page
+
+    def test_the_confirmation_says_it_cannot_be_undone(self) -> None:
+        """The reason the control is behind a `<details>` at all: the moment somebody
+        most wants this is the moment they should be slowed down."""
+        with self._console([turn("a", AGENT, None, "1")]) as c:
+            page = c.get("/message/a", cookies={SESSION_COOKIE: "s"}).text
+
+        assert "cannot be undone" in page
+        assert "not withdrawn" in page, "the local-only scope is not stated"

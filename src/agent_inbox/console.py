@@ -179,6 +179,13 @@ button:hover { border-color: currentColor; }
                   border: 1px solid var(--line); background: transparent;
                   color: inherit; }
 .reply summary { cursor: pointer; font-size: .82rem; opacity: .7; }
+/* A withdrawn body, and the control that withdraws one. Both deliberately quieter
+   than the surrounding text: the first is an absence and should read as one, and the
+   second is the only irreversible act on the page — a control styled like its
+   neighbours invites the same casualness as its neighbours. */
+.msg .b.gone { opacity: .55; font-style: italic; }
+.retract summary { cursor: pointer; font-size: .82rem; opacity: .55; }
+.retract { margin: .35rem 0 0; }
 /* The two panels on an agent's page. The dashed edge and the muted label are the
    only thing standing between "this agent runs on that host" and "this agent says
    so" — nothing in a profile is verified, and one flat list would let hearsay
@@ -1286,6 +1293,31 @@ def build_console(client: HubClient) -> Litestar:
             if str(a.get("type", "")) == "Person"
         }
 
+    def _retract_form(object_id: str, request: Request, withdrawn: bool) -> str:
+        """Withdraw this message. Behind a confirmation, and absent once it is gone.
+
+        **Deliberately plainer than the reply control.** This is the one act on the page
+        that cannot be undone, and a button that looks like the others invites the same
+        casualness as the others.
+
+        The confirmation is a `<details>` the reader opens and then a submit — two
+        deliberate acts, and not friction for its own sake. `catherine_shashkova`
+        observed on the day retraction shipped that the pull to retract is strongest
+        exactly where the record has most value, so the moment somebody most wants
+        this button is the moment they should be slowed down.
+        """
+        if not _signed_in(request) or withdrawn:
+            return ""
+        return (
+            "<details class='retract'><summary>Withdraw this message</summary>"
+            "<p class='dim'>The body is replaced with <code>[deleted]</code>. Its "
+            "place in the thread, its sender and its time remain, so replies beneath "
+            "it still make sense. <strong>This cannot be undone</strong>, and a copy "
+            "already delivered to another hub is not withdrawn.</p>"
+            f"<form method='post' action='/message/{html.escape(object_id)}/retract'>"
+            "<button type='submit'>Withdraw it</button></form></details>"
+        )
+
     def _reply_form(object_id: str, request: Request) -> str:
         """A reply control on **this** message, not only on the thread.
 
@@ -1343,6 +1375,13 @@ def build_console(client: HubClient) -> Litestar:
             # one*. Mail is evidence, not instruction (ADR 0008), and a badge saying
             # "operator" would render a fact as an order.
             kind = " human" if who in humans else ""
+            # A withdrawn message is styled as withdrawn rather than as a message whose
+            # text happens to read `[deleted]`. The mark is on the record, so a sender
+            # who wrote those characters themselves is not shown as having retracted
+            # anything.
+            withdrawn = bool(
+                n.get("retracted") or n.get("document", {}).get("retracted")
+            )
             parent = (
                 "<span class='orphan'>· in reply to a message not shown here</span>"
                 if orphan
@@ -1355,8 +1394,13 @@ def build_console(client: HubClient) -> Litestar:
                 f'<div class="h"><strong>{html.escape(_subject(n))}</strong> · '
                 f'from <code class="{kind.strip()}">{html.escape(who)}</code> · '
                 f"{html.escape(_shortdate(n.get('published', '')))} {parent}</div>"
-                f'<div class="b">{html.escape(n.get("content") or "")}</div>'
+                + (
+                    '<div class="b gone">[deleted]</div>'
+                    if withdrawn
+                    else f'<div class="b">{html.escape(n.get("content") or "")}</div>'
+                )
                 + _reply_form(oid, request)
+                + _retract_form(oid, request, withdrawn)
                 + "</div>"
                 + "</div>" * depth
             )
@@ -1367,8 +1411,72 @@ def build_console(client: HubClient) -> Litestar:
             if read_by
             else "<p class='dim'>Not yet read by anyone it was sent to.</p>"
         )
-        body = "<h2>Thread</h2>" + "".join(blocks) + read_note
+        body = (
+            "<h2>Thread</h2>"
+            + "".join(blocks)
+            + _retract_thread_form(_leaf(object_id), request)
+            + read_note
+        )
         return Response(_page("Message", body, hub, ""), media_type=MediaType.HTML)
+
+    def _retract_thread_form(object_id: str, request: Request) -> str:
+        """Withdraw every message in this conversation the signed-in human may.
+
+        Separated from the per-message control by more than styling: this is the most
+        destructive act the console offers, and the outcome can be *partial* — an agent
+        doing it takes its own turns and is refused the rest. The page says so before
+        the click rather than reporting it afterwards.
+        """
+        if not _signed_in(request):
+            return ""
+        return (
+            "<details class='retract'><summary>Withdraw this whole thread</summary>"
+            "<p class='dim'>Every message you have the power to withdraw is replaced "
+            "with <code>[deleted]</code>, each one audited separately. Messages you "
+            "cannot withdraw are left alone and reported back. <strong>This cannot be "
+            "undone.</strong></p>"
+            "<form method='post' action='/message/"
+            + html.escape(object_id)
+            + "/retract-thread'>"
+            "<button type='submit'>Withdraw the thread</button></form></details>"
+        )
+
+    @post("/message/{object_id:str}/retract", status_code=303, sync_to_thread=True)
+    def message_retract(object_id: str, request: Request) -> Response:
+        """Withdraw one message, as the signed-in human.
+
+        The console decides nothing about who may (NFR-002): `retraction.retract` owns
+        that, and this forwards the request and the identity. A refusal comes back as
+        the hub worded it.
+        """
+        try:
+            acting_for(request)[0].retract_message(object_id)
+        except ClientError as exc:
+            return _err(
+                exc,
+                hub_or_none(),
+                "Message",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
+        return Redirect(f"/message/{object_id}", status_code=303)
+
+    @post(
+        "/message/{object_id:str}/retract-thread", status_code=303, sync_to_thread=True
+    )
+    def message_retract_thread(object_id: str, request: Request) -> Response:
+        """Withdraw the whole conversation, as far as this human may."""
+        try:
+            acting_for(request)[0].retract_thread(object_id)
+        except ClientError as exc:
+            return _err(
+                exc,
+                hub_or_none(),
+                "Message",
+                api=client.config.base,
+                signed_in=_signed_in(request),
+            )
+        return Redirect(f"/message/{object_id}", status_code=303)
 
     @post("/message/{object_id:str}/reply", status_code=303, sync_to_thread=True)
     def message_reply(object_id: str, data: Form, request: Request) -> Response:
@@ -2908,6 +3016,8 @@ def build_console(client: HubClient) -> Litestar:
             mailbox,
             message,
             message_reply,
+            message_retract,
+            message_retract_thread,
             inbox,
             do_read,
             compose_form,

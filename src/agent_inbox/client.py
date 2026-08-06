@@ -832,6 +832,18 @@ class _FederationClient:
             "DELETE", f"/observe/blocks?origin={urllib.parse.quote(origin, safe='')}"
         )
 
+    def retract_message(self, object_id: str) -> Any:
+        """Withdraw one message's body. Who may is the hub's decision, not ours."""
+        return self._call("POST", f"/objects/{object_id}/retract")
+
+    def retract_thread(self, object_id: str) -> Any:
+        """Withdraw every message in a thread the caller has the power to.
+
+        Returns both lists — what went and what stayed. A caller that reported only
+        success would tell an operator a conversation is gone when half of it is not.
+        """
+        return self._call("POST", f"/objects/{object_id}/retract-thread")
+
     def hub_settings(self) -> Any:
         """Each setting with its value **and its source** — the shape `config list`
         already uses, so an operator learns one way of being told what governs what."""
