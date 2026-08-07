@@ -45,7 +45,7 @@ ALL_CHECKS = (*DEFAULT_CHECKS, CHECK_DEPLOY_IMAGE)
 TAG_URL = "https://hub.docker.com/v2/repositories/{repository}/tags/{tag}"
 
 PROMPT_INSTALL_RE = re.compile(
-    r"uv tool install --python (?P<python>[0-9.]+) --refresh --no-cache --force "
+    r"uv tool install --upgrade --python (?P<python>[0-9.]+) --refresh --no-cache "
     r'"(?P<requirement>agent-inbox\[clients\]>=(?P<version>[^"\s]+))"'
 )
 
@@ -76,21 +76,40 @@ def install_command(requirement: str, python: str = "") -> tuple[str, ...]:
         "uv",
         "tool",
         "install",
+        "--upgrade",
         *pin,
         "--refresh",
         "--no-cache",
-        "--force",
         requirement,
     )
 
 
 def extract_prompt_install(prompt: str) -> PromptInstall:
-    """Find the single versioned ``uv tool install`` command in a rendered prompt."""
+    """Find the versioned ``uv tool install`` command a rendered prompt advertises.
+
+    **One command, which is not the same as one occurrence.** This used to require
+    exactly one match, and the distinction only surfaced when the prompt grew a second,
+    legitimate place to show it — the Windows recovery path, where somebody who has just
+    killed a process needs to be told what to run, not sent back up the page.
+
+    The rule worth keeping is that the prompt never advertises *two different* commands,
+    which is the drift that put this gate here: `doctor` once gave the unpinned form
+    while the prompt gave the pinned one, so the advice an agent met when it was already
+    confused was the wrong one. Identical repetitions are fine and are guaranteed by
+    construction, since every copy is rendered from `staleness.upgrade_command`.
+    """
     matches = list(PROMPT_INSTALL_RE.finditer(prompt))
-    if len(matches) != 1:
+    if not matches:
         raise ReleaseGateError(
-            "expected exactly one prompt install command for "
-            f"{PACKAGE_REQUIREMENT}>=<version>, found {len(matches)}"
+            "the prompt advertises no install command for "
+            f"{PACKAGE_REQUIREMENT}>=<version>"
+        )
+    spellings = {match.group(0) for match in matches}
+    if len(spellings) != 1:
+        raise ReleaseGateError(
+            f"the prompt advertises {len(spellings)} different install commands, and "
+            "an agent meets whichever is nearest its confusion: "
+            f"{sorted(spellings)}"
         )
     match = matches[0]
     requirement = match.group("requirement")

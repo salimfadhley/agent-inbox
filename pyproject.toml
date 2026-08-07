@@ -78,14 +78,17 @@ ui = [
 # upgraded, so nothing breaks the moment this ships — it stops being replaced, not
 # suddenly absent.
 agent-inbox = "agent_inbox.cli:main"
-# `aiai` is the same program under a shorter name, **for a human at a terminal**
-# (owner, 2026-08-07). It is deliberately absent from the onboarding prompt: agents are
-# told to run the module, so nothing an agent does can hold a launcher open, and adding
-# a second launcher to that document would only invite them to lock a second file.
+# **One command, and `aiai` is not coming back** (owner, 2026-08-07). It shipped in
+# 0.89.0 and was withdrawn in the next release, undocumented throughout.
 #
-# Additive. `agent-inbox` stays exactly as it is — removing it would break every
-# existing install, every hook written before today, and every deployment.
-aiai = "agent_inbox.cli:main"
+# The reasoning that removed it: `uv tool install` has to write *an* alias, so the
+# launcher exists whatever we call it. A second name does not avoid the Windows lock, it
+# only adds a second file that can be locked — and a name the prompt deliberately never
+# mentions is a name nobody discovers, which makes it cost without buying.
+#
+# The Windows upgrade problem is answered where it actually lives: the wake hook stopped
+# holding the launcher in 0.88.0, and for anything else still holding it the prompt now
+# gives the manual path.
 
 [project.urls]
 Homepage = "https://github.com/salimfadhley/agent-inbox"

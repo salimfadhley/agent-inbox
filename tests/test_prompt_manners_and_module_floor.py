@@ -60,29 +60,6 @@ class TestTheModuleCommandAsksForAVersionThatHasOne:
         assert "It is an **old** one" in prompt
 
 
-class TestTheShortCommandIsNotInThePrompt:
-    def test_aiai_is_never_mentioned(self, prompt: str) -> None:
-        """`aiai` exists for a human at a terminal. Agents are told to run the module,
-        so nothing an agent does holds a launcher open — and naming a second launcher
-        here would only invite them to lock a second file."""
-        assert "aiai" not in prompt
-
-    def test_it_is_nonetheless_installed(self) -> None:
-        """The paired positive: absent from the prompt is not the same as absent."""
-        import tomllib
-        from pathlib import Path
-
-        scripts = tomllib.loads(Path("pyproject.toml").read_text())["project"][
-            "scripts"
-        ]
-
-        assert scripts["aiai"] == "agent_inbox.cli:main"
-        assert scripts["agent-inbox"] == "agent_inbox.cli:main", (
-            "the original command must stay: removing it breaks every existing "
-            "install, hook and deployment"
-        )
-
-
 class TestManners:
     """Asserted on the substance, not the wording — each of these is a distinct thing
     an agent is being asked to do, and a section that lost one would still read fine."""
@@ -121,3 +98,44 @@ class TestManners:
 
         assert "not everyone" in manners
         assert "none of them can decline" in manners
+
+
+class TestTheRegistrationIgnoresTheSurroundingProject:
+    """`uv run` adopts the `requires-python` of whatever project it stands in, and an
+    MCP server is launched from the directory the client happens to be working in.
+
+    A project pinned to `>=3.11, <3.13` therefore refuses the interpreter we asked for,
+    with an error naming the *project's* constraint — so it reads as the agent's machine
+    being wrong when nothing about it is. Reported by the owner on 2026-08-07 and
+    reproduced exactly: without the flag it fails, with it the module runs.
+
+    This is the one of these three corrections that stops a working setup dead, rather
+    than merely misleading somebody.
+    """
+
+    def test_every_uv_run_in_the_prompt_declines_the_project(self, prompt: str) -> None:
+        """Asserted across all of them, not just the two registrations. A `uv run` added
+        later without the flag would be broken in exactly the same way, and only on
+        somebody else's machine."""
+        invocations = [
+            block
+            for block in re.findall(r"```[a-z]*\n(.*?)```", prompt, re.S)
+            if "uv run" in block
+        ]
+
+        assert invocations, "precondition: the prompt runs uv somewhere"
+        for block in invocations:
+            assert "--no-project" in block, block
+
+    def test_the_codex_form_carries_it_too(self, prompt: str) -> None:
+        """A separate assertion because it is a separate syntax — a TOML args array,
+        which is exactly the kind of second spelling that gets updated late."""
+        toml = prompt.split("[mcp_servers.agent-inbox]", 1)[1]
+
+        assert '"--no-project"' in toml.split("```", 1)[0]
+
+    def test_the_error_is_explained(self, prompt: str) -> None:
+        """It names the project's own constraint and never mentions us, so a reader has
+        no reason to connect it to the mailbox at all."""
+        assert "incompatible" in prompt
+        assert "nothing to do with us" in prompt

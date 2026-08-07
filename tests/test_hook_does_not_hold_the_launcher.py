@@ -119,21 +119,59 @@ class TestThePromptSaysWhatIsHoldingIt:
         assert "every other agent session on this machine is holding" not in text
 
     def test_it_names_the_hook_and_the_remedy(self) -> None:
-        from agent_inbox.prompts import onboarding
+        from agent_inbox.prompts import LAUNCHER_FREE_SINCE, onboarding
 
         text = onboarding("https://hub.example", version="1.2.3")
 
         assert "wake hook, not another session" in text
         assert "install-hook" in text
-        from agent_inbox.prompts import LAUNCHER_FREE_SINCE
-
         assert LAUNCHER_FREE_SINCE in text
 
-    def test_it_offers_the_move_aside_workaround(self) -> None:
-        """For anyone whose launcher is held by something that is not ours. Renaming a
-        file that is in use is permitted on Windows, which is how installers do it."""
+    def test_the_remedy_is_per_project(self) -> None:
+        """Caught by the owner, 2026-08-07: this said re-run it **once**, which is
+        wrong. Hooks live in each project's own `.claude/settings.json`, so a single
+        fixed project does not help while every other one goes on starting the launcher
+        on every turn — and the symptom is identical, which is what makes the wrong
+        advice expensive rather than merely incomplete."""
+        from agent_inbox.prompts import onboarding
+
+        text = onboarding("https://hub.example", version="1.2.3")
+        remedy = text.split("re-run `agent-inbox install-hook", 1)[1][:400]
+
+        assert "every project" in remedy
+        assert ".claude/settings.json" in remedy
+
+    def test_it_gives_the_manual_upgrade_path(self) -> None:
+        """Owner's call, 2026-08-07: there is one launcher and there is going to be one,
+        because `uv tool install` writes an alias whatever it is named. So the honest
+        answer for Windows is not a second command but two commands — stop what is
+        holding it, then upgrade."""
+        from agent_inbox.prompts import onboarding
+
+        text = onboarding("https://hub.example", version="1.2.3")
+
+        assert "taskkill /IM agent-inbox.exe" in text
+        assert "uv tool install" in text.split("taskkill", 1)[1], (
+            "telling somebody to kill the process without telling them what to run next"
+        )
+
+    def test_it_still_offers_the_move_aside_alternative(self) -> None:
+        """For anyone who would rather not stop a running session. Renaming a file that
+        is in use is permitted on Windows, which is how installers do it."""
         from agent_inbox.prompts import onboarding
 
         text = onboarding("https://hub.example", version="1.2.3")
 
         assert "move %USERPROFILE%" in text
+
+    def test_the_upgrade_command_is_not_spelled_a_second_way(self) -> None:
+        """`staleness.upgrade_command` is the one copy, and it exists because two of
+        them drifted once already — leaving the *unpinned* form in the notice an agent
+        met when it was already confused. This paragraph must not become the third."""
+        from agent_inbox.prompts import onboarding
+        from agent_inbox.staleness import upgrade_command
+
+        text = onboarding("https://hub.example", version="1.2.3")
+        windows = text.split("taskkill", 1)[1].split("```", 2)[0]
+
+        assert upgrade_command() in windows

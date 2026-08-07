@@ -606,7 +606,7 @@ def test_the_prompt_makes_the_reader_check_what_is_already_installed(
     # The interpreter pin is part of the command, not decoration: uv will not change
     # the interpreter a tool is installed under, so an unpinned upgrade resolves to an
     # older release that fits and reports success (owner, 2026-08-05).
-    assert "uv tool install --python 3.14 --refresh --no-cache --force" in text
+    assert "uv tool install --upgrade --python 3.14 --refresh --no-cache" in text
     # Pinned to the floor, so a resolver that cannot reach it fails loudly instead of
     # silently installing 0.10.2 — the superseded package, with different commands.
     #

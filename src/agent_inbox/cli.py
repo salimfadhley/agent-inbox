@@ -565,6 +565,54 @@ def _markers() -> tuple[str, str, str, str]:
     )
 
 
+class _Notes:
+    """Findings worth knowing that are not faults, held back until the end.
+
+    Owner, 2026-08-07: *"can you change the design of doctor, so that the notes appear
+    at the bottom — not mixed in with the checks"*.
+
+    **The checks are a list you scan; the notes are prose you read**, and interleaving
+    them made both worse. A `note` three lines into a column of `ok` broke the scan the
+    colour exists to serve, and its two lines of advice pushed the next check out of
+    alignment — so the one line that needed reading was also the one that looked like a
+    formatting accident.
+
+    Collected rather than printed, and flushed once. That is why this is an object and
+    not a convention: `doctor` has several early returns, and a rule of the form
+    "remember to print the notes before each `return`" is a rule that gets forgotten on
+    the path nobody tested.
+    """
+
+    def __init__(self, marker: str) -> None:
+        self._marker = marker
+        self._said: list[str] = []
+
+    def say(self, text: str) -> None:
+        """Record one note. The text is exactly what would have been printed inline."""
+        self._said.append(text)
+
+    @property
+    def any(self) -> bool:
+        return bool(self._said)
+
+    def flush(self) -> None:
+        """Print them, once, under a heading — or print nothing at all.
+
+        Nothing at all is the common case and it must stay silent: a `Notes` heading
+        over an empty list is furniture, and a reader who sees it every run stops seeing
+        it on the run where something was under it.
+
+        On stdout, with the checks. The inline notes were split across both streams —
+        some `click.echo`, some `_err` — which was nobody's decision and meant half the
+        report vanished when somebody piped it. One report, one stream.
+        """
+        if not self._said:
+            return
+        click.echo("")
+        for note in self._said:
+            click.echo(f"{self._marker} {note}")
+
+
 def _report_interpreter(ok: str) -> None:
     """Name the interpreter and where it came from. A fact, never a warning.
 
@@ -604,7 +652,7 @@ def _say_if_migrated() -> None:
         _err(f"note: {said}")
 
 
-def _report_profile(client: HubClient, name: str, ok: str, warn: str) -> None:
+def _report_profile(client: HubClient, name: str, ok: str, notes: _Notes) -> None:
     """Say whether this agent has described itself at all (issue #61).
 
     `igor_laszlo` had an empty profile from the day he joined until the day he noticed,
@@ -652,16 +700,16 @@ def _report_profile(client: HubClient, name: str, ok: str, warn: str) -> None:
             + ", ".join(sorted(described))
         )
         return
-    click.echo(
-        f"{warn} profile         you have not described yourself. The roster and the "
-        f"console are built from this, so to another agent deciding whether to write "
-        f"to you, you are a blank line. Say what you are for:\n"
-        f"       agent-inbox profile edit purpose='<what you work on>'\n"
-        f"     Choosing to stay quiet is fine — this note exists so it is a choice."
+    notes.say(
+        "profile         you have not described yourself. The roster and the "
+        "console are built from this, so to another agent deciding whether to write "
+        "to you, you are a blank line. Say what you are for:\n"
+        "       agent-inbox profile edit purpose='<what you work on>'\n"
+        "     Choosing to stay quiet is fine — this note exists so it is a choice."
     )
 
 
-def _report_exposure(ok: str, warn: str) -> None:
+def _report_exposure(ok: str, notes: _Notes) -> None:
     """Say whether an identity file is exposed to git, on every `doctor` run.
 
     Owner's request, 2026-08-05. `join` adds an ignore rule, but that helps one project
@@ -697,21 +745,21 @@ def _report_exposure(ok: str, warn: str) -> None:
     for path, state in exposed:
         name = path.name
         if state == "staged":
-            click.echo(
-                f"{warn} config safety   {name} is STAGED — it carries a hub address "
+            notes.say(
+                f"config safety   {name} is STAGED — it carries a hub address "
                 f"and may carry a device token. Undo with:\n"
                 f"       git restore --staged {path}"
             )
         elif state == "tracked":
-            click.echo(
-                f"{warn} config safety   {name} is TRACKED by git. An ignore rule "
+            notes.say(
+                f"config safety   {name} is TRACKED by git. An ignore rule "
                 f"will not help now:\n"
                 f"       git rm --cached {path}\n"
                 f"     and revoke any token it carried — it is in the history."
             )
         else:
-            click.echo(
-                f"{warn} config safety   {name} is NOT IGNORED — `git add -A` would "
+            notes.say(
+                f"config safety   {name} is NOT IGNORED — `git add -A` would "
                 f"stage it. Add it to .gitignore, or run `agent-inbox join` again "
                 f"in that project."
             )
@@ -1330,6 +1378,11 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     "something on this list is broken" and read the FAIL line to find out which.
     """
     ok, bad, todo, warn = _markers()
+    # Collected, not printed. Flushed through the click context so no early return can
+    # lose them — `doctor` has three, and one is the credentials failure, which is
+    # exactly the run where a reader most wants everything it learned.
+    notes = _Notes(warn)
+    ctx.call_on_close(notes.flush)
     where = find_config() or (project_root() / CONFIG_NAME)
 
     # 1. Configuration. Having none is the *normal* state before `join`, not an error:
@@ -1387,7 +1440,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
             f"({config.role}, engine {config.engine or chosen} — {how})"
         )
 
-    _report_exposure(ok, warn)
+    _report_exposure(ok, notes)
 
     # `hub` became machine-wide by default on 2026-08-03: you have one mailbox and as
     # many identities as you have repositories. A project that still sets its own is not
@@ -1402,22 +1455,28 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     if pinned:
         machine_wide = str(load_global().get("hub", "")).strip()
         if machine_wide and machine_wide != pinned:
-            _err(
-                f"{warn} hub setting     this project pins {pinned} in {where}, so the "
+            said = (
+                f"hub setting     this project pins {pinned} in {where}, so the "
                 f"machine-wide {machine_wide} does not apply here."
             )
         elif machine_wide:
-            _err(
-                f"{warn} hub setting     this project repeats the machine-wide hub "
+            said = (
+                f"hub setting     this project repeats the machine-wide hub "
                 f"({pinned}) in {where}. Harmless, and no longer needed."
             )
         else:
-            _err(
-                f"{warn} hub setting     the hub lives in {where}, per project. "
+            said = (
+                f"hub setting     the hub lives in {where}, per project. "
                 "It is machine-wide by default now, so every other project has to be "
                 "told again."
             )
-        _err(
+        # **One note, advice included**, rather than two. The advice used to print
+        # inline; leaving it there while the note moved to the end would strand a block
+        # of instructions under whichever check happened to come next — worse than the
+        # interleaving this was meant to fix. And saying it as a second note would
+        # repeat the marker in front of a sentence that continues the first.
+        notes.say(
+            said + "\n"
             "     Unless this project deliberately uses a different hub, move it:\n\n"
             "       agent-inbox config unset hub\n"
             f"       agent-inbox config set hub {pinned or '<url>'}\n\n"
@@ -1539,7 +1598,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     staleness.note_hub_version(info.get("version"))
     match staleness.standing(info.get("version")):
         case "behind":
-            click.echo(f"{warn} version         {staleness.notice()}")
+            notes.say(f"version         {staleness.notice()}")
             # **Why the upgrade it just suggested may do nothing.** An install that does
             # not pin a version succeeds on an old interpreter and quietly resolves to
             # whatever that interpreter supports — so an agent told to upgrade runs the
@@ -1548,14 +1607,14 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
             # against what he had asked for. Saying it here is what turns a silent loop
             # into one round trip.
             if too_old := staleness.python_is_too_old():
-                click.echo(f"{warn} python          {too_old}")
+                notes.say(f"python          {too_old}")
         case "ahead":
             # The other direction, and a different problem with a different owner: the
             # hub is old, not this client, and upgrading here would fix nothing.
-            click.echo(
-                f"{warn} version         this client is {__version__} and the hub runs "
+            notes.say(
+                f"version         this client is {__version__} and the hub runs "
                 f"{info.get('version')} — the hub is behind, not you. Nothing to do "
-                f"here; whoever operates it may want to know."
+                "here; whoever operates it may want to know."
             )
 
     # 3. The hub's own verdict on us, credential included. Only the hub knows whether
@@ -1665,7 +1724,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     waiting = len(client.check_inbox().get("items", []))
     click.echo(f"{ok} api             ping answered; {waiting} message(s) waiting")
 
-    _report_profile(client, config.name, ok, warn)
+    _report_profile(client, config.name, ok, notes)
 
     # A local fault the network checks cannot see, so it decides the exit code even when
     # everything else answered.

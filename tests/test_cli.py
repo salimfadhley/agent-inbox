@@ -1241,10 +1241,14 @@ class TestDoctorReportsAProjectPinnedHub:
     ) -> None:
         self._setup(tmp_path, monkeypatch, "http://local:8081", "http://machine:8081")
         main(["--engine", "claude", "doctor"])
-        err = capsys.readouterr().err
-        assert "hub setting" in err
-        assert "does not apply here" in err
-        assert "config unset hub" in err, "it did not say how to fix it"
+        # **Stdout, since 2026-08-07.** Notes moved to the end of the report and onto
+        # one stream: they used to be split between `click.echo` and `_err` by nobody's
+        # decision, so piping `doctor` silently dropped half of them.
+        shown = capsys.readouterr()
+        report = shown.out + shown.err
+        assert "hub setting" in report
+        assert "does not apply here" in report
+        assert "config unset hub" in report, "it did not say how to fix it"
 
     def test_it_is_a_note_and_not_a_failure(
         self,
@@ -1255,7 +1259,8 @@ class TestDoctorReportsAProjectPinnedHub:
         """A project may point elsewhere on purpose; that is not broken."""
         self._setup(tmp_path, monkeypatch, "http://local:8081", "http://machine:8081")
         code = main(["--engine", "claude", "doctor"])
-        err = capsys.readouterr().err
+        shown = capsys.readouterr()
+        err = shown.out + shown.err  # notes moved to stdout on 2026-08-07
         assert code == 0, "a pinned hub was treated as a fault"
         assert "FAIL hub setting" not in err
         assert "deliberately uses a different hub" in err, (

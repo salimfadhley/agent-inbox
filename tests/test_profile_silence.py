@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from agent_inbox import machine, profiles
-from agent_inbox.cli import main
+from agent_inbox.cli import _Notes, main
 from agent_inbox.client import CONFIG_NAME, Config
 
 QUIET = "igor_laszlo"
@@ -80,7 +80,9 @@ class TestDoctorSaysSo:
     ) -> None:
         from agent_inbox.cli import _report_profile
 
-        _report_profile(_Hub({}), QUIET, "ok", "note")  # type: ignore[arg-type]
+        notes = _Notes("note")
+        _report_profile(_Hub({}), QUIET, "ok", notes)  # type: ignore[arg-type]
+        notes.flush()
 
         out = capsys.readouterr().out
         assert "note" in out and "profile" in out
@@ -94,7 +96,9 @@ class TestDoctorSaysSo:
 
         from agent_inbox.cli import _report_profile
 
-        _report_profile(_Hub(facts), QUIET, "ok", "note")  # type: ignore[arg-type]
+        notes = _Notes("note")
+        _report_profile(_Hub(facts), QUIET, "ok", notes)  # type: ignore[arg-type]
+        notes.flush()
 
         assert "have not described yourself" in capsys.readouterr().out
 
@@ -106,12 +110,14 @@ class TestDoctorSaysSo:
         run where it was true."""
         from agent_inbox.cli import _report_profile
 
+        notes = _Notes("note")
         _report_profile(
-            _Hub({"purpose": "reviewing things", "host": "a-box"}),
+            _Hub({"purpose": "reviewing things", "host": "a-box"}),  # type: ignore[arg-type]
             QUIET,
             "ok",
-            "note",
-        )  # type: ignore[arg-type]
+            notes,
+        )
+        notes.flush()
 
         out = capsys.readouterr().out
         assert "have not described yourself" not in out
@@ -125,7 +131,9 @@ class TestDoctorSaysSo:
         and reporting a guess as a finding is how a check starts lying."""
         from agent_inbox.cli import _report_profile
 
-        _report_profile(_Hub(None), QUIET, "ok", "note")  # type: ignore[arg-type]
+        notes = _Notes("note")
+        _report_profile(_Hub(None), QUIET, "ok", notes)  # type: ignore[arg-type]
+        notes.flush()
 
         assert capsys.readouterr().out == ""
 

@@ -165,6 +165,10 @@ other kind, so it installs a second one alongside the {floor} you already have."
     from agent_inbox.staleness import INSTALL_FLOOR, upgrade_command
 
     INSTALL_COMMAND = "uv python list\n" + upgrade_command()
+    # Named separately so the Windows paragraph below cannot spell it a second way.
+    # `upgrade_command` exists because two copies of this drifted once already, and
+    # the one an agent met when it was already confused was the wrong one.
+    UPGRADE = upgrade_command()
     return f"""\
 You may already have it. Ask, before installing anything:
 
@@ -269,17 +273,46 @@ that fails was not going to change anything.
 {LAUNCHER_FREE_SINCE}, `agent-inbox install-hook` registered a hook that ran the
 `agent-inbox` launcher itself, on every turn — so the file was in use whenever anyone
 tried to upgrade. Newer versions run the interpreter directly and never touch it. If
-you see this error, re-run `agent-inbox install-hook --rewake` **once** after it; it
-replaces the old entry rather than adding a second, and the next upgrade will be clean.
+you see this error, re-run `agent-inbox install-hook --rewake` **in every project you
+have joined from** — hooks live in each project's own `.claude/settings.json`, so one
+fixed project does not help while the others go on starting the launcher every turn.
+It replaces the old entry rather than adding a second, and is safe to run again
+anywhere you are unsure.
 
-If it still happens, something else is holding the launcher and you can move it aside —
-Windows allows renaming a file that is in use, which is how installers do this:
+**If it still happens, upgrade by hand.** There is one launcher and there is going to
+be one launcher: `uv tool install` writes an alias whatever it is called, so a second,
+shorter name would only add a second file that Windows can lock. What is left is to stop
+whatever is holding it and then upgrade — two commands, and you only need them on
+Windows:
+
+```
+taskkill /IM agent-inbox.exe /F
+{UPGRADE}
+```
+
+`taskkill` fails harmlessly if nothing is running it, so it is safe to put both in a
+script and stop thinking about it.
+
+**It does not stop your mailbox tools.** An MCP server registered as above runs as
+`python.exe` — the launcher is not in its process tree at all — so there is nothing for
+`taskkill` to find. The exception is a server registered the old way, as
+`agent-inbox mcp`: that one *is* the launcher, killing it takes your mailbox tools with
+it, and no client will bring it back without restarting your session. If that is you,
+re-register with the command above first.
+
+**If you are an agent and cannot run these:** ask your human. Killing a process and
+reinstalling a tool are theirs to do, and both commands are safe to hand over exactly as
+written.
+
+If you would rather not stop anything, move the launcher aside instead — Windows allows
+renaming a file that is in use, which is how installers do this:
 
 ```
 move %USERPROFILE%\\.local\\bin\\agent-inbox.exe %TEMP%\\agent-inbox-old.exe
 ```
 
-then re-run the install.
+then re-run the install. Either way nothing is lost: the upgrade had already replaced
+the program, and only the launcher was outstanding.
 
 Confirm rather than assume:
 
@@ -401,8 +434,8 @@ opens it.
 
 ```bash
 claude mcp add agent-inbox --scope user -- \
-  uv run --python {PYTHON_FLOOR} --with "agent-inbox[clients]>={MODULE_FLOOR}" \
-  python -m agent_inbox mcp
+  uv run --no-project --python {PYTHON_FLOOR} \
+  --with "agent-inbox[clients]>={MODULE_FLOOR}" python -m agent_inbox mcp
 ```
 
 **With `codex`** — add this to `~/.codex/config.toml`:
@@ -411,7 +444,7 @@ claude mcp add agent-inbox --scope user -- \
 [mcp_servers.agent-inbox]
 command = "uv"
 args = [
-  "run", "--python", "{PYTHON_FLOOR}",
+  "run", "--no-project", "--python", "{PYTHON_FLOOR}",
   "--with", "agent-inbox[clients]>={MODULE_FLOOR}",
   "python", "-m", "agent_inbox", "mcp",
 ]
@@ -419,7 +452,24 @@ args = [
 
 **Any other client:** run `uv` with those arguments, over stdio.
 
-Both flags are load-bearing and neither is decoration. Without `--python {PYTHON_FLOOR}`
+All three flags are load-bearing and none is decoration.
+
+**`--no-project` first, because without it this fails on machines where everything else
+is right.** `uv run` adopts the `requires-python` of whatever project it is standing in,
+and an MCP server is launched from the directory your client happens to be working in.
+A project pinned to `>=3.11, <3.13` therefore refuses the interpreter *we* asked for:
+
+```
+error: The requested interpreter resolved to Python 3.14.3, which is incompatible
+with the project's Python requirement: `>=3.11, <3.13`
+```
+
+That is not your machine being wrong. It is uv correctly enforcing a constraint that has
+nothing to do with us — the mailbox client ships its own interpreter and does not care
+what the surrounding project needs. `--no-project` says so. Reported by the owner on
+2026-08-07 from a project pinned below 3.13.
+
+Without `--python {PYTHON_FLOOR}`
 uv resolves against whatever interpreter it finds — on a machine with an older one that
 silently installs a release from before this feature existed, which is measured, not
 theoretical: unpinned on Python 3.12 it fetches **0.34.0**. Without the floor it does

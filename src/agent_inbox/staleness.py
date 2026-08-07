@@ -147,8 +147,16 @@ def upgrade_command(*, cached: bool = False) -> str:
     the problem; everything else is identical, and nothing here is optional.
     """
     cache = "" if cached else "--no-cache "
+    # **`--upgrade`, not `--force`** (owner, 2026-08-07). Measured rather than assumed:
+    # `--upgrade` replaces an installed tool exactly as `--force` does — 0.85.0 to
+    # 0.90.0 in a scratch tool dir — while skipping the package reinstall that `--force`
+    # performs even when nothing changed.
+    #
+    # It does **not** avoid the Windows entrypoint lock, and saying otherwise would be
+    # the useful-sounding lie: both write the launcher on every run. What answers that
+    # is stopping whatever holds the file, which the prompt now spells out.
     return (
-        f"uv tool install --python {interpreter_pin()} --refresh {cache}--force "
+        f"uv tool install --upgrade --python {interpreter_pin()} --refresh {cache}"
         f'"agent-inbox[clients]>={INSTALL_FLOOR}"'
     )
 

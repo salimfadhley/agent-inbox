@@ -121,17 +121,21 @@ class TestTheOldCommandNameIsGone:
         assert "agent-mailbox" not in self._scripts()
 
     def test_every_command_is_the_same_program(self) -> None:
-        """**Rewritten on 2026-08-07, when `aiai` was added** (owner) as a short name
-        for a human at a terminal.
+        """**Split in two on 2026-08-07**, and worth keeping split.
 
-        This used to assert `set(scripts) == {"agent-inbox"}`, and its message said "the
-        removed alias is back, or a new one appeared" — so it was guarding two things at
-        once and could not tell them apart. The first still matters and is asserted
-        above. The second was never the real rule: what makes an extra name harmless is
-        that it is an *alias*, not a second program that can drift.
+        This was one assertion, `set(scripts) == {"agent-inbox"}`, whose own message
+        said "the removed alias is back, or a new one appeared" — two rules in one
+        check, unable to say which had fired. `agent-mailbox` returning is now asserted
+        above, by name.
 
-        So that is what is checked. A new entry pointing somewhere else fails here, and
-        `agent-mailbox` returning fails above, which is strictly more than counting.
+        What is left here is the count *and* the entry point, because both matter and
+        for different reasons: a second name is a second launcher that Windows can lock,
+        and a script pointing somewhere other than `cli:main` would be a second program
+        free to drift from this one.
+
+        `aiai` was added under this heading and withdrawn the same day. uv writes a
+        launcher whatever it is called, so a shorter name never avoided the lock — it
+        only added another file that could be held open.
         """
         scripts = self._scripts()
 
@@ -139,9 +143,10 @@ class TestTheOldCommandNameIsGone:
         assert set(scripts.values()) == {"agent_inbox.cli:main"}, (
             f"a console script points somewhere else: {scripts}"
         )
-        assert "agent-inbox" in scripts, (
-            "the documented command must stay: removing it breaks every existing "
-            "install, hook and deployment"
+        assert set(scripts) == {"agent-inbox"}, (
+            "one command, and only one. `aiai` was added on 2026-08-07 and withdrawn "
+            "the same day: uv writes a launcher whatever it is called, so a second "
+            "name adds a second lockable file and buys nothing."
         )
 
     def test_the_import_alias_is_untouched(self) -> None:

@@ -197,7 +197,7 @@ class TestEveryInstallInstructionPinsTheInterpreter:
             ]
 
             assert lines[0].startswith("uv python list"), lines
-            assert lines[1].startswith("uv tool install --python "), lines
+            assert lines[1].startswith("uv tool install --upgrade --python "), lines
             assert f"uv python install {_python_floor()}" not in block, (
                 f"the fetch is inside the pasteable block (version={version!r})"
             )
@@ -276,7 +276,14 @@ class TestEveryInstallInstructionPinsTheInterpreter:
 
         found = extract_prompt_install(_install("0.60.1"))
 
-        assert found.command[:5] == ("uv", "tool", "install", "--python", "3.14")
+        assert found.command[:6] == (
+            "uv",
+            "tool",
+            "install",
+            "--upgrade",
+            "--python",
+            "3.14",
+        )
 
 
 class TestTheVersionFloorIsCalibratedNotChosen:
@@ -355,8 +362,15 @@ class TestOneInstallCommandForEverySurface:
     def test_the_command_carries_every_flag_that_matters(self) -> None:
         """Each of these was added because its absence cost somebody real work: the pin
         (uv will not move a tool between interpreters), the floor (an old interpreter
-        resolves to a pre-3.14 release), `--force` (a plain install is a no-op when the
-        tool exists) and `--refresh` (a cached index predates the release you need)."""
+        resolves to a pre-3.14 release), `--upgrade` (a plain install is a no-op when
+        the tool exists) and `--refresh` (a cached index predates the release you need).
+
+        `--upgrade` replaced `--force` on 2026-08-07, measured rather than assumed: it
+        replaces an installed tool exactly as `--force` does — 0.85.0 to 0.90.0 in a
+        scratch tool dir — while skipping the package reinstall `--force` performs even
+        when nothing has changed. It does **not** avoid the Windows entrypoint lock;
+        both write the launcher every run, and the prompt says so rather than implying
+        a flag fixed it."""
         from agent_inbox.staleness import (
             INSTALL_FLOOR,
             interpreter_pin,
@@ -367,5 +381,5 @@ class TestOneInstallCommandForEverySurface:
 
         assert f"--python {interpreter_pin()}" in command
         assert f">={INSTALL_FLOOR}" in command
-        assert "--force" in command
+        assert "--upgrade" in command
         assert "--refresh" in command

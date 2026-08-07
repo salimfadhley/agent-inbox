@@ -37,13 +37,44 @@ def test_release_artifact_check_pins_the_exact_release_version() -> None:
     )
 
 
-def test_prompt_install_extraction_rejects_missing_or_duplicate_floors() -> None:
-    with pytest.raises(ReleaseGateError, match="expected exactly one"):
+def test_prompt_install_extraction_rejects_a_prompt_that_advertises_none() -> None:
+    with pytest.raises(ReleaseGateError, match="advertises no install command"):
         extract_prompt_install("uv tool install agent-inbox")
 
-    line = 'uv tool install --refresh --no-cache --force "agent-inbox[clients]>=1.2.3"'
-    with pytest.raises(ReleaseGateError, match="expected exactly one"):
-        extract_prompt_install(f"{line}\n{line}")
+
+def test_the_same_command_twice_is_fine() -> None:
+    """Changed on 2026-08-07, when the prompt grew a second legitimate place to show
+    it: the Windows recovery path, where somebody who has just killed a process needs
+    to be told what to run rather than sent back up the page.
+
+    One *command* was always the rule; one *occurrence* was how it happened to be
+    spelled. Every copy renders from `staleness.upgrade_command`, so identical
+    repetitions are guaranteed rather than hoped for."""
+    line = (
+        "uv tool install --upgrade --python 3.14 --refresh --no-cache "
+        '"agent-inbox[clients]>=1.2.3"'
+    )
+
+    found = extract_prompt_install(f"{line}\nblah blah\n{line}")
+
+    assert found.version == "1.2.3"
+
+
+def test_two_different_commands_are_still_refused() -> None:
+    """The drift this gate exists for: `doctor` once gave the unpinned form while the
+    prompt gave the pinned one, so the advice an agent met when it was already confused
+    was the wrong one."""
+    pinned = (
+        "uv tool install --upgrade --python 3.14 --refresh --no-cache "
+        '"agent-inbox[clients]>=1.2.3"'
+    )
+    other = (
+        "uv tool install --upgrade --python 3.13 --refresh --no-cache "
+        '"agent-inbox[clients]>=1.2.3"'
+    )
+
+    with pytest.raises(ReleaseGateError, match="different install commands"):
+        extract_prompt_install(f"{pinned}\n{other}")
 
 
 def test_resolver_uses_the_same_clean_install_command_the_prompt_advertises() -> None:
@@ -68,9 +99,9 @@ def test_resolver_uses_the_same_clean_install_command_the_prompt_advertises() ->
                 "uv",
                 "tool",
                 "install",
+                "--upgrade",
                 "--refresh",
                 "--no-cache",
-                "--force",
                 "agent-inbox[clients]>=1.2.3",
             ],
             42.0,
@@ -106,8 +137,8 @@ def test_resolver_blocks_prompt_deploy_when_index_has_not_caught_up() -> None:
     problem = str(got.value)
     assert "agent-inbox[clients]>=9.9.9" in problem
     assert (
-        "uv tool install --refresh --no-cache --force 'agent-inbox[clients]>=9.9.9'"
-        in problem
+        "uv tool install --upgrade --refresh --no-cache "
+        "'agent-inbox[clients]>=9.9.9'" in problem
     )
     assert "agent-inbox 9.9.9 was not found" in problem
     assert len(commands) == 3
