@@ -95,8 +95,26 @@ class TestTheWindowsUpgradeWarning:
         assert "os error 32" in text
         assert "used by another process" in text
 
-    def test_it_says_the_upgrade_worked(self) -> None:
-        assert "the upgrade worked" in self._text().lower()
+    def test_it_no_longer_claims_the_upgrade_worked(self) -> None:
+        """**Reversed on 2026-08-07** (owner): *"If we see this error, we don't really
+        know."*
+
+        This asserted that the prompt says the upgrade worked, which was the whole
+        reassurance #26 asked for — and it was an inference, not a fact. The error
+        reports that the *launcher* could not be replaced; whether the package was
+        replaced is a separate line of uv's output that a reader has to go and find.
+        Usually it had been. Usually is not a rule.
+
+        What replaces it is cheaper than the inference it removes: stop the launcher and
+        run the install again, which is deterministic and costs nothing when the upgrade
+        had in fact succeeded. #26's real complaint — that nothing said what to do —
+        is still answered, and now without asking anybody to believe a guess.
+        """
+        text = self._text()
+
+        assert "the upgrade worked" not in text.lower()
+        assert "does not tell you whether the upgrade itself worked" in text
+        assert "taskkill /IM agent-inbox.exe" in text
 
     def test_it_gives_a_way_to_confirm_rather_than_assume(self) -> None:
         """A reassurance with no check is just a different thing to doubt."""

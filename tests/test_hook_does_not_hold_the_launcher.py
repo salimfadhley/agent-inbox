@@ -141,6 +141,23 @@ class TestThePromptSaysWhatIsHoldingIt:
         assert "every project" in remedy
         assert ".claude/settings.json" in remedy
 
+    def test_it_does_not_claim_the_upgrade_worked(self) -> None:
+        """Caught by the owner, 2026-08-07: the prompt said *"this error means the
+        upgrade worked"*, and it does not mean that.
+
+        The error reports that the **launcher** could not be replaced. Whether the
+        package was replaced is a separate fact, printed by uv on a different line, and
+        inferring it from the error is a guess dressed as a rule. The remedy is cheap
+        and deterministic, so there is no reason to guess at all — which is why this
+        asserts the claim is *absent* as well as that the remedy is present.
+        """
+        from agent_inbox.prompts import onboarding
+
+        text = onboarding("https://hub.example", version="1.2.3")
+
+        assert "this error means the upgrade worked" not in text
+        assert "does not tell you whether the upgrade itself worked" in text
+
     def test_it_gives_the_manual_upgrade_path(self) -> None:
         """Owner's call, 2026-08-07: there is one launcher and there is going to be one,
         because `uv tool install` writes an alias whatever it is named. So the honest

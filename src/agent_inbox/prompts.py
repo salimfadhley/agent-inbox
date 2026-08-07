@@ -251,7 +251,7 @@ asked for against what he got.
 conclude your mail is broken.** Run `agent-inbox doctor` (step 2) and believe it — it is
 what actually knows.
 
-**On Windows, this error means the upgrade worked:**
+**On Windows, this error means the launcher could not be replaced:**
 
 ```
 error: Failed to install entrypoint
@@ -261,13 +261,29 @@ error: Failed to install entrypoint
   being used by another process. (os error 32)
 ```
 
-It exits non-zero, which reads like failure. It is not. Windows will not let anything
-overwrite a running `.exe`. `uv` updated the tool's environment — the actual program —
-and could only not replace the small launcher that starts it. **That launcher runs
-whatever is in the environment**, so it starts the new version regardless of its own
-age. It also never really changes between releases: it is a generic stub holding an
-interpreter path and an entry point, identical from one version to the next, so the copy
-that fails was not going to change anything.
+Windows will not let anything overwrite a running `.exe`, and the launcher was running.
+
+**It does not tell you whether the upgrade itself worked, and neither does anything
+else in that message.** Usually the package *was* replaced and only the copy of the
+launcher failed — uv prints `- agent-inbox==<old>` and `+ agent-inbox==<new>` above the
+error when that is what happened. But that is a second fact you have to go and read, and
+"this error means it worked" is a guess dressed as a rule. Do not run on it.
+
+**Stop the launcher and run it again.** Two commands, deterministic, and you are done
+wondering:
+
+```
+taskkill /IM agent-inbox.exe /F
+{UPGRADE}
+```
+
+`taskkill` fails harmlessly when nothing is running it. Nothing is lost by doing this
+even if the upgrade had in fact succeeded — the second command is the same one you
+already ran.
+
+The launcher itself never really changes between releases: it is a generic stub holding
+an interpreter path and an entry point, identical from one version to the next. So the
+copy that failed was not going to change anything, and replacing it costs nothing.
 
 **What is usually holding it is a wake hook, not another session.** Before
 {LAUNCHER_FREE_SINCE}, `agent-inbox install-hook` registered a hook that ran the
@@ -279,19 +295,10 @@ fixed project does not help while the others go on starting the launcher every t
 It replaces the old entry rather than adding a second, and is safe to run again
 anywhere you are unsure.
 
-**If it still happens, upgrade by hand.** There is one launcher and there is going to
-be one launcher: `uv tool install` writes an alias whatever it is called, so a second,
-shorter name would only add a second file that Windows can lock. What is left is to stop
-whatever is holding it and then upgrade — two commands, and you only need them on
-Windows:
-
-```
-taskkill /IM agent-inbox.exe /F
-{UPGRADE}
-```
-
-`taskkill` fails harmlessly if nothing is running it, so it is safe to put both in a
-script and stop thinking about it.
+**There is one launcher and there is going to be one.** `uv tool install` writes an
+alias whatever it is called, so a second, shorter name would only add a second file that
+Windows can lock. Stopping the process is the answer, which is why it is the first thing
+above rather than a fallback.
 
 **It does not stop your mailbox tools.** An MCP server registered as above runs as
 `python.exe` — the launcher is not in its process tree at all — so there is nothing for
@@ -311,8 +318,7 @@ renaming a file that is in use, which is how installers do this:
 move %USERPROFILE%\\.local\\bin\\agent-inbox.exe %TEMP%\\agent-inbox-old.exe
 ```
 
-then re-run the install. Either way nothing is lost: the upgrade had already replaced
-the program, and only the launcher was outstanding.
+then re-run the install.
 
 Confirm rather than assume:
 
@@ -322,10 +328,14 @@ agent-inbox --version
 
 If it prints the version you asked for, you are done, and there is nothing to clean up.
 
-**Do not run the install repeatedly trying to clear it.** `uv` can record the upgrade as
-done while the copy failed, after which it answers `Nothing to upgrade` — so a real
-upgrade later may be skipped. If `--version` ever disagrees with what you installed,
-that is the case to report, and it is the only version of this worth worrying about.
+**Do not simply run the install again without stopping the process first.** It will
+fail the same way for the same reason, and there is a worse outcome than that: `uv` can
+record the upgrade as done while the copy failed, after which `uv tool upgrade` answers
+`Nothing to upgrade` — so a real upgrade later may be skipped. Stopping the launcher is
+what makes the retry mean something.
+
+If `--version` ever disagrees with what you installed, that is the case to report, and
+it is the only version of this worth worrying about.
 
 This hub is running **{version}**, which is newer than the floor above and does not need
 to match yours. You need {MINIMUM_CLIENT} or later to read your mail correctly — that is
