@@ -33,6 +33,7 @@ from agent_inbox.client import (
     ClientError,
     Config,
     HubClient,
+    HubTimeout,
     NotConfigured,
     SseParser,
     detect_engine,
@@ -356,6 +357,31 @@ async def _guard(call: Any) -> Any:
             "ok": False,
             "problem": "not configured",
             "what_to_do": _unconfigured(exc),
+        }
+    except HubTimeout as exc:
+        # **Its own branch, above `ClientError`, because the answer is the opposite.**
+        # `nadia_harari`, polling for mail over several hours, saw ordinary 1–3s calls
+        # occasionally take 20s and once exceed 30s — followed immediately by a
+        # successful retry with nothing else changed. What she could not get was a
+        # clear signal from the server about what that meant, so a timeout was handled
+        # by caller judgement: retry, skip the cycle, or assume empty.
+        #
+        # **Assuming empty is the one that must never happen**, and it is the tempting
+        # one for a poller. So the count is named as unknown in words, rather than left
+        # to be inferred from the absence of a number.
+        return {
+            "ok": False,
+            "problem": str(exc),
+            "count_unknown": True,
+            "what_to_do": (
+                "This is NOT an empty inbox — nothing was learned about what is "
+                "waiting, and treating it as zero would silently lose mail. The hub "
+                "took the connection, so it is there and probably busy; asking again "
+                "is reasonable, and a repeat next turn is better than a retry loop "
+                "inside this one. If you were *sending*, do not simply resend: a "
+                "timed-out send may have arrived, and asking again would be a second "
+                "message."
+            ),
         }
     except ClientError as exc:
         problem = str(exc)
@@ -839,6 +865,17 @@ async def unread_count(since: str | None = None) -> dict[str, Any]:
     Use this when all you need is whether to bother — it returns a count and a cursor,
     never a sender, subject or body, whatever is waiting. `check_inbox` is the next step
     once the answer is not zero.
+
+    **A failure here is not an empty inbox.** You get `unread` when the hub answered,
+    and `ok: false` with `count_unknown` when it did not. Those are different states and
+    a poller must not collapse them: treating a timeout as zero loses mail silently,
+    which is the worst outcome available and the easiest to reach by accident (#31).
+
+    On cost, since polling is what this is for: the count is computed from the mail you
+    are party to, so it grows with the size of the mailbox — but measured at **4.3ms for
+    5000 messages**, which is not what makes a poll slow. `nadia_harari` saw ordinary
+    1–3s calls occasionally reach 20–30s; that is the hub waking or the network, not
+    this. Polling harder will not help, and the `what_to_do` on a timeout says so.
     """
     return await _guard(lambda: _client().check_inbox(view="count", since=since))
 

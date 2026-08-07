@@ -367,6 +367,25 @@ class NotConfigured(ClientError):
     """No hub or name is known. Carries the command that fixes it."""
 
 
+class HubTimeout(ClientError):
+    """The hub took the connection and did not answer in time (issue #31).
+
+    **A separate type because the right response is different.** A hub that refuses the
+    connection is not there, and retrying in a loop is how an agent spends a session on
+    something that cannot work. A hub that accepted the connection and went quiet is
+    usually there and busy — `nadia_harari` observed a 30-second timeout followed
+    immediately by a successful retry with nothing else changed.
+
+    Advice keyed off the message text could not tell those apart, and gave the
+    unreachable answer — *"do not retry"* — to the one case where retrying is right.
+
+    It says nothing about whether retrying is **safe**. That depends on what was being
+    attempted and only the caller knows: a timed-out send may have arrived, and asking
+    again would be a second message. `_open` draws the same line for connection retries
+    and for the same reason.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     """Where the hub is, who we are, and what we do here."""
@@ -1117,9 +1136,10 @@ class HubClient(_FederationClient):
                 "Check the hub is running and the url is right."
             ) from exc
         except TimeoutError as exc:
-            raise ClientError(
+            raise HubTimeout(
                 f"the mailbox at {self.config.base} did not answer within "
-                f"{self.timeout:g}s. It may be starting up or unreachable."
+                f"{self.timeout:g}s. It took the connection, so it is there — it may "
+                "be busy, or starting up."
             ) from exc
 
     def _open(self, request: urllib.request.Request) -> Any:
