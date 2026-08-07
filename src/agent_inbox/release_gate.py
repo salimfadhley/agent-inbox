@@ -33,7 +33,16 @@ PROMPT_URL = f"{PROMPT_HUB_URL}/prompts/agent"
 PACKAGE_REQUIREMENT = "agent-inbox[clients]"
 CHECK_PROMPT_FLOOR = "prompt-floor"
 CHECK_RELEASE_ARTIFACT = "release-artifact"
+CHECK_DEPLOY_IMAGE = "deploy-image"
 DEFAULT_CHECKS = (CHECK_PROMPT_FLOOR, CHECK_RELEASE_ARTIFACT)
+#: Every check this module can run. `deploy-image` is not a default: it needs an
+#: image reference, which is deployment-specific and therefore never hard-coded here.
+ALL_CHECKS = (*DEFAULT_CHECKS, CHECK_DEPLOY_IMAGE)
+
+#: Where to ask whether a registry is serving a tag. Formatted with the repository
+#: and the tag; the host is a parameter of the format string rather than of this
+#: module, so pointing it at another registry is a caller's decision.
+TAG_URL = "https://hub.docker.com/v2/repositories/{repository}/tags/{tag}"
 
 PROMPT_INSTALL_RE = re.compile(
     r"uv tool install --python (?P<python>[0-9.]+) --refresh --no-cache --force "
@@ -151,6 +160,73 @@ def verify_hub_version(hub_url: str, version: str, *, timeout: float) -> None:
         )
 
 
+def verify_deploy_image(
+    repository: str,
+    version: str,
+    *,
+    timeout: float,
+    attempts: int = 10,
+    delay: float = 15.0,
+    sleep: Sleeper = time.sleep,
+    fetch: Callable[[str, float], int] | None = None,
+) -> None:
+    """Fail unless the registry a deploy pulls from is actually serving this release.
+
+    **The mismatch this closes is "optional to publish, required to deploy"** (#39).
+    The image workflow treats one registry as a bonus — missing credentials skip the
+    push rather than failing it — while `docker-compose.yml` pulls from exactly that
+    registry. So a release could pass every gate, report success, and leave every deploy
+    pulling a stale image, with nothing red at any point.
+
+    That is the same shape as the deploy check that reported success over a hub five
+    releases behind, and the same shape as the console it did not look at. The lesson
+    each time is the one applied here: **a step that cannot run must fail, not pass.**
+
+    Retried, because a push is not instantly visible: the registry accepts a manifest
+    and takes a moment to serve it, and a gate that failed on that would be a flake
+    teaching everyone to re-run gates until they go green.
+    """
+    ask = fetch or _tag_status
+    url = TAG_URL.format(repository=repository, tag=version)
+    status = 0
+    for attempt in range(1, attempts + 1):
+        status = ask(url, timeout)
+        if status == 200:
+            LOGGER.info("registry serves %s:%s", repository, version)
+            return
+        LOGGER.info(
+            "registry does not yet serve %s:%s (HTTP %s), attempt %d/%d",
+            repository,
+            version,
+            status,
+            attempt,
+            attempts,
+        )
+        if attempt < attempts:
+            sleep(delay)
+    raise ReleaseGateError(
+        f"{repository}:{version} is not being served (last HTTP {status}). "
+        "A deploy pulling this tag would silently get an older image."
+    )
+
+
+def _tag_status(url: str, timeout: float) -> int:
+    """The registry's answer for one tag, as a status code.
+
+    A network failure is reported as ``0`` rather than raised, so it is retried like any
+    other not-yet: the caller is in the middle of a release and a transient DNS blip is
+    not a reason to declare the image missing.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as refused:
+        return int(refused.code)
+    except (urllib.error.URLError, TimeoutError, OSError) as unreachable:
+        LOGGER.info("could not reach the registry: %s", unreachable)
+        return 0
+
+
 def run_command(
     command: Sequence[str],
     timeout: float,
@@ -233,11 +309,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--check",
-        choices=DEFAULT_CHECKS,
+        choices=ALL_CHECKS,
         action="append",
         help=(
             "check to run; pass more than once. Defaults to prompt-floor and "
             "release-artifact."
+        ),
+    )
+    parser.add_argument(
+        "--image",
+        help=(
+            "image repository a deploy pulls, e.g. <account>/<image>. Required by the "
+            "deploy-image check, and never defaulted: which registry a deployment "
+            "pulls from is not this module's to assume."
         ),
     )
     parser.add_argument(
@@ -301,6 +385,22 @@ def main(
                     timeout=args.timeout,
                     sleep=sleep,
                 )
+
+        if CHECK_DEPLOY_IMAGE in checks:
+            if not args.image:
+                # Refused rather than defaulted. A gate that guessed which registry a
+                # deployment pulls from would pass by checking the wrong one, which is
+                # precisely the failure this check exists to end.
+                raise ReleaseGateError(
+                    "--image is required by the deploy-image check: name the "
+                    "repository a deploy actually pulls, e.g. <account>/<image>"
+                )
+            verify_deploy_image(
+                args.image,
+                args.version,
+                timeout=args.timeout,
+                sleep=sleep,
+            )
 
         if CHECK_RELEASE_ARTIFACT in checks:
             artifact_install = release_artifact_install_for_version(args.version)

@@ -17,11 +17,18 @@ name: Docker image
 #
 # Publishes to Docker Hub (docker.io/<user>/agent-inbox) and, for free, to GHCR
 # (ghcr.io/<owner>/agent-inbox). Docker Hub needs two repo secrets (Settings ->
-# Secrets and variables -> Actions); without them the Docker Hub push is skipped, not
-# failed, and only GHCR is written:
+# Secrets and variables -> Actions):
 #   DOCKERHUB_USERNAME  the Docker Hub account/namespace
 #   DOCKERHUB_TOKEN     a Read/Write access token (hub.docker.com -> Account Settings
 #                       -> Security -> New Access Token)
+#
+# **On a release tag those secrets are required, not optional** (issue #39). Without
+# them the push used to be *skipped rather than failed*, while docker-compose.yml pulls
+# from Docker Hub — so a release could pass every gate, report success, and leave every
+# deploy pulling a stale image, with nothing red at any point. The mismatch between
+# "optional to publish" and "required to deploy" was the bug, not which registry wins.
+#
+# On a plain main build the skip is still fine: nothing deploys :edge.
 
 on:
   # Build only what has passed CI. The CI workflow runs on the same pushes; this waits
@@ -85,6 +92,17 @@ jobs:
           --check prompt-floor
           --version "${{ steps.version.outputs.pep440 }}"
 
+      - name: Docker Hub is required for a release
+        if: steps.kind.outputs.release == 'true' && env.HAS_DOCKERHUB != 'true'
+        # Fails the release rather than quietly publishing to GHCR alone. A deploy
+        # pulls Docker Hub; a release that cannot write there has not released.
+        run: |
+          echo "::error::This is a release tag, and the Docker Hub credentials are" \
+               "missing. docker-compose.yml pulls from Docker Hub, so publishing to" \
+               "GHCR alone would leave every deploy on the previous image while this" \
+               "workflow reported success. Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN."
+          exit 1
+
       - name: Resolve target registries
         id: reg
         # GHCR always; Docker Hub only when its secrets are configured.
@@ -141,3 +159,14 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Prove the registry a deploy pulls is serving this release
+        if: steps.kind.outputs.release == 'true'
+        # The push reporting success is not the same as the tag being servable, and
+        # this project has been caught by that distinction more than once. Retried
+        # inside the gate, because a manifest takes a moment to become visible.
+        run: >-
+          uv run python -m agent_inbox.release_gate
+          --check deploy-image
+          --image "${{ secrets.DOCKERHUB_USERNAME }}/agent-inbox"
+          --version "${{ steps.version.outputs.docker }}"
