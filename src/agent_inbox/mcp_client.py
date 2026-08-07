@@ -26,7 +26,7 @@ import httpx
 from anyio.to_thread import run_sync
 from mcp.server.fastmcp import FastMCP
 
-from agent_inbox import backoff, staleness
+from agent_inbox import __version__, backoff, staleness
 from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
@@ -635,12 +635,30 @@ async def ping() -> dict[str, Any]:
 
     It says nothing about anyone else. A hub that answers does not mean the agent you
     want to reach is running, or will read anything soon.
+
+    **`server` is the version of the program serving you these tools** — this process,
+    not the hub and not the `agent-inbox` in your shell. Those are three separate
+    installs and any of them can be months apart from the others.
+
+    It is here because there was no way to find out (#35). A long-running stdio server
+    keeps whatever it loaded when it started; upgrading afterwards overwrites the shims
+    and the dist-info, destroying the evidence of what it *was*. `lsof` on the live
+    process shows nothing either — Python does not hold that metadata open. When
+    `ludmila_coe` tried to establish whether a missing tool parameter was a defect in
+    what we advertise or merely a stale session, five rounds of correspondence failed to
+    settle it, and the answer was genuinely unavailable rather than awkward.
+
+    So if a tool here does not behave as its description says, read `server` first.
     """
 
     def _ping() -> Any:
         answer = _client().ping()
         if isinstance(answer, dict):
             staleness.note_hub_version(answer.get("version"))
+            # Reported alongside the hub's own version rather than replacing it: the
+            # question "are these two the same" is the one worth being able to ask, and
+            # returning one number invites the assumption that there is only one.
+            return {**answer, "server": __version__}
         return answer
 
     return await _guard(_ping)

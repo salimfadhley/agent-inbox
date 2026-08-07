@@ -276,9 +276,53 @@ def cli(ctx: click.Context, engine: str | None) -> None:
     "client for its workspace roots, and falls back to its working directory. Use it "
     "when a client offers neither.",
 )
-def mcp(project: str | None) -> int:
-    """Run as an MCP server over stdio (for an agent)."""
+@click.option(
+    "--describe",
+    is_flag=True,
+    help="Print the tool schema this build advertises, as JSON, and exit.",
+)
+def mcp(project: str | None, describe: bool) -> int:
+    """Run as an MCP server over stdio (for an agent).
+
+    `--describe` prints what this build advertises instead of serving, so that
+    "what my session shows" can be compared against "what a fresh server offers"
+    (#35). That comparison previously meant hand-rolling JSON-RPC framing over stdio;
+    `ludmila_coe` attempted exactly that, it did not return, and a simple question went
+    five rounds without an answer.
+
+    It is the *fresh* half of the comparison and cannot be anything else — a running
+    stdio server serves whatever it loaded, and nothing can interrogate it from outside.
+    The other half comes from `ping`, which now reports the serving version.
+    """
     from agent_inbox.mcp_client import main as run_mcp
+
+    if describe:
+        import asyncio
+
+        from agent_inbox.mcp_client import mcp as server
+
+        tools = asyncio.run(server.list_tools())
+        click.echo(
+            json.dumps(
+                {
+                    "version": __version__,
+                    "tools": [
+                        {
+                            "name": tool.name,
+                            # Every parameter this build offers, named. A parameter that
+                            # exists but is not advertised is a feature no agent can
+                            # discover, and until this there was no way to notice.
+                            "parameters": sorted(
+                                (tool.inputSchema or {}).get("properties", {})
+                            ),
+                        }
+                        for tool in sorted(tools, key=lambda t: t.name)
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0
 
     run_mcp(Path(project).expanduser() if project else None)
     return 0
@@ -1437,7 +1481,28 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     # Printed together rather than a line each, because the interesting thing about
     # either number is the other one. A fact, not a warning: no advice attached, and the
     # notice below still owns saying whether the difference matters.
-    click.echo(f"{ok} versions        client {__version__}, hub {info.get('version')}")
+    #
+    # **Three installs, and this command can only see two of them** (#60). `client` is
+    # the CLI in this shell. An agent's tools are served by a *separate* process — the
+    # prompt registers it as `uv run --with "agent-inbox[clients]>=…" python -m
+    # agent_inbox mcp`, where `--with` resolves to latest at every launch while the CLI
+    # changes only when somebody upgrades it. They routinely differ, and a long-running
+    # stdio server keeps whatever it loaded regardless of both.
+    #
+    # There is no honest way to read that version from here — another process, possibly
+    # another install, and nothing it holds open names its version. So the line says as
+    # much, in a clause rather than a finding of its own. **Two numbers with nothing
+    # beside them read as exhaustive**, and that is how somebody concludes their upgrade
+    # took while the process actually serving them is months behind.
+    #
+    # A clause and not a `--` line, deliberately: `--` means something outstanding that
+    # the reader can go and do, and this is permanently true. An amber marker nobody can
+    # ever clear is furniture, and the interpreter line two calls down exists precisely
+    # because that lesson was learned once already.
+    click.echo(
+        f"{ok} versions        client {__version__}, hub {info.get('version')}"
+        " — the MCP server is a third install; ask it with `ping`"
+    )
     # **Which Python this client runs on, and where it came from.** Asked for by the
     # owner after `igor_laszlo` found that `uv python install` counts only uv-managed
     # interpreters: a 3.14 from scoop or Homebrew satisfies `--python 3.14` while being
