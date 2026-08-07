@@ -857,8 +857,19 @@ def build_console(client: HubClient) -> Litestar:
         orchestrator restart the console over an outage it cannot fix, and hide the
         real fault behind the wrong red light. The pages already report an unreachable
         hub, which is where that belongs.
+
+        **It reports its own version, and that is the point** (issue #59). A deploy
+        updates two apps and only ever proved one: `verify-deployment` fetched the
+        prompt *from* the console to check a caution, and never asked what the console
+        was running. So a console five releases behind passed every check while the
+        summary line said "all 1 target(s) proved themselves" — success reported for
+        work not verified, which is this project's worst failure shape, sitting inside
+        the tool that exists to prevent it.
+
+        Unauthenticated, deliberately: a deploy check runs before anybody signs in, and
+        a version is not a secret — the hub publishes its own in `GET /`.
         """
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     # -- observing (no caller; consumes nothing) ---------------------------
 

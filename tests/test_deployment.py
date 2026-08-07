@@ -179,3 +179,105 @@ class TestSeveralTargets:
             assert not ok
             assert len(reports) == 2
             assert reports[1].ok, "the good one was still checked and still passed"
+
+
+class TestAStaleConsoleIsCaught:
+    """Issue #59: the deploy proved the hub and took the console on faith.
+
+    A deploy updates two apps. This checked one — it fetched the prompt *from* the
+    console to compare a caution, which a console five releases behind answers perfectly
+    well. So it passed, and the summary said *"all 1 target(s) proved themselves"*.
+
+    **A verifier reporting success for something it never examined is this project's
+    worst failure shape, and it was sitting inside the tool built to catch it.** It cost
+    real confusion: on 2026-08-05 a deploy was reported green while the console's own
+    version was never established.
+    """
+
+    HUB = "https://hub.example"
+    PROMPT = "https://console.example/prompts/agent"
+
+    @staticmethod
+    def _hub_body(version: str) -> bytes:
+        import json
+
+        return json.dumps(
+            {"version": version, "authenticated": True, "id": "https://hub.example"}
+        ).encode()
+
+    def _answers(
+        self, hub_version: str, console_version: str | None, prompt: str
+    ) -> object:
+        """A fetcher standing in for both apps, so the two versions can disagree."""
+        import json
+
+        def get(url: str, timeout: int = 0) -> tuple[int, bytes]:
+            if url.endswith("/health"):
+                body: dict[str, object] = {"status": "ok"}
+                if console_version is not None:
+                    body["version"] = console_version
+                return 200, json.dumps(body).encode()
+            if "/prompts/" in url:
+                return 200, prompt.encode()
+            return 200, self._hub_body(hub_version)
+
+        return get
+
+    def test_a_console_behind_the_hub_fails_the_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bug, stated as a test. Both apps were deployed; only one moved."""
+        from agent_inbox import deployment
+
+        monkeypatch.setattr(
+            deployment, "_get", self._answers("1.2.3", "1.0.0", AUTHENTICATED_OPENER)
+        )
+
+        report = deployment.verify(self.HUB, "1.2.3", self.PROMPT)
+
+        assert not report.ok, "a console five releases behind passed the deploy check"
+        assert any("console" in c.name for c in report.checks)
+
+    def test_both_current_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The paired positive. A check that failed whenever a console was mentioned
+        would satisfy the test above and block every deploy."""
+        from agent_inbox import deployment
+
+        monkeypatch.setattr(
+            deployment, "_get", self._answers("1.2.3", "1.2.3", AUTHENTICATED_OPENER)
+        )
+
+        report = deployment.verify(self.HUB, "1.2.3", self.PROMPT)
+
+        assert report.ok, [str(c) for c in report.checks]
+
+    def test_a_console_too_old_to_say_is_a_failure_not_a_skip(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The case that would recreate the bug in a new place. A console predating this
+        field is exactly the console the check exists to find, and treating its silence
+        as a pass would be the same mistake wearing different clothes."""
+        from agent_inbox import deployment
+
+        monkeypatch.setattr(
+            deployment, "_get", self._answers("1.2.3", None, AUTHENTICATED_OPENER)
+        )
+
+        report = deployment.verify(self.HUB, "1.2.3", self.PROMPT)
+
+        assert not report.ok
+        assert any("console reports a version" in c.name for c in report.checks)
+
+    def test_the_hub_alone_is_still_checkable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No prompt url means no console — a hub-only deployment must not be failed for
+        lacking a console it does not have."""
+        from agent_inbox import deployment
+
+        monkeypatch.setattr(deployment, "_get", self._answers("1.2.3", None, ""))
+
+        report = deployment.verify(self.HUB, "1.2.3", "")
+
+        assert report.ok
+        assert not any("console" in c.name for c in report.checks)

@@ -1170,7 +1170,13 @@ def verify_deployment(
         for check in report.checks:
             click.echo(str(check))
     if ok:
-        click.echo(f"\nall {len(reports)} target(s) proved themselves")
+        # **Count the checks, not the targets** (issue #59). "all 1 target(s) proved
+        # themselves" was true and useless: it counted hubs asked, not things proved,
+        # so it read identically whether four invariants had been examined or one. A
+        # summary that cannot distinguish a thorough pass from a shallow one is the
+        # same failure the checks below it exist to prevent.
+        proved = sum(len(r.checks) for r in reports)
+        click.echo(f"\n{proved} check(s) passed across {len(reports)} target(s)")
         return 0
     failed = [r.target for r in reports if not r.ok]
     _err(f"{len(failed)} of {len(reports)} target(s) did not: " + ", ".join(failed))

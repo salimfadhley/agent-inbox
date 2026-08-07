@@ -563,9 +563,23 @@ def test_the_console_reports_its_own_health_without_asking_the_hub(
         def hub_info(self) -> dict[str, Any]:
             raise ClientError("hub is down")
 
+    # **Actually built with a dead hub.** `DeadHub` was defined here and never used —
+    # the assertion ran against the ordinary fixture, so the one claim in the docstring
+    # was the one thing untested. Found on 2026-08-07 while adding the version field.
+    with_dead_hub, _ = make(DeadHub())
+    with with_dead_hub as c:
+        down = c.get("/health")
+
+    assert down.status_code == 200, "the console died with the hub"
+    assert down.json()["status"] == "ok"
+
     got = console.get("/health")
     assert got.status_code == 200
-    assert got.json() == {"status": "ok"}
+    assert got.json()["status"] == "ok"
+    # The version is what makes a deploy check able to tell a stale console from a
+    # current one (issue #59). Asserted as present rather than equal to a literal, so
+    # this does not need editing every release.
+    assert got.json()["version"], "the console does not say what it is running"
 
     client, stub = make(DeadHub())
     with client as c:

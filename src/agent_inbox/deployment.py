@@ -167,6 +167,53 @@ def verify(
             detail="the prompt contradicts the hub's own descriptor",
         )
 
+        # **And what version served that prompt** (issue #59).
+        #
+        # A deploy updates two apps. Until now this proved one: it fetched the prompt
+        # *from* the console and checked a caution, which a console five releases behind
+        # answers perfectly well — so it passed, and the summary said "all 1 target(s)
+        # proved themselves". A verifier reporting success for something it never
+        # examined is the failure this project names as its worst, sitting inside the
+        # tool built to catch it.
+        #
+        # Asked of the console's own `/health` rather than inferred from the prompt: the
+        # prompt is generated from the hub's descriptor, so its content says almost
+        # nothing about the code rendering it.
+        console_root = prompt_url.split("/prompts", 1)[0]
+        try:
+            health_status, health_body = _get(console_root.rstrip("/") + "/health")
+        except ConnectionError as unreachable:
+            report.add("console reachable", False, detail=str(unreachable))
+            return report
+        if health_status != 200:
+            report.add("console reachable", False, detail=f"HTTP {health_status}")
+            return report
+
+        try:
+            health = json.loads(health_body or b"{}")
+        except ValueError:
+            health = {}
+        console_version = str(health.get("version", ""))
+
+        if not console_version:
+            # **Named, not silently skipped.** A console too old to report its version
+            # is exactly the console this check exists to find, and treating silence as
+            # a pass would recreate the bug in a new place.
+            report.add(
+                "console reports a version",
+                False,
+                detail="no version in /health — the console predates this check, "
+                "which is itself the thing worth knowing",
+            )
+        elif expect_version:
+            report.add(
+                f"console running {expect_version}",
+                console_version == expect_version,
+                detail=f"found {console_version}",
+            )
+        else:
+            report.add("console reports a version", True, console_version)
+
     return report
 
 
