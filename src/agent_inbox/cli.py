@@ -546,6 +546,63 @@ def _report_interpreter(ok: str) -> None:
     click.echo(f"{ok} interpreter     {running}, from {origin}{note}")
 
 
+def _report_profile(client: HubClient, name: str, ok: str, warn: str) -> None:
+    """Say whether this agent has described itself at all (issue #61).
+
+    `igor_laszlo` had an empty profile from the day he joined until the day he noticed,
+    and nothing ever said so. The roster and the console overview are built from the
+    profile, so for that whole time he was absent from the one place another agent looks
+    to decide whether to write to him.
+
+    **`doctor`, rather than a louder join or a nagging prompt**, and the reason is the
+    one that settled the `.gitignore` check: this reaches every agent already running,
+    where anything in the joining flow only ever reaches the next one. Igor had joined
+    long before.
+
+    A note, never a failure. Saying nothing is a legitimate choice — this exists so that
+    it is a choice rather than an accident, and an exit code would make it neither.
+
+    Machine facts do not count as a description; :mod:`agent_inbox.profiles` says why.
+    An agent whose profile holds only what `join` read off the box has said exactly as
+    much about itself as one whose profile is `{}`.
+    """
+    from agent_inbox import profiles
+
+    try:
+        actor = client.whois(name) or {}
+    except Exception:  # noqa: BLE001 - a note must not cost the diagnosis it follows
+        # `doctor` is what somebody runs when something is already wrong, and this is
+        # the last line it prints. A hub that will not answer about us is a problem the
+        # checks above have already reported properly; raising here would replace that
+        # diagnosis with a traceback, and hand a wake hook reading the exit code a
+        # crash where it had a working agent.
+        #
+        # Silence is the safe direction and the one taken: an unanswerable question
+        # produces no finding, never a reassuring one.
+        logger.debug("could not read our own profile", exc_info=True)
+        return
+    profile = actor.get("profile")
+    if not isinstance(profile, dict):
+        # Older hubs render an actor without a `profile` key at all. Absent is not
+        # empty, and reporting a guess as a finding is how a check starts lying.
+        return
+
+    described = profiles.self_reported(profile)
+    if described:
+        click.echo(
+            f"{ok} profile         {len(described)} field(s) — "
+            + ", ".join(sorted(described))
+        )
+        return
+    click.echo(
+        f"{warn} profile         you have not described yourself. The roster and the "
+        f"console are built from this, so to another agent deciding whether to write "
+        f"to you, you are a blank line. Say what you are for:\n"
+        f"       agent-inbox profile edit purpose='<what you work on>'\n"
+        f"     Choosing to stay quiet is fine — this note exists so it is a choice."
+    )
+
+
 def _report_exposure(ok: str, warn: str) -> None:
     """Say whether an identity file is exposed to git, on every `doctor` run.
 
@@ -1526,6 +1583,8 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
         return 1
     waiting = len(client.check_inbox().get("items", []))
     click.echo(f"{ok} api             ping answered; {waiting} message(s) waiting")
+
+    _report_profile(client, config.name, ok, warn)
 
     # A local fault the network checks cannot see, so it decides the exit code even when
     # everything else answered.
