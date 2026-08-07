@@ -108,17 +108,40 @@ class TestTheOldCommandNameIsGone:
     the onboarding prompt names `agent-inbox` throughout.
     """
 
-    def test_only_one_console_script_is_declared(self) -> None:
+    def _scripts(self) -> dict[str, str]:
         import tomllib
         from pathlib import Path
 
         root = Path(__file__).resolve().parents[1]
-        scripts = tomllib.loads((root / "pyproject.toml").read_text())["project"][
+        return tomllib.loads((root / "pyproject.toml").read_text())["project"][
             "scripts"
         ]
 
-        assert set(scripts) == {"agent-inbox"}, (
-            f"the removed alias is back, or a new one appeared: {sorted(scripts)}"
+    def test_the_removed_alias_has_not_come_back(self) -> None:
+        assert "agent-mailbox" not in self._scripts()
+
+    def test_every_command_is_the_same_program(self) -> None:
+        """**Rewritten on 2026-08-07, when `aiai` was added** (owner) as a short name
+        for a human at a terminal.
+
+        This used to assert `set(scripts) == {"agent-inbox"}`, and its message said "the
+        removed alias is back, or a new one appeared" — so it was guarding two things at
+        once and could not tell them apart. The first still matters and is asserted
+        above. The second was never the real rule: what makes an extra name harmless is
+        that it is an *alias*, not a second program that can drift.
+
+        So that is what is checked. A new entry pointing somewhere else fails here, and
+        `agent-mailbox` returning fails above, which is strictly more than counting.
+        """
+        scripts = self._scripts()
+
+        assert scripts, "precondition: some console script is declared"
+        assert set(scripts.values()) == {"agent_inbox.cli:main"}, (
+            f"a console script points somewhere else: {scripts}"
+        )
+        assert "agent-inbox" in scripts, (
+            "the documented command must stay: removing it breaks every existing "
+            "install, hook and deployment"
         )
 
     def test_the_import_alias_is_untouched(self) -> None:

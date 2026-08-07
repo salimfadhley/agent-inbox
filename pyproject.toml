@@ -78,6 +78,14 @@ ui = [
 # upgraded, so nothing breaks the moment this ships — it stops being replaced, not
 # suddenly absent.
 agent-inbox = "agent_inbox.cli:main"
+# `aiai` is the same program under a shorter name, **for a human at a terminal**
+# (owner, 2026-08-07). It is deliberately absent from the onboarding prompt: agents are
+# told to run the module, so nothing an agent does can hold a launcher open, and adding
+# a second launcher to that document would only invite them to lock a second file.
+#
+# Additive. `agent-inbox` stays exactly as it is — removing it would break every
+# existing install, every hook written before today, and every deployment.
+aiai = "agent_inbox.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/salimfadhley/agent-inbox"

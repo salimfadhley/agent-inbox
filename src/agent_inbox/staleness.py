@@ -115,6 +115,21 @@ FALLBACK_FLOOR = "3.14"
 #: index trails a publish by minutes.
 INSTALL_FLOOR = "0.35.0"
 
+#: The first release that can be run as a module — the version that added `__main__.py`.
+#:
+#: **Separate from `INSTALL_FLOOR` because it answers a different question.** That one
+#: is "old enough to be a known-bad silent downgrade"; this one is "new enough for
+#: `python -m agent_inbox` to exist at all". They were the same number for a while, and
+#: the same number was wrong by 37 releases: the MCP registration asked for `>=0.35.0`
+#: and then invoked a module that did not appear until 0.72.0.
+#:
+#: It never bit, because `>=` resolves to the newest release and the newest release has
+#: it. That is luck, not correctness — a lowest-resolution install, a constrained index,
+#: or a mirror lagging behind would all have produced
+#: `No module named agent_inbox.__main__`, which is what the owner met on 2026-08-07 by
+#: a different route: omitting `--python` so uv settled on 0.34.0.
+MODULE_FLOOR = "0.72.0"
+
 
 def upgrade_command(*, cached: bool = False) -> str:
     """The single install command, for the prompt *and* for every notice.
