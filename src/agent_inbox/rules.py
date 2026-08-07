@@ -13,6 +13,7 @@ The scenario numbers refer to ``doc/messaging-rules.md``.
 """
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from typing import NamedTuple
 
 from agent_inbox.records import ActorRecord, ObjectRecord
@@ -368,6 +369,54 @@ def visible_turns(
         for obj in thread_members(objects, root_id)
         if is_party_to(obj, viewer, all_actors, memberships)
     )
+
+
+def hide_invisible_parents(
+    objects: Iterable[ObjectRecord],
+    records: Iterable[ObjectRecord],
+    reader: str,
+    all_actors: Iterable[str],
+    memberships: Mapping[str, frozenset[str]],
+) -> tuple[ObjectRecord, ...]:
+    """Blank ``in_reply_to`` on any turn whose **parent** *reader* cannot see (#45).
+
+    A reply is deliverable to somebody who was never in the conversation it answers —
+    Ludmila opens a thread to Pablo alone, then replies to her own opener addressing
+    Jed. Jed is properly party to the reply. He was never party to the opener, and yet
+    the reply carried the opener's id straight to him.
+
+    Nothing readable follows from holding that id: :func:`visible_turns` returns
+    nothing, `read` refuses, and :func:`may_attach_to` refuses a reply to it — and was
+    deliberately written so a forbidden parent and a nonexistent one clear identically,
+    *precisely* so a caller could not tell "real but not yours" from "no such thing".
+    This was the one place that distinction survived: **the id itself is proof the
+    message exists.** An existence oracle, not a content leak, which is why it is worth
+    closing quietly rather than dramatically.
+
+    **Blanked, not dropped, and that is deliberate here** — the opposite of the choice
+    :meth:`Api._result` makes, for a reason that only holds at this layer. A stored
+    record renders `inReplyTo: null` whenever a message is not a reply at all, so a
+    blank is the *commonest* value on the wire and says nothing. In a search result the
+    field had no such cover, so there dropping it uniformly was the quiet option. Both
+    answer the same question — what does a non-disclosing value look like *here* — and
+    get different answers because the surroundings differ.
+
+    The cost is real and is the point: a client cannot always rebuild a thread from one
+    note. Sometimes it should not be able to.
+    """
+    known = {obj.id: obj for obj in objects}
+    out: list[ObjectRecord] = []
+    for record in records:
+        parent = known.get(record.in_reply_to or "")
+        if record.in_reply_to and not (
+            parent is not None and is_party_to(parent, reader, all_actors, memberships)
+        ):
+            # A parent that has expired out of the store is blanked too. It is gone;
+            # naming it tells a reader an id that resolves to nothing, which is the
+            # same non-answer with extra steps.
+            record = replace(record, in_reply_to=None)
+        out.append(record)
+    return tuple(out)
 
 
 def may_attach_to(

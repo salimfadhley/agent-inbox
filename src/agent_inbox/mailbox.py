@@ -436,7 +436,13 @@ class Mailbox:
         all_actors, memberships = await self._context()
         objects = tuple(await self._store.objects())
         read_ids = await self._read_by(me, objects)
-        return rules.unread(objects, me, read_ids, all_actors, memberships)
+        return rules.hide_invisible_parents(
+            objects,
+            rules.unread(objects, me, read_ids, all_actors, memberships),
+            me,
+            all_actors,
+            memberships,
+        )
 
     async def unread_count(self, caller: str) -> int:
         """How much is waiting. Cheap enough for an agent to ask every turn."""
@@ -468,7 +474,7 @@ class Mailbox:
         me = (await self._require_actor(caller)).name
         all_actors, memberships = await self._context()
         objects = tuple(await self._store.objects())
-        return rules.search(
+        hits, more = rules.search(
             objects,
             me,
             query,
@@ -478,6 +484,19 @@ class Mailbox:
             since=since,
             until=until,
             limit=limit,
+        )
+        # The search route drops `inReplyTo` from its own output for this reason and
+        # says so — but a rule that only holds where somebody remembered it is not a
+        # rule. Applied here, every present and future reader of `search` inherits it.
+        safe = rules.hide_invisible_parents(
+            objects, [hit.record for hit in hits], me, all_actors, memberships
+        )
+        return (
+            tuple(
+                rules.Match(record=record, snippet=hit.snippet)
+                for record, hit in zip(safe, hits, strict=True)
+            ),
+            more,
         )
 
     async def read(self, caller: str, object_id: str) -> ObjectRecord:
@@ -537,7 +556,13 @@ class Mailbox:
         if named is None or not rules.is_party_to(named, me, all_actors, memberships):
             return ()
         root_id = rules.thread_root(objects, object_id)
-        return rules.visible_turns(objects, root_id, me, all_actors, memberships)
+        return rules.hide_invisible_parents(
+            objects,
+            rules.visible_turns(objects, root_id, me, all_actors, memberships),
+            me,
+            all_actors,
+            memberships,
+        )
 
     async def view(self, caller: str, object_id: str) -> ObjectRecord:
         """One message the caller is party to, **without consuming it**.
@@ -582,7 +607,15 @@ class Mailbox:
         all_actors, memberships = await self._context()
         if not rules.is_party_to(obj, me, all_actors, memberships):
             raise NoSuchMessage(f"no message {object_id!r} available to you")
-        return obj
+        # Being party to a reply says nothing about being party to what it answers
+        # (#45). Only the parent is fetched, not the whole store: this path runs on
+        # every `read` and every `view`.
+        parent = (
+            await self._store.get_object(obj.in_reply_to) if obj.in_reply_to else None
+        )
+        return rules.hide_invisible_parents(
+            (parent,) if parent else (), (obj,), me, all_actors, memberships
+        )[0]
 
     async def _read_by(
         self, caller: str, objects: Iterable[ObjectRecord]
