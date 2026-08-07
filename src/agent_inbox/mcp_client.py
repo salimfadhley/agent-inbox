@@ -39,6 +39,7 @@ from agent_inbox.client import (
     find_config,
     load_config,
     load_hub,
+    take_migration_notice,
     write_config,
 )
 from agent_inbox.interrupt import Gatekeeper, load_policy
@@ -763,6 +764,11 @@ async def join(
                     f"recorded as [agents.{engine}]; any other engine's entry in this "
                     "project is untouched."
                 )
+                # A filename migration is a side effect of the write, not of joining
+                # (#12). Appended rather than replacing the note: what happened to the
+                # engine entry is what the caller asked about, and this is extra.
+                if said := take_migration_notice():
+                    note = f"{note} {said}"
             except ClientError as exc:
                 note = str(exc)
 

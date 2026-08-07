@@ -454,11 +454,27 @@ class TestJoinDoesNotEvictWhoeverWasHereFirst:
 
         write_config("http://hub:8081", "nicole_ruzickova", engine="claude", force=True)
 
-        text = (tmp_path / LEGACY_CONFIG_NAME).read_text()
-        assert "pablo_fantomas" in text, "codex's identity was evicted by claude's join"
-        assert not (tmp_path / CONFIG_NAME).exists(), (
-            "join created a second config file, which then shadows the real one"
+        # **Asserted as "one file, everyone in it" rather than "the legacy name
+        # survives"** — changed when #12 made a project write migrate the filename.
+        #
+        # The harm #47 names is eviction: a *second* file appearing with only the
+        # joining engine in it, shadowing the real one so every other identity vanished.
+        # That is still exactly what fails here. What is no longer required is the file
+        # keeping its old *name*: the migration renames it and carries every engine
+        # across, so codex is not evicted, it has moved house with claude.
+        #
+        # Written this way round on purpose. Pinning the filename would have made this
+        # test a guard against the migration rather than against the eviction, and the
+        # comment above it would have gone on describing a bug it no longer caught.
+        configs = sorted(
+            path.name
+            for path in tmp_path.iterdir()
+            if path.name in {CONFIG_NAME, LEGACY_CONFIG_NAME}
         )
+        assert len(configs) == 1, f"two config files, one of which shadows: {configs}"
+        text = (tmp_path / configs[0]).read_text()
+        assert "pablo_fantomas" in text, "codex's identity was evicted by claude's join"
+        assert "nicole_ruzickova" in text
 
     def test_a_fresh_project_still_gets_the_canonical_name(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

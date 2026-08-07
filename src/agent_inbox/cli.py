@@ -49,6 +49,7 @@ from agent_inbox.client import (
     load_global,
     load_hub,
     project_root,
+    take_migration_notice,
     unset_global,
     unset_project,
     write_config,
@@ -484,6 +485,7 @@ def join(
     path = write_config(
         hub_url, granted, engine=engine, role=role, force=force, token=given or None
     )
+    _say_if_migrated()
     recorded = {} if no_machine_facts else _record_machine_facts(client, granted)
     woken = None if no_wake_hook else _install_wake_hook()
     ignored = _keep_it_out_of_git(path)
@@ -588,6 +590,18 @@ def _report_interpreter(ok: str) -> None:
         else " — `uv python install` will not count this one"
     )
     click.echo(f"{ok} interpreter     {running}, from {origin}{note}")
+
+
+def _say_if_migrated() -> None:
+    """Announce a config filename migration, if the write just did one (#12).
+
+    On stderr, because the file moving is **not what the caller asked for** — they set a
+    value; this is a side effect, and a side effect does not belong in the output a
+    script is parsing. It still has to be said: a rename that nobody mentions is how
+    somebody discovers their `.gitignore` no longer covers their identity file.
+    """
+    if said := take_migration_notice():
+        _err(f"note: {said}")
 
 
 def _report_profile(client: HubClient, name: str, ok: str, warn: str) -> None:
@@ -925,6 +939,7 @@ def config_set(
         # A project write lands in one engine's entry. Getting that wrong writes into
         # another agent's identity, which is why this refuses rather than defaults.
         written.append(str(write_project(project, engine=_resolve_engine(ctx))))
+        _say_if_migrated()
 
     # A machine-wide value that a project file already overrides is set and inert, and
     # the reader would reasonably conclude the command did nothing. `load_hub` reads the
@@ -1009,6 +1024,7 @@ def config_unset(ctx: click.Context, is_global: bool, name: str) -> int:
         if is_global
         else unset_project(name, engine=_resolve_engine(ctx))
     )
+    _say_if_migrated()
     if not removed:
         _err(f"{name} was not set {'machine-wide' if is_global else 'here'}")
         return 1

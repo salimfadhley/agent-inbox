@@ -699,8 +699,126 @@ def _set_machine_hub(hub: str, env: dict[str, str] | None = None) -> None:
     write_global({"hub": hub}, env)
 
 
+#: What a caller is told after a config write moved the file. Empty when nothing moved.
+#:
+#: Returned rather than printed, because this module has no business writing to a
+#: terminal — the CLI and the MCP server present it differently, and one of them is
+#: talking to a program.
+MigrationNotice = str
+
+
+def migrate_project_name(target: Path) -> tuple[Path, str]:
+    """Where a project write should actually land, and what to say about it (#12).
+
+    v0.24.0 renamed the project file to ``agent-inbox.toml`` and kept reading the old
+    ``agent-mailbox.toml``, so nothing broke and nothing moved. That is the right trade
+    for a release and the wrong one forever: every project that existed then is still on
+    the old name, and "we read both names indefinitely" is a cost that only grows.
+
+    **Migrating on write is the shape that needs nobody to remember it.** The file is
+    already being rewritten, by somebody already running a command that changes
+    configuration. Read-only commands never reach here — `doctor`, `config list`,
+    `whoami` and `ping` all resolve config without rendering it, and a diagnostic that
+    mutated the thing it was diagnosing would be a trap, most of all in `doctor`, which
+    is run precisely to understand a broken state.
+
+    Three cases, and two of them refuse to move anything:
+
+    **A tracked legacy file is not renamed.** `agent-mailbox.toml` was git-tracked in
+    this very repository until `02e5d12`; an ignore rule cannot untrack what is already
+    in the index. A plain rename there reads to git as *the agent's identity was
+    deleted*, plus a new ignored file nobody can see. `git mv` would work, but quietly
+    rewriting somebody's index during `config set` is a larger surprise than the one
+    being fixed. So it is reported and left alone.
+
+    **Both files present: the current name wins and the old one is not touched.**
+    `find_config` already prefers the current name, so this is reached by way of a
+    half-finished migration rather than by design — but two identity files in one
+    project is a state a human should hear about rather than have tidied away.
+
+    Otherwise the write moves to the current name and the ignore rule is *fixed*, not
+    merely mentioned. The request asked for a reminder; a reminder is what was already
+    there and it is what `parisa_murthy` demonstrated does not work — a `.gitignore`
+    naming the pre-rename file reads as protection on inspection. Renaming without
+    fixing it would silently undo a protection the project already had, which is worse
+    than not renaming at all.
+    """
+    if target.name != LEGACY_CONFIG_NAME:
+        stale = target.with_name(LEGACY_CONFIG_NAME)
+        if stale.is_file():
+            return target, (
+                f"Two identity files here: {CONFIG_NAME} and the older "
+                f"{LEGACY_CONFIG_NAME}. {CONFIG_NAME} is the one in use; nothing has "
+                f"been changed. Delete {LEGACY_CONFIG_NAME} once you have checked it "
+                "holds nothing you still want."
+            )
+        return target, ""
+
+    current = target.with_name(CONFIG_NAME)
+    if current.is_file():
+        return current, (
+            f"Writing {CONFIG_NAME}, which already exists alongside the older "
+            f"{LEGACY_CONFIG_NAME}. The older file has been left exactly as it is."
+        )
+
+    # Imported here, not at module scope: `ignores` imports this module. A lazy import
+    # is the cost of keeping the dependency pointing one way.
+    from agent_inbox import ignores
+
+    root = project_root(target.parent)
+    if ignores.is_tracked(target, root):
+        return target, (
+            f"{LEGACY_CONFIG_NAME} is tracked by git, so it has not been renamed to "
+            f"{CONFIG_NAME} — to git a rename would read as your identity being "
+            "deleted, and the replacement would be invisible. Do it deliberately:\n"
+            f"    git mv {LEGACY_CONFIG_NAME} {CONFIG_NAME}\n"
+            "and revoke any token it carried; a tracked identity file is in the "
+            "history whether or not it is renamed."
+        )
+
+    said = f"Renamed {LEGACY_CONFIG_NAME} to {CONFIG_NAME}."
+    state = ignores.ensure_ignored(current, root)
+    if state == "added":
+        said += (
+            f" Your .gitignore named {LEGACY_CONFIG_NAME} or nothing at all, so a rule "
+            f"for {CONFIG_NAME} has been added — without it the rename would have "
+            "turned an ignored file into a committable one."
+        )
+    elif state == "already":
+        said += " It was already ignored by git under the new name."
+    return current, said
+
+
+#: Set by the last project write, read and cleared by whoever presents it.
+#:
+#: A module-level hand-off is not pretty. The alternative is changing the return type of
+#: `write_project`, `unset_project` and `write_config` — three public functions with
+#: callers in the CLI, the MCP server and the tests — to carry a string that is empty
+#: almost every time. This is the smaller change, and the notice is worthless if it is
+#: not read: `take_migration_notice` empties it, so it cannot be reported twice.
+_migration_notice: str = ""
+
+
+def take_migration_notice() -> str:
+    """What the last config write moved, if anything. Reading it clears it."""
+    global _migration_notice
+    said, _migration_notice = _migration_notice, ""
+    return said
+
+
 def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
-    """Write the project file. One renderer, so `join` and `configure` cannot drift."""
+    """Write the project file. One renderer, so `join` and `configure` cannot drift.
+
+    **Every project write passes through here**, which is why the filename migration
+    lives here rather than in each of the three callers. A migration that each writer
+    had to remember would be a migration one of them forgot.
+    """
+    global _migration_notice
+    legacy = target
+    target, said = migrate_project_name(target)
+    moved = target != legacy
+    if said:
+        _migration_notice = said
     lines = [
         "# agent-inbox — where the mailbox is, and who each agent here is on it.",
         "# Written by `join` and `agent-inbox configure`, one entry per engine. Do not",
@@ -729,6 +847,12 @@ def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp.replace(target)
+    # **The old file goes only after the new one is on disk.** Dying between the two
+    # leaves both, which `find_config` resolves in favour of the current name and which
+    # the "two identity files" branch above then reports. Dying the other way round
+    # would leave neither, and an agent with no identity at all.
+    if moved and legacy.is_file():
+        legacy.unlink()
     return target
 
 
