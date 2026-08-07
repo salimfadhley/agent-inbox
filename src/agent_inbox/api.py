@@ -1830,6 +1830,25 @@ def build_api(
         header = conn.headers.get("Authorization", "")
         if header.lower().startswith("bearer "):
             token = await auth.resolve_token(header[7:].strip())
+            if token is not None and not token.may_act:
+                # **A `ui` token grants nothing to act with** (#53). It is valid — it
+                # authenticated — and it still yields no caller, because the console
+                # only ever reads and every route it uses takes no caller at all.
+                #
+                # Fallen through rather than raised, and that distinction is
+                # load-bearing: the console presents *both* its device token and the
+                # signed-in human's cookie on the same request. Raising here would kill
+                # the cookie branch below and lock out the operator holding it. Exactly
+                # the shape that produced the `*`-attribution bug on 2026-08-05, and
+                # exactly the same remedy — believe the more specific credential.
+                #
+                # What bounds the damage is scope, not lifetime: an eight-hour token
+                # that could still send as any agent would impersonate the whole roster
+                # for eight hours.
+                api_logger.info(
+                    "event=token.observe_only id=%s path=%s", token.id, conn.url.path
+                )
+                token = None
             if token is not None:
                 # Here, and only here, are both halves in hand: the credential says the
                 # holder is allowed in, and the header says which agent they are. A

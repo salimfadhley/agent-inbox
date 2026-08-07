@@ -41,6 +41,19 @@ class TokenRevoked(AuthError):
     code = "token_revoked"
 
 
+class TokenExpired(AuthError):
+    """A device token was presented that has passed its expiry (issue #53).
+
+    **Distinct from revoked, and from unknown, because the remedies differ.** A revoked
+    credential was deliberately withdrawn and asking for another is a conversation with
+    an operator. An expired one simply aged out, and the holder can usually get a fresh
+    one by signing in again. Reporting both as "not allowed" would send half the callers
+    to the wrong person.
+    """
+
+    code = "token_expired"
+
+
 class TooManyAttempts(AuthError):
     """Too many failed logins from this source; try again later.
 

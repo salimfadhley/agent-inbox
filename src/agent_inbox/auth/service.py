@@ -22,6 +22,7 @@ from agent_inbox.auth.exceptions import (
     EnrolmentRequired,
     LastOperator,
     OperatorExists,
+    TokenExpired,
     TokenRevoked,
     UnknownOperator,
 )
@@ -565,6 +566,14 @@ class AuthService:
             # that gets as far as being recorded has been honoured for one more request
             # than it should have been.
             raise TokenRevoked("this token has been revoked")
+        if token.has_expired(self._now()):
+            # **Here, beside revoked, so that no caller can forget it** (#53). Expiry is
+            # only a real boundary if it is enforced where the credential is resolved;
+            # anywhere else is a check somebody has to remember to make, and the one
+            # that gets forgotten is the one on the route that matters.
+            raise TokenExpired(
+                "this token has expired. If it was issued by signing in, sign in again."
+            )
         return token
 
     async def admit(self, token: DeviceToken, actor: str, client: str = "") -> None:

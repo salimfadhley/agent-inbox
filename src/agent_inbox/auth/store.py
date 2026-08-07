@@ -25,6 +25,7 @@ from agent_inbox.auth.records import (
     DeviceToken,
     EnrolmentState,
     Session,
+    TokenKind,
     TokenUse,
     User,
 )
@@ -264,7 +265,9 @@ _SCHEMA = (
         label      TEXT NOT NULL DEFAULT '',
         created    TEXT NOT NULL DEFAULT '',
         last_used  TEXT,
-        revoked    INTEGER NOT NULL DEFAULT 0
+        revoked    INTEGER NOT NULL DEFAULT 0,
+        kind       TEXT NOT NULL DEFAULT '',
+        expires    TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -320,7 +323,21 @@ def _to_token(row: aiosqlite.Row) -> DeviceToken:
         created=row["created"],
         last_used=row["last_used"],
         revoked=bool(row["revoked"]),
+        # `in row.keys()` because a store written before these columns existed is read
+        # by this same function — the additive migration below adds them, but a row
+        # fetched during an upgrade must not raise. Same pattern as `email` above.
+        kind=TokenKind(row["kind"]) if _has(row, "kind") else None,
+        expires=row["expires"] if _has(row, "expires") else "",
     )
+
+
+def _has(row: aiosqlite.Row, column: str) -> bool:
+    """Whether this row carries a column, and something in it.
+
+    A migration adds the column with an empty default, so *present* and *populated* are
+    different questions and only the second one means anything here.
+    """
+    return column in row.keys() and bool(row[column])
 
 
 class SqliteAuthStore:
@@ -390,6 +407,19 @@ class SqliteAuthStore:
             await self._execute(
                 "ALTER TABLE auth_token_use ADD COLUMN client TEXT NOT NULL DEFAULT ''"
             )
+        # Token kind and expiry (#53). Added empty on purpose rather than backfilled:
+        # an empty `kind` is read back as the kind that row already was — derived from
+        # `actor`, which is where the distinction has always lived — and an empty
+        # `expires` means never, which every existing token is. So an upgraded
+        # deployment keeps working with no write at all.
+        cursor = await self._execute("PRAGMA table_info(auth_device_tokens)")
+        held = {row["name"] for row in await cursor.fetchall()}
+        for column, ddl in (
+            ("kind", "kind TEXT NOT NULL DEFAULT ''"),
+            ("expires", "expires TEXT NOT NULL DEFAULT ''"),
+        ):
+            if column not in held:
+                await self._execute(f"ALTER TABLE auth_device_tokens ADD COLUMN {ddl}")
         await self._db.commit()
 
     @property
@@ -516,8 +546,8 @@ class SqliteAuthStore:
     async def add_token(self, token: DeviceToken) -> None:
         await self._execute(
             "INSERT INTO auth_device_tokens "
-            "(id, actor, token_hash, label, created, last_used, revoked) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(id, actor, token_hash, label, created, last_used, revoked, kind, "
+            "expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 token.id,
                 token.actor,
@@ -526,6 +556,8 @@ class SqliteAuthStore:
                 token.created,
                 token.last_used,
                 int(token.revoked),
+                str(token.kind or ""),
+                token.expires,
             ),
         )
         await self._db.commit()

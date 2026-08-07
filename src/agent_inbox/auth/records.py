@@ -69,12 +69,40 @@ class User:
 SHARED_ACTOR = "*"
 
 
+class TokenKind(StrEnum):
+    """What a credential is for — and therefore what it may do (issue #53).
+
+    Two of these already existed, deduced from a sentinel in ``actor``: ``*`` meant
+    "any agent on this machine", a name meant "this one". Naming them makes the
+    difference a fact rather than an inference, and leaves room for kinds nobody has
+    thought of yet.
+
+    **The third is the point.** ``UI`` is what the console holds, and it is short-lived
+    *and* structurally unable to act. Shortening a credential's life reduces the window;
+    it does not reduce what fits through it, and an eight-hour token that can still send
+    mail as any agent can impersonate the whole roster for eight hours. So a kind
+    governs **capability**, not merely expiry — a kind that only changed a lifetime
+    would be a naming exercise.
+    """
+
+    #: Admits any agent on a machine; identity is claimed by the caller. Today's ``*``.
+    AGENT = "agent"
+    #: Bound to one named agent.
+    BOUND = "bound"
+    #: Observe only. May not act as anybody, and may not administer anything.
+    UI = "ui"
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceToken:
     """A bearer credential. Holds only the secret's hash.
 
     ``actor`` is one agent's name, or :data:`SHARED_ACTOR` for a token that admits any
     agent and leaves identity to the caller.
+
+    ``kind`` and ``expires`` default to what every token already was — an agent or bound
+    token that never expires — so a store written before they existed reads back
+    unchanged. **No deployment may break because we named a thing.**
     """
 
     id: str
@@ -84,6 +112,36 @@ class DeviceToken:
     created: str = ""
     last_used: str | None = None
     revoked: bool = False
+    kind: TokenKind | None = None
+    #: When it stops working, ISO-8601. Empty means never, which is what all of today's
+    #: tokens are.
+    expires: str = ""
+
+    def __post_init__(self) -> None:
+        if self.kind is None:
+            # Derived, not guessed: this is exactly what `actor` has always encoded, so
+            # an existing row keeps precisely the meaning it already had.
+            derived = TokenKind.AGENT if self.actor == SHARED_ACTOR else TokenKind.BOUND
+            object.__setattr__(self, "kind", derived)
+
+    @property
+    def may_act(self) -> bool:
+        """Whether this credential may be used to do anything but look.
+
+        Asked at the two places a request acquires an identity to act with, so a route
+        cannot forget: every route that sends, replies or administers depends on one of
+        them, and the observe routes depend on neither.
+        """
+        return self.kind is not TokenKind.UI
+
+    def has_expired(self, now: str) -> bool:
+        """Whether *now* is past its expiry. A token with no expiry never is.
+
+        String comparison, which is safe because both sides are ISO-8601 UTC and this
+        codebase stores time nowhere else. Parsing would add a failure mode — a
+        malformed stored value raising inside authentication — to buy nothing.
+        """
+        return bool(self.expires) and now >= self.expires
 
 
 @dataclass(frozen=True, slots=True)
