@@ -108,11 +108,43 @@ class MessageStore(Protocol):
         ...
 
     async def seen_activity(self, activity_id: str) -> bool:
-        """Whether this activity has already been delivered."""
+        """Whether this activity has been delivered, or is being delivered now."""
         ...
 
     async def remember_activity(self, activity_id: str, seen: str) -> None:
         """Record an activity as delivered. Idempotent."""
+        ...
+
+    async def claim_activity(
+        self, activity_id: str, now: str, stale_before: str
+    ) -> bool:
+        """Take responsibility for delivering this activity. ``True`` if it is yours.
+
+        **The claim is the decision, not a check before one** (issue #41). Asking
+        "have I seen this?" and then delivering is check-then-act: two POSTs of one
+        activity both pass the question before either records an answer, and both
+        deliver. The claim is a single write, so exactly one caller can win it.
+
+        ``stale_before`` is what stops that becoming a silent drop. A claim that was
+        never completed — the deliverer crashed between claiming and storing — is
+        reclaimable once it is older than this, so the message arrives late rather than
+        never. Without it, closing the duplicate window would open a losing one, and for
+        a mailbox a lost message is the worse of the two.
+        """
+        ...
+
+    async def complete_activity(self, activity_id: str) -> None:
+        """Mark a claimed activity delivered, so its claim can never be reclaimed."""
+        ...
+
+    async def release_activity(self, activity_id: str) -> None:
+        """Give back an uncompleted claim, so the sender's next attempt can take it.
+
+        Never touches a *completed* one. Releasing after delivery would re-open the
+        duplicate window this whole mechanism exists to close, and the caller that most
+        wants to release is an error path, which is exactly where a confident wrong
+        answer does the most damage.
+        """
         ...
 
     async def add_peer(self, origin: str, added: str, note: str = "") -> None:
@@ -142,6 +174,9 @@ class InMemoryStore:
         self._peers: dict[str, str] = {}
         self._blocks: dict[str, str] = {}
         self._seen: dict[str, str] = {}
+        #: Claims that finished. A claim is in `_seen`; only a *completed* one is here,
+        #: and the difference is what makes an abandoned claim reclaimable.
+        self._delivered: set[str] = set()
 
     async def claim_name(self, actor: ActorRecord) -> bool:
         if actor.name in self._actors:
@@ -222,6 +257,30 @@ class InMemoryStore:
 
     async def remember_activity(self, activity_id: str, seen: str) -> None:
         self._seen.setdefault(activity_id, seen)
+        self._delivered.add(activity_id)
+
+    async def claim_activity(
+        self, activity_id: str, now: str, stale_before: str
+    ) -> bool:
+        held = self._seen.get(activity_id)
+        if held is None:
+            self._seen[activity_id] = now
+            return True
+        if activity_id in self._delivered:
+            return False
+        # Claimed and never completed. Whoever held it is gone if the claim is old
+        # enough; taking it over is how a crash costs a delay instead of a message.
+        if held < stale_before:
+            self._seen[activity_id] = now
+            return True
+        return False
+
+    async def complete_activity(self, activity_id: str) -> None:
+        self._delivered.add(activity_id)
+
+    async def release_activity(self, activity_id: str) -> None:
+        if activity_id not in self._delivered:
+            self._seen.pop(activity_id, None)
 
 
 _conforms: MessageStore = InMemoryStore()

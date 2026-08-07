@@ -39,6 +39,21 @@ from agent_inbox.vocabulary import ActorType
 #: 340,000 combinations, so this only matters for absurdly full mailboxes.
 _NAME_ATTEMPTS = 24
 
+#: How long a claim on an inbound activity is honoured before another delivery may take
+#: it over (issue #41).
+#:
+#: **This number is the whole trade, so it is worth stating what it buys either way.**
+#: Too short and a slow-but-live delivery gets a second one started underneath it, which
+#: is the duplicate the claim exists to prevent. Too long and a hub that died mid-
+#: delivery leaves the message undeliverable for that whole window.
+#:
+#: Five minutes because it must comfortably exceed one delivery — a `house.send` to a
+#: handful of local recipients, measured in milliseconds — while staying well inside the
+#: interval at which a sender's retry queue gives up. It is not tuned to anything
+#: measured, because nothing here is close to the boundary; it is chosen to be
+#: uninteresting from both directions.
+CLAIM_LEASE_SECONDS = 300
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -114,6 +129,28 @@ class Mailbox:
 
     async def remember_activity(self, activity_id: str) -> None:
         await self._store.remember_activity(activity_id, self._now())
+
+    async def claim_activity(self, activity_id: str) -> bool:
+        """Take responsibility for delivering an inbound activity (issue #41).
+
+        ``True`` means it is yours to deliver and nobody else's; ``False`` means it is
+        already delivered, or somebody else is delivering it right now.
+
+        A claim abandoned mid-delivery becomes available again after
+        :data:`CLAIM_LEASE_SECONDS`, so a hub that dies between claiming and storing
+        costs the message a delay rather than its existence.
+        """
+        now = datetime.fromisoformat(self._now())
+        stale = (now - timedelta(seconds=CLAIM_LEASE_SECONDS)).isoformat()
+        return await self._store.claim_activity(activity_id, now.isoformat(), stale)
+
+    async def complete_activity(self, activity_id: str) -> None:
+        """Mark a claimed activity delivered, so its claim is never reclaimed."""
+        await self._store.complete_activity(activity_id)
+
+    async def release_activity(self, activity_id: str) -> None:
+        """Give back a claim whose delivery failed, so the next attempt may take it."""
+        await self._store.release_activity(activity_id)
 
     @property
     def store(self) -> MessageStore:

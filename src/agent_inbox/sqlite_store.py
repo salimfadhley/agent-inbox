@@ -108,7 +108,8 @@ _SCHEMA = (
     """
     CREATE TABLE IF NOT EXISTS seen_activities (
         activity_id TEXT PRIMARY KEY,
-        seen        TEXT NOT NULL DEFAULT ''
+        seen        TEXT NOT NULL DEFAULT '',
+        delivered   INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -186,6 +187,19 @@ class SqliteStore:
         await conn.execute("PRAGMA foreign_keys=ON")
         for statement in _SCHEMA:
             await conn.execute(statement)
+        # Additive, for a store written before the claim existed (#41). Existing rows
+        # get `delivered = 1`, which is exactly what they are: every one of them was
+        # written by the old `remember_activity`, which only ever ran *after* a
+        # successful delivery. Defaulting them to 0 would make every activity this hub
+        # has ever received reclaimable, and a peer that retried an old id would deliver
+        # it a second time — the very bug this closes, introduced by its own fix.
+        cursor = await conn.execute("PRAGMA table_info(seen_activities)")
+        held = {row[1] for row in await cursor.fetchall()}
+        if "delivered" not in held:
+            await conn.execute(
+                "ALTER TABLE seen_activities "
+                "ADD COLUMN delivered INTEGER NOT NULL DEFAULT 1"
+            )
         await conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         await conn.commit()
         self._conn = conn
@@ -255,8 +269,52 @@ class SqliteStore:
 
     async def remember_activity(self, activity_id: str, seen: str) -> None:
         await self._execute(
-            "INSERT OR IGNORE INTO seen_activities (activity_id, seen) VALUES (?, ?)",
+            "INSERT INTO seen_activities (activity_id, seen, delivered) "
+            "VALUES (?, ?, 1) "
+            "ON CONFLICT(activity_id) DO UPDATE SET delivered = 1",
             (activity_id, seen),
+        )
+        await self._db.commit()
+
+    async def claim_activity(
+        self, activity_id: str, now: str, stale_before: str
+    ) -> bool:
+        """Win the right to deliver this activity, atomically (issue #41).
+
+        **One statement decides**, which is the whole point. `INSERT ... ON CONFLICT DO
+        UPDATE ... WHERE` is a single write under SQLite's write lock, so of two POSTs
+        carrying the same activity id exactly one can come away with `rowcount == 1`.
+        The previous shape asked `seen_activity` and then delivered, and both callers
+        could pass the question before either wrote the answer.
+
+        The `WHERE` is what keeps a crash from costing a message. A row that was claimed
+        and never completed is taken over once it is older than *stale_before*; a row
+        that was *delivered* is never taken over at all, whatever its age. So the two
+        failures land where they should: a genuine duplicate is refused for ever, and an
+        abandoned delivery is retried late.
+        """
+        cursor = await self._execute(
+            "INSERT INTO seen_activities (activity_id, seen, delivered) "
+            "VALUES (?, ?, 0) "
+            "ON CONFLICT(activity_id) DO UPDATE SET seen = excluded.seen "
+            "WHERE seen_activities.delivered = 0 AND seen_activities.seen < ?",
+            (activity_id, now, stale_before),
+        )
+        await self._db.commit()
+        return cursor.rowcount == 1
+
+    async def complete_activity(self, activity_id: str) -> None:
+        await self._execute(
+            "UPDATE seen_activities SET delivered = 1 WHERE activity_id = ?",
+            (activity_id,),
+        )
+        await self._db.commit()
+
+    async def release_activity(self, activity_id: str) -> None:
+        """Delete an *uncompleted* claim. The `delivered = 0` is the safety."""
+        await self._execute(
+            "DELETE FROM seen_activities WHERE activity_id = ? AND delivered = 0",
+            (activity_id,),
         )
         await self._db.commit()
 

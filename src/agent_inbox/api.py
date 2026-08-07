@@ -1576,29 +1576,60 @@ class Api:
 
         message = read_create(parse_activity(raw), sender)
 
-        if await mailbox.seen_activity(message.activity_id):
+        # **Claim before delivering, not check before delivering** (issue #41).
+        #
+        # This asked `seen_activity` and then sent. Two POSTs of one activity id — which
+        # is precisely what the retry queue produces, because a client-side timeout does
+        # not cancel the peer's in-flight request — both passed the question before
+        # either wrote the answer, and both delivered. `Mailbox.send` mints a fresh uuid
+        # per call, so nothing downstream could catch it.
+        #
+        # The claim is a single write, so exactly one caller wins it.
+        if not await mailbox.claim_activity(message.activity_id):
             # FR-5: a retry is a no-op, not an error and not a second message.
             return {"delivered": False, "reason": "already seen"}
 
-        # `local_name` refuses `@local` and anything not addressed here, which is what
-        # keeps the non-egress promise true from the outside as well as the inside.
+        # From here the claim is held, and every path out must either complete it or
+        # give it back. Holding it while failing would make one bad delivery permanent:
+        # the sender retries, the claim refuses, and the message is lost with nobody
+        # able to see why.
         try:
-            recipients = tuple(
-                addressing.local_name(one, mailbox.hub_name)
-                for one in message.recipients
-            )
-        except AddressError as refusal:
-            raise InboundRefused("that delivery names nobody here") from refusal
+            # `local_name` refuses `@local` and anything not addressed here, which is
+            # what keeps the non-egress promise true from outside as well as inside.
+            try:
+                recipients = tuple(
+                    addressing.local_name(one, mailbox.hub_name)
+                    for one in message.recipients
+                )
+            except AddressError as refusal:
+                raise InboundRefused("that delivery names nobody here") from refusal
 
-        await self.house.send(
-            caller="",
-            to=recipients,
-            body=message.body,
-            subject=message.subject,
-            in_reply_to=message.in_reply_to,
-            remote_sender=message.sender,
-        )
-        await mailbox.remember_activity(message.activity_id)
+            await self.house.send(
+                caller="",
+                to=recipients,
+                body=message.body,
+                subject=message.subject,
+                in_reply_to=message.in_reply_to,
+                remote_sender=message.sender,
+            )
+        except BaseException:
+            # Broad on purpose, and it re-raises. A refusal, a store failure, or the
+            # request being cancelled all leave the same state — claimed, undelivered —
+            # and all of them should let the sender try again rather than being told for
+            # ever that we have already seen it.
+            #
+            # Best-effort, because the claim's own lease is the real guarantee: if
+            # giving it back also fails, the activity becomes deliverable again when the
+            # lease expires. This only makes the common failure fast.
+            with suppress(Exception):
+                await mailbox.release_activity(message.activity_id)
+            raise
+
+        # **After the message is stored, never before.** The order is the guarantee: a
+        # crash between the claim and here leaves an incomplete claim, which the lease
+        # makes reclaimable, so the message arrives late. The other order would mark it
+        # delivered and lose it.
+        await mailbox.complete_activity(message.activity_id)
         return {"delivered": True}
 
 

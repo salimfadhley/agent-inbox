@@ -369,11 +369,11 @@ class TestARetriedActivityArrivesOnce:
     whether that costs them a duplicate is a property of the **receiving** half — which
     is why it is asked here, of two real hubs, rather than of the retry loop's fakes.
 
-    **What these prove, and what they do not.** They prove the sequential case: one
-    attempt finishing before the next begins, which is what the queue actually does.
-    They do not prove atomicity, and it is not there — see issue #41 for the two
-    windows (a retry racing its own in-flight first attempt, and a crash between the
-    send and the marker) in which a duplicate is still reachable.
+    **The sequential case, and since issue #41 the concurrent one too.** These began by
+    proving only that one attempt finishing before the next begins costs no duplicate —
+    which is what the queue usually does — and recorded that atomicity was absent. It is
+    now present: the receiver claims the activity id in a single write before it
+    delivers, so of two attempts in flight together exactly one proceeds.
     """
 
     @staticmethod
@@ -422,6 +422,68 @@ class TestARetriedActivityArrivesOnce:
         assert self._copies(beta, marker) == 1, (
             "a retried activity must not cost the recipient a second copy"
         )
+
+    def test_two_simultaneous_deliveries_land_once(self, hubs) -> None:
+        """Window (a) of issue #41, against two real hubs.
+
+        The premise of the retry feature is that an attempt can fail *after* the peer
+        received it — a client-side timeout does not cancel the peer's in-flight
+        request. So the queue's retry can arrive while the first attempt is still inside
+        `house.send`, and the old check-then-act let both through: both passed
+        `seen_activity` before either recorded an answer, and `Mailbox.send` mints a
+        fresh uuid per call, so nothing downstream could catch the second.
+
+        Run rather than reasoned about, with the two attempts genuinely overlapping.
+        """
+        import threading
+
+        from agent_inbox.outbound import deliver, resolve
+
+        alpha, beta = hubs
+        asyncio.run(alpha.house.join("racer"))
+        key, key_id = TestSendingToAPeer._keys(alpha)
+        who = resolve(f"alice@beta.localhost:{beta.port}")
+        marker = "delivered twice, simultaneously"
+        activity = {
+            "type": "Create",
+            "id": f"{alpha.base}/act/41-concurrent",
+            "object": {
+                "type": "Note",
+                "to": ["alice"],
+                "content": marker,
+                "summary": "the retry that raced its own first attempt",
+            },
+        }
+        settings = asyncio.run(alpha.house.mailbox.hub_settings())
+        peers = asyncio.run(alpha.house.mailbox.peers())
+        start = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def attempt() -> None:
+            start.wait(timeout=10)
+            try:
+                deliver(
+                    who,
+                    activity,
+                    key=key,
+                    key_id=key_id,
+                    settings=settings,
+                    peers=peers,
+                )
+                outcomes.append("delivered")
+            except AlreadyDelivered:
+                outcomes.append("refused")
+
+        threads = [threading.Thread(target=attempt) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert self._copies(beta, marker) == 1, (
+            f"two simultaneous attempts delivered {self._copies(beta, marker)} copies"
+        )
+        assert sorted(outcomes) == ["delivered", "refused"], outcomes
 
     def test_a_changed_id_is_a_different_message(self, hubs) -> None:
         """The paired positive, and the proof the assertion above can fail.
