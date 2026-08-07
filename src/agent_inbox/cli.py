@@ -1958,16 +1958,19 @@ def wake_check(
 @click.option("--dir", "directory", help="project dir (default: this repo root)")
 @click.option(
     "--command",
-    default="agent-inbox wake-check",
-    show_default=True,
-    help="base hook command; override for local source-tree testing",
+    default=None,
+    help=(
+        "base hook command; override for local source-tree testing. Defaults to this "
+        "interpreter running the module, which is what keeps a Windows upgrade from "
+        "failing on a launcher held open by the hook itself."
+    ),
 )
 @click.option(
     "--rewake",
     is_flag=True,
     help="also wake a fully idle session (async; needs a live-session check)",
 )
-def install_hook(directory: str | None, command: str, rewake: bool) -> int:
+def install_hook(directory: str | None, command: str | None, rewake: bool) -> int:
     """Add the wake hooks to .claude/settings.json."""
     from agent_inbox import hookconfig
 

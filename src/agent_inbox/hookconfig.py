@@ -8,10 +8,17 @@ command). Re-install is idempotent (it strips ours first), and the write is atom
 """
 
 import json
+import shlex
+import sys
 from pathlib import Path
 from typing import Any
 
 #: Our hook entries are the ones whose command runs this subcommand.
+#:
+#: Deliberately the *subcommand* and not the program: the program has changed once
+#: already (see :func:`default_command`), and a marker naming it would have orphaned
+#: every hook installed before that change — leaving them un-uninstallable and doubling
+#: on the next install.
 _MARKER = "wake-check"
 
 #: The three events we hook. SessionStart/UserPromptSubmit inject context; Stop wakes.
@@ -128,12 +135,50 @@ def _write(path: Path, settings: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def install(
-    root: Path, command: str = "agent-inbox wake-check", *, rewake: bool = False
-) -> Path:
-    """Merge the wake hooks into ``root/.claude/settings.json``. Idempotent."""
+def default_command() -> str:
+    """How to run `wake-check`, without going through the `agent-inbox` launcher.
+
+    **This is the Windows upgrade bug, and it is ours.** On Windows a running `.exe`
+    cannot be overwritten, and `uv tool install --force` has to replace the launcher at
+    `~/.local/bin/agent-inbox.exe`. Installing this hook as `agent-inbox wake-check`
+    started that launcher on *every turn of every session*, so the file was reliably in
+    use and every upgrade ended in::
+
+        error: Failed to install entrypoint
+          Caused by: ... The process cannot access the file because it is being used by
+          another process. (os error 32)
+
+    Reported by the owner on 2026-08-07 upgrading 0.83.0 to 0.87.0, with the
+    observation that makes the fix obvious: **the launcher never actually changes
+    between releases.** It is a generic stub holding an interpreter path and an entry
+    point, both identical from one version to the next. uv copies it anyway, and the
+    copy is what fails. Nothing was wrong with the upgrade.
+
+    So run the interpreter directly. `sys.executable` is the environment agent-inbox is
+    installed into — the uv tool venv, or a project venv from source — and it is the one
+    that can import `agent_inbox`. It was measured during the MCP work that
+    `uv tool install --force` leaves that interpreter unchanged by inode, so holding
+    *it* open across an upgrade costs nothing.
+
+    The same reasoning already moved the MCP server to `python -m agent_inbox mcp`; this
+    is the other invocation we make on somebody's behalf, and it was missed because it
+    is installed once and never seen again.
+
+    Quoted with `shlex`, because the path is not ours and a uv tool directory can sit
+    under a directory with a space in it.
+    """
+    return f"{shlex.quote(sys.executable)} -m agent_inbox wake-check"
+
+
+def install(root: Path, command: str | None = None, *, rewake: bool = False) -> Path:
+    """Merge the wake hooks into ``root/.claude/settings.json``. Idempotent.
+
+    Re-running this **migrates** an older hook: `apply` strips every entry carrying the
+    marker before adding ours, and the marker is the subcommand rather than the program,
+    so a hook installed as `agent-inbox wake-check` is replaced rather than duplicated.
+    """
     path = settings_path(root)
-    _write(path, apply(_read(path), command, rewake=rewake))
+    _write(path, apply(_read(path), command or default_command(), rewake=rewake))
     return path
 
 

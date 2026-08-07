@@ -84,6 +84,14 @@ COMMANDS_ADDED_AFTER_THE_FLOOR: dict[str, str] = {
     "profile": "0.26.0",
 }
 
+#: The release in which the hook we install stopped invoking the `agent-inbox` launcher.
+#:
+#: Kept here rather than imported from the module that installs it, because ADR 0011
+#: forbids a hub module from reaching into harness machinery — and `prompts` is served
+#: by the hub. The prompt is allowed to *describe* what a client does; it may not depend
+#: on the client's code to say it. Same shape, and same reason, as the dict above.
+LAUNCHER_FREE_SINCE = "0.88.0"
+
 
 def _python_floor() -> str:
     """The interpreter our releases need, from package metadata — never typed twice."""
@@ -250,10 +258,28 @@ error: Failed to install entrypoint
 ```
 
 It exits non-zero, which reads like failure. It is not. Windows will not let anything
-overwrite a running `.exe`, and every other agent session on this machine is holding
-`agent-inbox.exe` open. `uv` updated the tool's environment — the actual program — and
-could only not replace the small launcher that starts it. **That launcher runs whatever
-is in the environment**, so it starts the new version regardless of its own age.
+overwrite a running `.exe`. `uv` updated the tool's environment — the actual program —
+and could only not replace the small launcher that starts it. **That launcher runs
+whatever is in the environment**, so it starts the new version regardless of its own
+age. It also never really changes between releases: it is a generic stub holding an
+interpreter path and an entry point, identical from one version to the next, so the copy
+that fails was not going to change anything.
+
+**What is usually holding it is a wake hook, not another session.** Before
+{LAUNCHER_FREE_SINCE}, `agent-inbox install-hook` registered a hook that ran the
+`agent-inbox` launcher itself, on every turn — so the file was in use whenever anyone
+tried to upgrade. Newer versions run the interpreter directly and never touch it. If
+you see this error, re-run `agent-inbox install-hook --rewake` **once** after it; it
+replaces the old entry rather than adding a second, and the next upgrade will be clean.
+
+If it still happens, something else is holding the launcher and you can move it aside —
+Windows allows renaming a file that is in use, which is how installers do this:
+
+```
+move %USERPROFILE%\\.local\\bin\\agent-inbox.exe %TEMP%\\agent-inbox-old.exe
+```
+
+then re-run the install.
 
 Confirm rather than assume:
 
@@ -262,7 +288,6 @@ agent-inbox --version
 ```
 
 If it prints the version you asked for, you are done, and there is nothing to clean up.
-Closing the other sessions first would avoid the message, but it buys nothing.
 
 **Do not run the install repeatedly trying to clear it.** `uv` can record the upgrade as
 done while the copy failed, after which it answers `Nothing to upgrade` — so a real
@@ -318,6 +343,7 @@ def onboarding(
     """
     prompt_url = prompt_url or f"{hub_url.rstrip('/')}/prompts/agent"
     profile_version = COMMANDS_ADDED_AFTER_THE_FLOOR["profile"]
+
     # The MCP registration below names both, for the reason given beside it there.
     PYTHON_FLOOR = _python_floor()
     from agent_inbox.staleness import INSTALL_FLOOR
