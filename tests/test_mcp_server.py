@@ -52,7 +52,9 @@ async def test_an_explicit_project_is_not_overridden_by_asking(
     def refuse() -> None:
         raise AssertionError("asked the client despite being told")
 
-    monkeypatch.setattr(mcp_client.mcp, "get_context", refuse)
+    # Patched on the module, not on the server: fastmcp 3.x has no `mcp.get_context()`
+    # — it is a module-level dependency, imported by name.
+    monkeypatch.setattr(mcp_client, "get_context", refuse)
     monkeypatch.setattr(mcp_client, "_project", tmp_path)
     monkeypatch.setattr(mcp_client, "_roots_asked", True)
 
@@ -72,7 +74,7 @@ async def test_asking_survives_a_client_that_offers_no_roots(
     monkeypatch.setattr(mcp_client, "_roots_asked", False)
     monkeypatch.setattr(mcp_client, "_project", None)
     monkeypatch.setattr(
-        mcp_client.mcp, "get_context", lambda: (_ for _ in ()).throw(RuntimeError("no"))
+        mcp_client, "get_context", lambda: (_ for _ in ()).throw(RuntimeError("no"))
     )
     await mcp_client._resolve_project()  # must not raise
     assert mcp_client._project is None

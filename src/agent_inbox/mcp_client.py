@@ -24,7 +24,26 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 from anyio.to_thread import run_sync
-from mcp.server.fastmcp import FastMCP
+
+# **The standalone `fastmcp`, not the copy that used to live in the official SDK.**
+#
+# What we imported until 2026-08-08 was `mcp.server.fastmcp.FastMCP` — FastMCP *1.0*,
+# vendored into Anthropic's `mcp` SDK and frozen there. `mcp` 2.0.0 deleted it outright:
+# not renamed, not deprecated, simply gone, so a fresh `uv tool install` produced a
+# client that raised on import.
+#
+# `mcp` 2.x does offer a successor, `MCPServer`, and staying inside the official SDK
+# would have added no new dependency. The owner's call went the other way and the
+# reasoning is the durable one: this is a long-lived project, `fastmcp` is the actively
+# released continuation of the very API we already use, and `MCPServer` is a fresh
+# surface with its own migration still ahead of it. Porting onto something already
+# superseded would have bought a shorter diff and a second migration.
+from fastmcp import FastMCP
+
+# `get_context()` is a module-level dependency here rather than a method on the server.
+# FastMCP 1.0 had `mcp.get_context()`; 3.x has no such method at all, which is the one
+# change in this port that could not fail loudly.
+from fastmcp.server.dependencies import get_context
 
 from agent_inbox import __version__, backoff, staleness
 from agent_inbox.client import (
@@ -218,7 +237,7 @@ async def _resolve_project() -> None:
     # Who connected? The client names itself when it initialises, and that is the one
     # authority on which engine's identity to use.
     try:
-        info = mcp.get_context().session.client_params
+        info = get_context().session.client_params
         name = (info.clientInfo.name if info and info.clientInfo else "").lower()
         for marker, engine in _CLIENT_ENGINES:
             if marker in name:
@@ -229,10 +248,19 @@ async def _resolve_project() -> None:
         pass
 
     try:
-        result = await mcp.get_context().session.list_roots()
+        # `ctx.list_roots()` rather than reaching through `.session`: 3.x makes this a
+        # first-class method, and the shorter path is the one it supports.
+        #
+        # **It returns the roots themselves, not a result wrapping them.** FastMCP 1.0
+        # handed back a `ListRootsResult` and this loop read `.roots` off it. That
+        # difference is invisible until it runs, and this whole block is deliberately
+        # swallowed — so the old spelling would have raised `AttributeError`, been
+        # caught two lines up, and silently left every agent's project unresolved.
+        # pyright is what found it; nothing else here would have.
+        roots = await get_context().list_roots()
     except Exception:  # noqa: BLE001 - an unsupported capability is not an error here
         return
-    for root in result.roots:
+    for root in roots:
         uri = str(root.uri)
         if not uri.startswith("file://"):
             continue
@@ -306,7 +334,7 @@ def _entries(path: Path) -> list[str]:
 def _client_name() -> str | None:
     """What the connected client calls itself, if it said."""
     try:
-        info = mcp.get_context().session.client_params
+        info = get_context().session.client_params
         return info.clientInfo.name if info and info.clientInfo else None
     except Exception:  # noqa: BLE001 - only ever used to explain a failure
         return None

@@ -26,7 +26,15 @@ from agent_inbox.mcp_client import mcp
 
 @pytest.fixture
 async def rendered() -> str:
-    got = await mcp.get_prompt("check", {})
+    """The text a `/mcp__agent-inbox__check` actually becomes.
+
+    Two steps under fastmcp 3.x: `get_prompt` returns the registered prompt *object*,
+    and `render` turns it into the messages a client receives. FastMCP 1.0 collapsed
+    both into one call, which is why this changed in the port and nothing about the
+    agent-visible result did.
+    """
+    prompt = await mcp.get_prompt("check")
+    got = await prompt.render({})
     return str(got.messages[0].content.text)  # type: ignore[union-attr]
 
 
