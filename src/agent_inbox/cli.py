@@ -313,8 +313,17 @@ def mcp(project: str | None, describe: bool) -> int:
                             # Every parameter this build offers, named. A parameter that
                             # exists but is not advertised is a feature no agent can
                             # discover, and until this there was no way to notice.
+                            #
+                            # **Through `to_mcp_tool()`, deliberately.** fastmcp 3.x
+                            # returns its own `FunctionTool` from `list_tools`, whose
+                            # schema lives on `.parameters`; the protocol object an
+                            # agent actually receives is what this command exists to
+                            # show. Reading the internal shape would have kept working
+                            # and quietly reported something no client ever sees.
                             "parameters": sorted(
-                                (tool.inputSchema or {}).get("properties", {})
+                                (tool.to_mcp_tool().inputSchema or {}).get(
+                                    "properties", {}
+                                )
                             ),
                         }
                         for tool in sorted(tools, key=lambda t: t.name)

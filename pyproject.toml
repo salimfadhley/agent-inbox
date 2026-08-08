@@ -54,21 +54,18 @@ dependencies = [
 # Client-side only (M3). The hub container does not carry these: mcp pulls in pydantic
 # and starlette, which the API deliberately does not use (ADR 0009).
 clients = [
-    # **The upper bound is debt, and it has an owner and a removal condition.**
+    # **The standalone `fastmcp`, and the `<2` cap on `mcp` is gone with it.**
     #
-    # `mcp` 2.0.0 removed `mcp.server.fastmcp` outright — not renamed, not deprecated;
-    # `FastMCP` appears nowhere in the distribution. `mcp_client` imports it, so any
-    # resolution that picks 2.x produces an MCP server that cannot start.
+    # We used to import `mcp.server.fastmcp.FastMCP` — FastMCP 1.0, vendored into the
+    # official SDK and frozen there. `mcp` 2.0.0 deleted it, a plain `uv tool install`
+    # started resolving to 2.0.0, and clients raised on import. v0.95.0 capped `<2` to
+    # stop that reaching people; this replaces the cap rather than living under it,
+    # which is what the charter asks of a cap.
     #
-    # This was not theoretical for long: `>=1.12` was unbounded, 2.0.0 shipped, and a
-    # plain `uv tool install "agent-inbox[clients]"` — the command in our own onboarding
-    # prompt — began resolving to it. Found on 2026-08-08 on the owner's machine, where
-    # `agent-inbox mcp` failed with `No module named 'mcp.server.fastmcp'`.
-    #
-    # The charter forbids caps as a resting place, so: **removed when `mcp_client` is
-    # ported to the 2.x server API** (issue filed), and not before. Until then this is
-    # the difference between a working client and one that raises on import.
-    "mcp[cli]>=1.12,<2",
+    # `mcp` itself is no longer a direct dependency: `fastmcp` brings the protocol
+    # types it needs, and declaring a package we no longer import would be the same
+    # unbounded hazard again with nothing gained.
+    "fastmcp>=3.4.6",
     "httpx>=0.27",
 ]
 # Vestigial. The console renders its own HTML and reaches the hub over urllib, so it

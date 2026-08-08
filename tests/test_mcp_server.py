@@ -52,7 +52,9 @@ async def test_an_explicit_project_is_not_overridden_by_asking(
     def refuse() -> None:
         raise AssertionError("asked the client despite being told")
 
-    monkeypatch.setattr(mcp_client.mcp, "get_context", refuse)
+    # Patched on the module, not on the server: fastmcp 3.x has no `mcp.get_context()`
+    # — it is a module-level dependency, imported by name.
+    monkeypatch.setattr(mcp_client, "get_context", refuse)
     monkeypatch.setattr(mcp_client, "_project", tmp_path)
     monkeypatch.setattr(mcp_client, "_roots_asked", True)
 
@@ -72,7 +74,7 @@ async def test_asking_survives_a_client_that_offers_no_roots(
     monkeypatch.setattr(mcp_client, "_roots_asked", False)
     monkeypatch.setattr(mcp_client, "_project", None)
     monkeypatch.setattr(
-        mcp_client.mcp, "get_context", lambda: (_ for _ in ()).throw(RuntimeError("no"))
+        mcp_client, "get_context", lambda: (_ for _ in ()).throw(RuntimeError("no"))
     )
     await mcp_client._resolve_project()  # must not raise
     assert mcp_client._project is None
@@ -124,3 +126,43 @@ def test_a_credential_failure_says_it_is_not_the_agents_to_fix(
     assert out["ok"] is False
     assert "cannot fix this yourself" in str(out["what_to_do"])
     assert "retrying will not help" in str(out["what_to_do"])
+
+
+class TestTheServerIsQuietAndActuallyServes:
+    """The port is only done if the thing runs, not merely if it constructs.
+
+    Everything else about the fastmcp 3.x migration was proved by comparing surfaces.
+    These two run a real MCP session, because a server that lists sixteen tools and
+    cannot answer a call would pass every other test in this repository.
+    """
+
+    async def test_a_real_session_lists_and_calls(self) -> None:
+        """initialize, tools/list, prompts/get and tools/call, over the protocol."""
+        from fastmcp import Client
+
+        from agent_inbox.mcp_client import mcp
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            prompts = await client.list_prompts()
+            rendered = await client.get_prompt("check", {})
+            answered = await client.call_tool("hub_info", {})
+
+        assert len(tools) == 16
+        assert [p.name for p in prompts] == ["check"]
+        assert rendered.messages
+        assert answered is not None
+
+    def test_it_starts_without_printing_a_banner(self) -> None:
+        """fastmcp 3.x prints a ten-line box on startup; FastMCP 1.0 printed nothing.
+
+        It goes to stderr, so it does not corrupt the JSON-RPC on stdout — but an
+        agent's client surfaces stderr, and this runs at the start of every session
+        with a mailbox. Asserted on the call rather than by capturing output, because
+        the alternative is spawning a subprocess in a unit test to read its banner.
+        """
+        import inspect
+
+        from agent_inbox import mcp_client
+
+        assert "show_banner=False" in inspect.getsource(mcp_client.main)
