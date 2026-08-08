@@ -1268,7 +1268,12 @@ def main(project: Path | None = None) -> None:
         _project = project
         _roots_asked = True
 
-    mcp.run()
+    # **No banner.** fastmcp 3.x prints a ten-line box on startup that FastMCP 1.0 did
+    # not. It goes to stderr, so it does not corrupt the JSON-RPC on stdout — but an
+    # agent's client surfaces stderr, and this runs at the start of every session that
+    # has a mailbox. A decorative box nobody asked for, once per session, on every
+    # machine, is exactly the furniture this project keeps removing from `doctor`.
+    mcp.run(show_banner=False)
 
 
 if __name__ == "__main__":  # pragma: no cover
