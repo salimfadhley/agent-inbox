@@ -54,7 +54,21 @@ dependencies = [
 # Client-side only (M3). The hub container does not carry these: mcp pulls in pydantic
 # and starlette, which the API deliberately does not use (ADR 0009).
 clients = [
-    "mcp[cli]>=1.12",
+    # **The upper bound is debt, and it has an owner and a removal condition.**
+    #
+    # `mcp` 2.0.0 removed `mcp.server.fastmcp` outright — not renamed, not deprecated;
+    # `FastMCP` appears nowhere in the distribution. `mcp_client` imports it, so any
+    # resolution that picks 2.x produces an MCP server that cannot start.
+    #
+    # This was not theoretical for long: `>=1.12` was unbounded, 2.0.0 shipped, and a
+    # plain `uv tool install "agent-inbox[clients]"` — the command in our own onboarding
+    # prompt — began resolving to it. Found on 2026-08-08 on the owner's machine, where
+    # `agent-inbox mcp` failed with `No module named 'mcp.server.fastmcp'`.
+    #
+    # The charter forbids caps as a resting place, so: **removed when `mcp_client` is
+    # ported to the 2.x server API** (issue filed), and not before. Until then this is
+    # the difference between a working client and one that raises on import.
+    "mcp[cli]>=1.12,<2",
     "httpx>=0.27",
 ]
 # Vestigial. The console renders its own HTML and reaches the hub over urllib, so it

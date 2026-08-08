@@ -47,7 +47,7 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'ui'", specifier = ">=3.1" },
     { name = "litestar", specifier = ">=2.24.0" },
     { name = "markdown", marker = "extra == 'ui'", specifier = ">=3.6" },
-    { name = "mcp", extras = ["cli"], marker = "extra == 'clients'", specifier = ">=1.12" },
+    { name = "mcp", extras = ["cli"], marker = "extra == 'clients'", specifier = ">=1.12,<2" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "pyotp", specifier = ">=2.9" },
     { name = "segno", specifier = ">=1.6" },
