@@ -2076,26 +2076,70 @@ def wake_check(
     is_flag=True,
     help="also wake a fully idle session (async; needs a live-session check)",
 )
-def install_hook(directory: str | None, command: str | None, rewake: bool) -> int:
-    """Add the wake hooks to .claude/settings.json."""
+@click.option(
+    "--engine",
+    "engine",
+    default=None,
+    help="the harness to install for; detected from the environment when omitted.",
+)
+def install_hook(
+    directory: str | None, command: str | None, rewake: bool, engine: str | None
+) -> int:
+    """Install waking for this harness — or say plainly that it has none.
+
+    **It used to write `.claude/settings.json` whatever it was running under**, and
+    report success. The onboarding prompt promised the opposite in as many words:
+    *"where a harness has no such mechanism the command says so and costs you nothing."*
+    It did not say so. It wrote a file nothing read and told the agent it was reachable,
+    which is a false success — the worst kind, because nothing looks wrong.
+
+    Found when `aurelia_saahaa` joined on opencode — the first agent positioned to
+    hit it.
+    """
     from agent_inbox import hookconfig
 
     root = Path(directory) if directory else project_root()
-    path = hookconfig.install(root, command=command, rewake=rewake)
-    extra = " (with async rewake)" if rewake else ""
-    click.echo(f"wake hooks installed in {path}{extra}")
-    click.echo("Restart your session so it picks up the hooks.")
+    harness = engine or detect_engine()
+    try:
+        path = hookconfig.install_for(harness, root, command=command, rewake=rewake)
+    except hookconfig.NoWakingHere as absent:
+        # Exit 0: nothing failed. The command was asked to do something this harness
+        # cannot do, and the honest answer is a plain one — not an error a script has
+        # to interpret, and not a success it would believe.
+        _err(f"no waking here: {absent}")
+        if not harness:
+            _err(
+                "\n     If you know which harness this is, name it:\n"
+                "       agent-inbox install-hook --engine <harness>\n"
+                f"     Known: {', '.join(sorted(hookconfig.SUPPORTED_HARNESSES))}."
+            )
+        return 0
+
+    extra = " (with async rewake)" if rewake and harness == "claude" else ""
+    click.echo(f"waking installed for {harness} in {path}{extra}")
+    click.echo("Restart your session so it picks it up.")
     return 0
 
 
 @cli.command("uninstall-hook")
 @click.option("--dir", "directory", help="project dir (default: this repo root)")
 def uninstall_hook(directory: str | None) -> int:
-    """Remove the wake hooks from .claude/settings.json."""
+    """Remove whatever waking we installed, for every harness.
+
+    **Both, unconditionally, without asking which harness this is.** Uninstall is the
+    command somebody runs when they want it gone, and detection is exactly what may
+    have changed since it was installed — a project that was joined under one harness
+    and is now opened under another would otherwise leave the first one's file behind,
+    still running, with the command reporting success.
+    """
     from agent_inbox import hookconfig
 
     root = Path(directory) if directory else project_root()
-    click.echo(f"wake hooks removed from {hookconfig.uninstall(root)}")
+    removed = [
+        str(hookconfig.uninstall(root)),
+        str(hookconfig.uninstall_opencode(root)),
+    ]
+    click.echo("waking removed from:\n  " + "\n  ".join(removed))
     return 0
 
 

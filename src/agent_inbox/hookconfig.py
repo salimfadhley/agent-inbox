@@ -114,6 +114,90 @@ def apply(
 # -- file I/O --------------------------------------------------------------
 
 
+#: Harnesses whose waking mechanism we know how to install.
+#:
+#: **A harness absent from this is not a failure to install — it is a reason to say
+#: so.**
+#: Until 2026-08-09 `install-hook` wrote `.claude/settings.json` unconditionally and
+#: reported success, whatever harness it was run under. The onboarding prompt promised
+#: the opposite in as many words: *"where a harness has no such mechanism the command
+#: says so and costs you nothing."* It did not say so. It wrote a file nothing read and
+#: told the agent it was being woken.
+#:
+#: `aurelia_saahaa` was the first agent positioned to hit that, on opencode.
+SUPPORTED_HARNESSES: frozenset[str] = frozenset({"claude", "opencode"})
+
+
+def plugin_path(root: Path) -> Path:
+    """Where opencode loads a project's plugins from.
+
+    `.opencode/plugins/` is auto-loaded at startup, which makes it the direct analogue
+    of `.claude/settings.json` — a file in a known place, read by the harness, needing
+    no registration step.
+    """
+    return root / ".opencode" / "plugins" / "agent-inbox-wake.js"
+
+
+def opencode_plugin(command: str) -> str:
+    """The plugin source: subscribe to idle, run *our* waiter, deliver what it says.
+
+    **Thin on purpose, and it must stay thin.** `session.idle` is opencode's analogue of
+    Claude Code's `Stop`, and everything that makes waiting work — holding the hub's
+    event stream, the polling floor beneath it, the announce-once watermark, the re-arm
+    when the clock runs out — already exists in `wake.py` and is harness-agnostic. What
+    differs between harnesses is only *who calls the waiter* and *what they do with exit
+    2*. A second implementation of the waiting logic in JavaScript is the failure this
+    shape exists to avoid.
+
+    **The notice is what the waiter wrote, unaltered.** On Claude Code exit-2 stderr is
+    visibly machine output; here it lands as a message in the conversation, in the
+    human's voice. So it must be unmistakably from the mailbox and must never carry a
+    message *body* — `wake._notice` already emits sender and subject only, and that is
+    the reason this passes its text through rather than composing any of its own.
+    Injecting mail content as a prompt would let any peer drive somebody else's agent,
+    which is ADR 0008 broken at the root.
+
+    One waiter at a time per session: idle can fire again while the previous is held,
+    and two waiters would announce the same arrival twice.
+    """
+    return f"""// Installed by `agent-inbox install-hook`. Safe to delete;
+// re-run the command to restore it.
+//
+// Waking, for opencode. `session.idle` is this harness's `Stop`: it fires when the
+// agent goes quiet. We then run the mailbox's own waiter, which holds the hub's event
+// stream and returns the moment something arrives — or re-arms when its clock runs out.
+//
+// Exit 2 means "there is mail, and here is who it is from" on stderr. That text is
+// passed through unchanged: it names senders and subjects and never a message body,
+// because a message arriving here reads as though your human said it.
+export const AgentInboxWake = async ({{ client, $ }}) => {{
+  let holding = false
+  return {{
+    event: async ({{ event }}) => {{
+      if (event?.type !== "session.idle") return
+      if (holding) return
+      holding = true
+      try {{
+        const args = `--event Stop --wait --poll-interval 5 --wait-timeout 28800`
+        const run = await $`{command} ${{args}}`
+          .nothrow()
+          .quiet()
+        const said = String(run.stderr ?? "").trim()
+        if (run.exitCode === 2 && said) {{
+          await client.session.prompt({{
+            path: {{ id: event.properties.sessionID }},
+            body: {{ parts: [{{ type: "text", text: said }}] }},
+          }})
+        }}
+      }} finally {{
+        holding = false
+      }}
+    }},
+  }}
+}}
+"""
+
+
 def settings_path(root: Path) -> Path:
     return root / ".claude" / "settings.json"
 
@@ -168,6 +252,57 @@ def default_command() -> str:
     under a directory with a space in it.
     """
     return f"{shlex.quote(sys.executable)} -m agent_inbox wake-check"
+
+
+class NoWakingHere(Exception):
+    """This harness has no mechanism we can install into, and saying so is the point.
+
+    Raised rather than returned, and never swallowed by the caller, because the whole
+    defect being fixed is that the absence used to be *silent*: a file was written, a
+    success reported, and the agent went on believing it would be woken.
+    """
+
+
+def install_for(
+    harness: str | None, root: Path, command: str | None = None, *, rewake: bool = False
+) -> Path:
+    """Install waking for the harness actually running, or refuse and say why.
+
+    `harness` is what `client.detect_engine` reported — `None` when it could not tell,
+    which is a legitimate answer and must not be papered over with a guess. Guessing
+    here writes a file the harness never reads and tells somebody they are reachable.
+    """
+    if harness == "claude":
+        return install(root, command, rewake=rewake)
+    if harness == "opencode":
+        return install_opencode(root, command)
+    raise NoWakingHere(
+        f"{harness or 'this harness'} has no waking mechanism I know how to install. "
+        "Nothing has been written. Keep checking your inbox at the start of a turn — "
+        "that always works, and is what every agent did before hooks existed."
+    )
+
+
+def install_opencode(root: Path, command: str | None = None) -> Path:
+    """Write the opencode plugin. Idempotent — the file is replaced, not appended to.
+
+    Unlike `.claude/settings.json`, this file is ours entirely: opencode loads every
+    plugin in the directory, so there is nothing of anybody else's to merge with and
+    nothing to strip. Overwriting is the whole operation.
+    """
+    path = plugin_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(opencode_plugin(command or default_command()), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def uninstall_opencode(root: Path) -> Path:
+    """Remove the plugin. Absent is success — this is how uninstall is called twice."""
+    path = plugin_path(root)
+    path.unlink(missing_ok=True)
+    return path
 
 
 def install(root: Path, command: str | None = None, *, rewake: bool = False) -> Path:
