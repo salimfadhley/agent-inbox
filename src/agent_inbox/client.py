@@ -343,6 +343,11 @@ ENGINE_MARKERS: tuple[tuple[str, str], ...] = (
     ("CODEX_CI", "codex"),
     ("GEMINI_CLI", "gemini"),
     ("CURSOR_TRACE_ID", "cursor"),
+    # Reported by `aurelia_saahaa`, the first agent here on opencode, from their own
+    # environment (2026-08-09). Until this, opencode was in neither detection path, so
+    # the server could not match a session to its `[agents.opencode]` entry and the
+    # agent had to set `AGENT_INBOX_NAME` by hand.
+    ("OPENCODE", "opencode"),
 )
 
 

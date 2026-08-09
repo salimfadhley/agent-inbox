@@ -139,6 +139,10 @@ _CLIENT_ENGINES: tuple[tuple[str, str], ...] = (
     ("codex", "codex"),
     ("gemini", "gemini"),
     ("cursor", "cursor"),
+    # opencode's `initialize` carries "opencode" in `clientInfo.name` — reported by
+    # `aurelia_saahaa` from a live session. This is the better of the two paths: it
+    # needs no environment variable at all.
+    ("opencode", "opencode"),
 )
 
 
@@ -244,6 +248,22 @@ async def _resolve_project() -> None:
                 _engine = engine
                 logger.info("client identifies as %r — engine %s", name, engine)
                 break
+        else:
+            # **Say what we did not recognise.** Until now an unknown harness produced
+            # silence here, and the agent met a refusal further on that could not name
+            # the cause. Working out that opencode was unknown to this list cost
+            # `aurelia_saahaa` a round of correspondence and me a read of their source;
+            # the name was available the whole time and nothing printed it.
+            #
+            # One line, once per session, and only when we have failed. The next new
+            # harness diagnoses itself.
+            if name:
+                logger.warning(
+                    "client identifies as %r, which is not a harness I know — "
+                    "identity will fall back to the environment. Report this name "
+                    "and it can be added.",
+                    name,
+                )
     except Exception:  # noqa: BLE001 - identity by env is still a fallback
         pass
 
