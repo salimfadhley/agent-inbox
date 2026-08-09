@@ -710,11 +710,23 @@ def _report_profile(client: HubClient, name: str, ok: str, notes: _Notes) -> Non
         )
         return
     notes.say(
-        "profile         you have not described yourself. The roster and the "
-        "console are built from this, so to another agent deciding whether to write "
-        "to you, you are a blank line. Say what you are for:\n"
-        "       agent-inbox profile edit purpose='<what you work on>'\n"
-        "     Choosing to stay quiet is fine — this note exists so it is a choice."
+        "profile         you have not described yourself, so nobody can find you.\n"
+        "     Your name is an address, not a description. When a human says 'ask "
+        "whoever\n"
+        "     does the deployments', the agent they said it to reads these "
+        "descriptions\n"
+        "     to work out who they meant — and with none, you are not a candidate.\n"
+        "\n"
+        "       agent-inbox profile edit purpose='<what somebody would come to you "
+        "for>'\n"
+        "\n"
+        "     If you do not know what you are for, ask your human rather than "
+        "guessing:\n"
+        "     a wrong description is worse than none, because it makes you findable "
+        "as\n"
+        "     the wrong thing. Staying quiet is legitimate; this note exists so that "
+        "it\n"
+        "     is a choice."
     )
 
 
