@@ -130,12 +130,23 @@ class TestRunWaitMode:
         out = capsys.readouterr()  # type: ignore[attr-defined]
         assert "urgent" in out.err and out.out == ""
 
-    def test_wait_times_out_silently(
+    def test_running_out_of_time_re_arms_instead_of_going_quiet(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capsys: object,
     ) -> None:
+        """**Rewritten on 2026-08-09** (owner). This was
+        `test_wait_times_out_silently`, and silence was the bug.
+
+        A waiter that reached its deadline exited 0, and nothing started another: a new
+        waiter needs a `Stop` event, and a session idle for eight hours has long since
+        stopped. So the agent went deaf overnight, with nothing said, until a human
+        happened to type something.
+
+        Re-arming works by waking once on purpose. Exit 2 makes Claude Code continue the
+        turn; the turn ends; the `Stop` that follows installs a fresh waiter.
+        """
         monkeypatch.setattr(wake, "_fetch_unread", lambda root: [])
         sleeps: list[float] = []
 
@@ -148,10 +159,71 @@ class TestRunWaitMode:
             sleep=sleeps.append,
         )
 
-        assert code == 0
-        assert sleeps == []
+        assert code == 2, "a waiter that runs out of time must re-arm, not go quiet"
+        assert sleeps == [wake.REARM_SETTLE], "it must settle before re-arming"
         out = capsys.readouterr()  # type: ignore[attr-defined]
-        assert out.out == "" and out.err == ""
+        assert "nothing for you to do" in out.err, out.err
+        assert out.out == ""
+
+    def test_the_re_arm_says_plainly_that_no_mail_is_waiting(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: object,
+    ) -> None:
+        """An agent woken by exit 2 has every reason to assume mail prompted it, and
+        would go looking. Saying so costs one sentence; letting it search costs a turn.
+        """
+        monkeypatch.setattr(wake, "_fetch_unread", lambda root: [])
+
+        wake.run(
+            "Stop",
+            root=tmp_path,
+            wait=True,
+            poll_interval=0.25,
+            wait_timeout=0.0,
+            sleep=lambda _: None,
+        )
+
+        said = capsys.readouterr().err  # type: ignore[attr-defined]
+        assert "No mail" in said
+        assert "housekeeping" in said
+
+    def test_mail_arriving_during_the_settle_is_reported_as_mail(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: object,
+    ) -> None:
+        """The paired positive, and the one that keeps the re-arm honest.
+
+        The settle is a whole minute of real time. Mail landing inside it must produce
+        the ordinary arrival notice — dressing a real message up as housekeeping would
+        be the worst outcome available, because the agent is told there is nothing to
+        do while something waits.
+        """
+        waiting = [{"id": "u/1", "attributedTo": "u/pablo_fantomas", "summary": "late"}]
+        arrived: list[bool] = []
+
+        def fetch(root: Path) -> list[dict[str, object]]:
+            # Empty until the settle has happened, then a message is there.
+            return waiting if arrived else []
+
+        monkeypatch.setattr(wake, "_fetch_unread", fetch)
+
+        code = wake.run(
+            "Stop",
+            root=tmp_path,
+            wait=True,
+            poll_interval=0.25,
+            wait_timeout=0.0,
+            sleep=lambda _: arrived.append(True),
+        )
+
+        said = capsys.readouterr().err  # type: ignore[attr-defined]
+        assert code == 2
+        assert "late" in said, "a real arrival was not reported"
+        assert "housekeeping" not in said, "a real message was dressed up as a re-arm"
 
     def test_wait_exits_when_another_waiter_is_active(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -209,7 +281,10 @@ class TestTheWaiterSurvivesTheHubGoingAway:
             sleep=sleeps.append,
         )
 
-        assert code == 0
+        # 2, not 0, since 2026-08-09: reaching the deadline now re-arms rather than
+        # exiting quietly. The property under test is unchanged and is the line below —
+        # that the waiter polled *through* the failures rather than dying on the first.
+        assert code == 2
         assert attempts["n"] > 3, (
             f"the waiter stopped after {attempts['n']} polls — a hub restart ended it, "
             "and an idle session would never be woken again"

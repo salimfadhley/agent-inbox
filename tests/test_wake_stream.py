@@ -15,7 +15,7 @@ import urllib.error
 import pytest
 
 from agent_inbox.client import Config, HubClient
-from agent_inbox.wake import ArrivalStream
+from agent_inbox.wake import REARM_SETTLE, ArrivalStream
 
 MAIL = b'event: mail\r\ndata: {"id": "abc"}\r\n\r\n'
 KEEPALIVE = b": keep-alive\r\n"
@@ -412,8 +412,16 @@ class TestTheIntervalIsBounded:
         stream = FakeStream(connected=True)
         _drive(monkeypatch, tmp_path, stream, [], wait_timeout=TICK * 6)
 
-        assert len(stream.sleeps) > 1, "the whole wait was spent in one sleep"
-        assert max(stream.sleeps) <= TICK, "the interval is unbounded"
+        # The last sleep is the re-arm settle, not a poll (2026-08-09). It is
+        # deliberately long and deliberately taken on the *stream*, so that mail landing
+        # during it still shortens it — but it is not the interval this bounds.
+        polls, settle = stream.sleeps[:-1], stream.sleeps[-1]
+
+        assert len(polls) > 1, "the whole wait was spent in one sleep"
+        assert max(polls) <= TICK, "the interval is unbounded"
+        assert settle == REARM_SETTLE, (
+            "the wait ended with something other than the re-arm settle"
+        )
 
 
 class TestPollingIsStillTheFloor:

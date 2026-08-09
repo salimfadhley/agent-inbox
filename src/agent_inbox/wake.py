@@ -57,6 +57,24 @@ _TIMEOUT = 3.0
 DEFAULT_POLL_INTERVAL = 5.0
 DEFAULT_WAIT_TIMEOUT = 8 * 60 * 60.0
 
+#: How long to settle before re-arming, once a waiter has run out its clock.
+#:
+#: **The re-arm is the point; the minute is the safety valve.** A waiter reaching its
+#: deadline used to exit quietly, and nothing started another — re-arming needs a `Stop`
+#: event, and a session that has been idle for eight hours has already stopped. So the
+#: agent went deaf, silently, and stayed deaf until a human happened to type something.
+#:
+#: Re-arming works by waking once on purpose: exit 2 makes Claude Code continue the
+#: turn, the turn ends, and the `Stop` that follows installs a fresh waiter. The cost is
+#: one wake per eight idle hours, which is three a day and buys an agent that stays
+#: reachable overnight.
+#:
+#: The minute exists so that a fault cannot turn that into a spin. If anything ever
+#: makes the wait return instantly, the worst case is one wake a minute rather than a
+#: hot loop — and a minute is also long enough that real mail arriving during it is
+#: reported as itself rather than as a re-arm.
+REARM_SETTLE = 60.0
+
 #: How long the waiter sleeps between polls **while it is holding the event stream**.
 #: Five seconds is pointless when the stream will interrupt the sleep in milliseconds,
 #: but it cannot become "however long is left" either: a stream that connected and then
@@ -353,6 +371,43 @@ def _emit(result: WakeResult) -> None:
         sys.stderr.write(result.stderr)
 
 
+def _rearm(event: str, root: Path, sleep: Sleeper) -> int:
+    """Wake once, on purpose, so that a fresh waiter is installed.
+
+    Called when a waiter has run out its clock. Exiting quietly is what left an idle
+    agent unreachable: a new waiter needs a `Stop`, and a session idle for eight hours
+    has long since stopped, so nothing re-armed it and nothing said so.
+
+    **Settle first, then check once more.** Mail arriving during the settle is reported
+    as mail — the ordinary notice, from the ordinary path — because a real arrival must
+    never be dressed up as housekeeping. Only genuine silence produces the re-arm.
+
+    The notice says plainly that nothing is waiting. An agent woken by this should do
+    nothing, and telling it so is cheaper than letting it go looking for the message it
+    assumes prompted the wake.
+    """
+    sleep(REARM_SETTLE)
+    code = _run_once(event, root)
+    if code != 0:
+        return code  # mail turned up while we settled; it speaks for itself
+    _emit(
+        WakeResult(
+            exit_code=_REARM_EXIT,
+            stderr=(
+                "[agent-inbox] No mail. This wake is housekeeping: the mail waiter "
+                "reached its time limit and restarts when this turn ends. **Nothing "
+                "is waiting and there is nothing for you to do** — carry on, or stop.\n"
+            ),
+        )
+    )
+    return _REARM_EXIT
+
+
+#: The exit code that makes Claude Code continue the turn, feeding stderr to the agent.
+#: The same one a real arrival uses, because it is the only one that re-arms.
+_REARM_EXIT = 2
+
+
 def _run_once(event: str, root: Path) -> int:
     result = wake_response(event, _fetch_unread(root), _load_seen(root))
     _save_seen(root, result.seen)
@@ -503,7 +558,7 @@ def _wait_for_wake(
                     return code
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    return 0
+                    return _rearm(event, root, sleep)
                 sleep(min(_interval(poll_interval, stream), remaining))
         finally:
             # On a wake, on a timeout, and on anything raised: a hook that leaks a
