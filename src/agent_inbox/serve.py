@@ -3,7 +3,7 @@
 Configuration is environment only — no config file, no flags. The hub is a container;
 a container's contract is its environment, and anything else would need mounting.
 
-Nothing here has a default that names a machine. `AGENT_MAILBOX_PUBLIC_URL` is how the
+Nothing here has a default that names a machine. `AGENT_INBOX_PUBLIC_URL` is how the
 hub learns its own address, and it must be told (charter: no deployment-specific
 hostnames in the repo). Everything else has a sensible default so a bare `docker run`
 works.
@@ -93,8 +93,7 @@ class Settings:
         auth_mode = _env("AUTH_MODE", "off").lower()
         if auth_mode not in _AUTH_MODES:
             raise ValueError(
-                "AGENT_MAILBOX_AUTH_MODE must be one of "
-                f"{_AUTH_MODES}, not {auth_mode!r}"
+                f"AGENT_INBOX_AUTH_MODE must be one of {_AUTH_MODES}, not {auth_mode!r}"
             )
         return cls(
             db=_env("DB", "/data/agent-mailbox.db"),
@@ -149,7 +148,7 @@ def build_app(
         key = config.secret_key or auth_secrets.generate_key()
         if not config.secret_key:
             logger.warning(
-                "AGENT_MAILBOX_SECRET_KEY is unset — generated an ephemeral "
+                "AGENT_INBOX_SECRET_KEY is unset — generated an ephemeral "
                 "key. Set a stable key or 2FA enrolments will not survive a "
                 "restart."
             )
@@ -177,7 +176,7 @@ def build_app(
             # these are different audiences: whoever deploys the hub reads the log, and
             # may never open the console at all.
             logger.warning(
-                "%s. AGENT_MAILBOX_ADMIN_PASSWORD is set: `admin` can sign in with it "
+                "%s. AGENT_INBOX_ADMIN_PASSWORD is set: `admin` can sign in with it "
                 "WITHOUT a second factor, and can then reset passwords and issue or "
                 "revoke tokens. Anyone who can read this hub's environment "
                 "controls it. Intended for manual testing and for recovering a hub "

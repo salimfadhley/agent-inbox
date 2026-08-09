@@ -255,7 +255,7 @@ def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> 
     if (hub or {}).get("adminPasswordSet"):
         warning += (
             f'<p class="warn"><strong>{html.escape(INSECURE_ADMIN_WARNING)}.</strong> '
-            "<code>AGENT_MAILBOX_ADMIN_PASSWORD</code> is set, so <code>admin</code> "
+            "<code>AGENT_INBOX_ADMIN_PASSWORD</code> is set, so <code>admin</code> "
             "can sign in with it <strong>without a second factor</strong> and then "
             "reset passwords and issue or revoke tokens. Anyone who can read "
             "this hub's environment controls it. Intended for manual testing and for "
@@ -613,17 +613,22 @@ def _version(hub: dict[str, Any]) -> str:
 def _console_base(request: Request) -> str:
     """Where *this console* is reachable, for putting inside the pasted prompt.
 
-    The hub is told its own address (``AGENT_MAILBOX_PUBLIC_URL``) because it stamps
+    The hub is told its own address (``AGENT_INBOX_PUBLIC_URL``) because it stamps
     it into every identifier it emits. A console sidecar is never told, and it cannot
     use the hub's answer: they are different services on different ports. It needs
     the address for one link, and the best evidence available is the address the
     human is looking at right now — if the page reached them here, an agent they
     paste it to can reach it here too.
 
-    ``AGENT_MAILBOX_CONSOLE_URL`` overrides that, for a proxy that rewrites the host
+    ``AGENT_INBOX_CONSOLE_URL`` overrides that, for a proxy that rewrites the host
     without setting the forwarded headers.
     """
-    if override := os.environ.get("AGENT_MAILBOX_CONSOLE_URL", "").strip():
+    # Both prefixes, current first (#63): this read the legacy name only, so a console
+    # deployed with `AGENT_INBOX_CONSOLE_URL` silently ignored it.
+    from agent_inbox.hub_settings import env_with_source
+
+    found = env_with_source("CONSOLE_URL", os.environ)
+    if override := (found[0] if found else ""):
         return override.rstrip("/")
     headers = request.headers
     scheme = headers.get("x-forwarded-proto") or request.url.scheme

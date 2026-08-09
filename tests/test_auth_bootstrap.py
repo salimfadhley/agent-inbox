@@ -159,7 +159,10 @@ class TestTheAdminOverrideWorks:
             await svc.login("admin", OVERRIDE)
 
         logged = " ".join(r.getMessage() for r in caplog.records)
-        assert "AGENT_MAILBOX_ADMIN_PASSWORD" in logged
+        # `AGENT_INBOX_*` since 2026-08-09 (#63). The audit line names the variable an
+        # operator would unset; naming the deprecated one sent them to a name that is
+        # honoured but is not the one to be using.
+        assert "AGENT_INBOX_ADMIN_PASSWORD" in logged
         assert "second factor" in logged
         assert OVERRIDE not in logged, "announce the use, never the value"
 

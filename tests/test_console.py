@@ -1422,7 +1422,10 @@ class TestTheInsecureAdminBanner:
     def test_the_banner_appears_when_the_override_is_set(self) -> None:
         html_out = self._page({"adminPasswordSet": True})
         assert "Explicitly setting an admin password is insecure" in html_out
-        assert "AGENT_MAILBOX_ADMIN_PASSWORD" in html_out
+        # `AGENT_INBOX_*` since 2026-08-09 (#63). The banner tells an operator which
+        # variable to unset, and naming the deprecated one sent them to a variable that
+        # is honoured but is not the one they should be using.
+        assert "AGENT_INBOX_ADMIN_PASSWORD" in html_out
         assert "without a second factor" in html_out
 
     def test_no_banner_on_an_ordinary_hub(self) -> None:

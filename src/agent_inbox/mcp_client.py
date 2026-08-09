@@ -303,7 +303,7 @@ def _unconfigured(exc: NotConfigured) -> str:
             f"identified itself as {_client_name() or 'nothing recognisable'}, and no "
             "engine marker was in the environment either. Newer clients are matched by "
             "the name they send when they connect; if yours is not, set "
-            "AGENT_MAILBOX_NAME in this server's entry in the client's configuration, "
+            "AGENT_INBOX_NAME in this server's entry in the client's configuration, "
             "or run `agent-inbox join` in the project to create an entry for it."
         )
     return (
@@ -315,7 +315,7 @@ def _unconfigured(exc: NotConfigured) -> str:
         "Any one of these fixes it:\n"
         "  * give this server a working directory: add `cwd` to its entry in the MCP\n"
         "    client's configuration, pointing at the project\n"
-        "  * set AGENT_MAILBOX_NAME (and AGENT_MAILBOX_HUB) in that same entry\n"
+        "  * set AGENT_INBOX_NAME (and AGENT_INBOX_HUB) in that same entry\n"
         "  * run `agent-inbox join` in the project, if this engine has no name yet\n\n"
         "Both of the first two pin this server to one identity, so an agent that works "
         "in several projects wants the first, per project."
@@ -800,7 +800,7 @@ async def join(
             note = (
                 "I could not tell which engine I am, so I did not write a config — "
                 "guessing would risk taking another agent's identity. Set "
-                "AGENT_MAILBOX_NAME, or add an [agents.<engine>] entry by hand."
+                "AGENT_INBOX_NAME, or add an [agents.<engine>] entry by hand."
             )
         else:
             try:

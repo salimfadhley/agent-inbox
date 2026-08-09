@@ -50,7 +50,7 @@ logger = logging.getLogger("agent_inbox.auth")
 #: entirely. `tests/test_auth_bootstrap.py` asserts it, so the break happens here and
 #: says what it is.
 #:
-#: `AGENT_MAILBOX_INITIAL_ADMIN_PASSWORD` is the alternative for callers that would
+#: `AGENT_INBOX_INITIAL_ADMIN_PASSWORD` is the alternative for callers that would
 #: rather supply a password than scrape one.
 INITIAL_PASSWORD_LOG_PREFIX = "initial admin password: "
 
@@ -331,7 +331,7 @@ class AuthService:
     ) -> LoginResult:
         """Verify a password and, if enrolled, a second factor. Returns a session.
 
-        **Except in low-security mode.** When ``AGENT_MAILBOX_ADMIN_PASSWORD`` is set,
+        **Except in low-security mode.** When ``AGENT_INBOX_ADMIN_PASSWORD`` is set,
         that value logs `admin` straight in — no second factor, no enrolment, whatever
         state the stored account is in. That is the point of it: it is the way back into
         a hub whose password is forgotten or whose authenticator is gone, and the way a
@@ -363,7 +363,7 @@ class AuthService:
             # timing even in a mode that has already given up on secrecy.
             if hmac.compare_digest(password, self._admin_password):
                 logger.warning(
-                    "admin signed in with AGENT_MAILBOX_ADMIN_PASSWORD — no second "
+                    "admin signed in with AGENT_INBOX_ADMIN_PASSWORD — no second "
                     "factor was required. This hub is in low-security mode."
                 )
                 session = await self._new_session(username, limited=False)

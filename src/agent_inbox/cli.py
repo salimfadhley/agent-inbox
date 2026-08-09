@@ -1,9 +1,9 @@
 """One tool, several modes.
 
-``agent-inbox`` is the command (``agent-mailbox`` is the same program under its older
-name). It runs as an MCP server for an agent, as a terminal client for a human, or as
-the hub itself — and in every mode it is the thing that **owns the local
-configuration**.
+``agent-inbox`` is the command — ``agent-mailbox`` was the same program under its
+older name, and that console script was removed on 2026-08-05. It runs as an MCP
+server for an agent, as a terminal client for a human, or as the hub itself — and in
+every mode it is the thing that **owns the local configuration**.
 
 That ownership is the point. Nobody hand-writes ``agent-inbox.toml``: the first time
 an engine runs here it claims a name and records itself, and because the file persists,
@@ -112,7 +112,8 @@ workspace, falls back to this one, and takes which engine it serves from the cli
 own name. `--project` settles it for a client that offers neither.
 
 `serve` and `console` are the hub and its window: configured by the environment
-(AGENT_MAILBOX_*), not by a project, and they run anywhere.
+(AGENT_INBOX_*, or the legacy AGENT_MAILBOX_*), not by a project, and they run
+anywhere.
 """
 
 
@@ -402,7 +403,7 @@ def reset_admin(username: str) -> int:
     config = Settings.from_env()
     if not config.secret_key:
         _err(
-            "AGENT_MAILBOX_SECRET_KEY is unset. Set the same key the hub runs with, "
+            "AGENT_INBOX_SECRET_KEY is unset. Set the same key the hub runs with, "
             "or the reset writes an account the hub cannot read."
         )
         return 1
@@ -479,7 +480,10 @@ def join(
     # Joining an enforcing hub needs a credential *before* there is a project config to
     # hold one, so the shared machine-wide token counts here too. Explicit beats
     # environment beats machine-wide; whichever it is, it authenticates this call.
-    given = (token or "").strip() or os.environ.get("AGENT_MAILBOX_TOKEN", "").strip()
+    # Both prefixes, current first — via the helper rather than a second reading of
+    # the environment. This read the legacy name only, so an operator who set
+    # `AGENT_INBOX_TOKEN` and had no config file got nothing and no explanation (#63).
+    given = (token or "").strip() or _env_token()
     shared = str(load_global().get("token", "")).strip()
     client = HubClient(
         Config(hub=hub_url, name=name or UNNAMED, role=role, token=given or shared)
@@ -659,6 +663,26 @@ def _say_if_migrated() -> None:
     """
     if said := take_migration_notice():
         _err(f"note: {said}")
+
+
+def _env_token() -> str:
+    """A token from the environment, under either prefix, current winning.
+
+    `hub_settings.env_with_source` already knows how to try both; reading the
+    environment a second way here is how the two came apart in the first place (#63).
+    """
+    from agent_inbox.hub_settings import env_with_source
+
+    found = env_with_source("TOKEN", os.environ)
+    return found[0] if found else ""
+
+
+def _env_token_source() -> str:
+    """Which variable supplied it, so advice points at the one in effect."""
+    from agent_inbox.hub_settings import env_with_source
+
+    found = env_with_source("TOKEN", os.environ)
+    return found[1] if found and found[0] else ""
 
 
 def _report_profile(client: HubClient, name: str, ok: str, notes: _Notes) -> None:
@@ -1534,7 +1558,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     if config is not None:
         token = config.token or ""
     if not token:
-        token = os.environ.get("AGENT_MAILBOX_TOKEN", "").strip()
+        token = _env_token()
     if not token:
         token = str(load_global().get("token", "")).strip()
     # **`--hub` decides who is contacted, not merely what is printed.** This read
@@ -1671,8 +1695,10 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     # through a config that does not contain it.
     source = ""
     if has_token:
-        if os.environ.get("AGENT_MAILBOX_TOKEN", "").strip():
-            source = " (from AGENT_MAILBOX_TOKEN)"
+        if found := _env_token_source():
+            # **The variable that was actually in effect**, not the one we prefer. A
+            # deployment configured under the legacy name told which name to edit.
+            source = f" (from {found})"
         elif diagnostic.token == str(load_global().get("token", "")).strip():
             source = f" (shared, from {global_config_path()})"
         else:

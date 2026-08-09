@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 #: Suppress the whole business. Current name first, as everywhere else.
 OPT_OUT_VARS: tuple[str, ...] = (
     "AGENT_INBOX_NO_MACHINE_FACTS",
-    "AGENT_MAILBOX_NO_MACHINE_FACTS",
+    "AGENT_MAILBOX_NO_MACHINE_FACTS",  # legacy, still honoured
 )
 
 #: A cap on how much of the checkout path to disclose, for roots outside the home

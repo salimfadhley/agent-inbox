@@ -88,7 +88,7 @@ def _fernet(key: str) -> Fernet:
         return Fernet(key.encode("ascii") if isinstance(key, str) else key)
     except (ValueError, TypeError) as exc:
         raise ValueError(
-            "AGENT_MAILBOX_SECRET_KEY is not a valid Fernet key — generate one with "
+            "AGENT_INBOX_SECRET_KEY is not a valid Fernet key — generate one with "
             "the app's --print-secret-key helper and keep it stable across restarts"
         ) from exc
 
