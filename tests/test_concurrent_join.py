@@ -28,6 +28,7 @@ identities survive. Without it, both children read an empty file and the second
 rename discards the first. Deterministically, every run.
 """
 
+import ast
 import os
 import subprocess
 import sys
@@ -214,3 +215,76 @@ class TestALoneJoinIsUnchanged:
             "claude": "rosemary_nasrin",
             "codex": "pablo_fantomas",
         }
+
+
+#: Writing a config file at all. Every one of these replaces the whole file from
+#: something the caller read a moment earlier, which is the shape of the bug.
+RENDERERS = {"_render_project", "_render_global", "_merge_global"}
+
+
+def _locked_ranges(body: ast.AST) -> list[tuple[int, int]]:
+    return [
+        (node.lineno, node.end_lineno or node.lineno)
+        for node in ast.walk(body)
+        if isinstance(node, ast.With)
+        and any(
+            isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Name)
+            and item.context_expr.func.id == "exclusive"
+            for item in node.items
+        )
+    ]
+
+
+class TestEveryWriterIsLocked:
+    """A guard against the *next* one, which is the part a fixed bug cannot cover.
+
+    The six call sites were locked by hand. A seventh added later would be exactly as
+    broken as the original and exactly as quiet about it — no test fails, because the
+    tests above only exercise `write_config`. So this asks the source directly: every
+    call that replaces a config file is lexically inside a `with exclusive(...)`.
+
+    The one way out is a function whose docstring promises **"call with the lock
+    held"**, which is how `_merge_global` exists — its caller needs to read, decide,
+    and write under one lock. A promise in a docstring is weaker than a `with`
+    statement, so it costs a sentence a reviewer will see.
+    """
+
+    def _client(self) -> ast.Module:
+        package = Path(__file__).resolve().parents[1] / "src" / "agent_inbox"
+        return ast.parse((package / "client.py").read_text())
+
+    def test_no_config_write_happens_outside_a_lock(self) -> None:
+        unguarded: list[str] = []
+        for fn in ast.walk(self._client()):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            if "call with the lock held" in (ast.get_docstring(fn) or "").lower():
+                continue
+            ranges = _locked_ranges(fn)
+            for call in ast.walk(fn):
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
+                    continue
+                if call.func.id not in RENDERERS:
+                    continue
+                if not any(lo <= call.lineno <= hi for lo, hi in ranges):
+                    unguarded.append(f"{fn.name} calls {call.func.id} unlocked")
+
+        assert not unguarded, "\n".join(unguarded)
+
+    def test_the_check_can_actually_see_the_calls(self) -> None:
+        """**The premise, established before anything is asserted on it.**
+
+        A search that matched nothing would pass the test above for ever — including
+        on the day somebody renames `_render_project` and every lock quietly stops
+        being checked. So: count them, and expect the six that exist.
+        """
+        found = [
+            call.func.id
+            for call in ast.walk(self._client())
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id in RENDERERS
+        ]
+
+        assert len(found) >= 6, f"expected every writer to be found, saw {found}"
