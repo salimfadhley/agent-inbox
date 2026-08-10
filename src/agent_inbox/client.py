@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent_inbox.locking import exclusive
+
 #: What `join` writes, under the project's own name.
 CONFIG_NAME = "agent-inbox.toml"
 
@@ -130,17 +132,73 @@ def global_config_path(env: dict[str, str] | None = None) -> Path:
     return root / GLOBAL_CONFIG_DIR / GLOBAL_CONFIG_NAME
 
 
+#: Held for the length of a read-modify-write of the project file, so two engines
+#: joining at once cannot each write a file containing only themselves (issue #49).
+#:
+#: **Keyed to the project root, not to the config's filename.** The file may be
+#: `agent-inbox.toml` or the legacy `agent-mailbox.toml`, and `_render_project` may
+#: migrate one to the other *during* the write — a lock named after the file would be
+#: released against a name that no longer exists, and two writers straddling the
+#: migration would hold different locks and neither would be wrong.
+PROJECT_LOCK_NAME = ".agent-inbox.lock"
+
+#: The same, for the machine-wide file. Contention here is *more* likely than on a
+#: project: every project on the machine shares this one file, so two agents in two
+#: unrelated repositories joining at once are contending, and what they would lose is
+#: the shared token.
+GLOBAL_LOCK_NAME = "config.lock"
+
+
+def project_lock_path(start: Path | None = None) -> Path:
+    """Where the project write lock lives — beside the file it protects."""
+    return project_root(start) / PROJECT_LOCK_NAME
+
+
+def global_lock_path(env: dict[str, str] | None = None) -> Path:
+    """Where the machine-wide write lock lives — beside the file it protects."""
+    return global_config_path(env).with_name(GLOBAL_LOCK_NAME)
+
+
 def write_global(settings: dict[str, str], env: dict[str, str] | None = None) -> Path:
     """Merge *settings* into the machine-wide file, creating it if need be.
 
     Merging, never replacing: the file may already hold a hub for another deployment,
     and a tool that silently discarded it would be worse than one that never wrote at
     all. Written 0600 — it holds a credential, and the default umask does not.
+
+    Merging is not enough on its own. Two processes that each merge into what they read
+    and each replace the file produce a file holding only the second one's work — the
+    same lost update as replacing, arriving a step later. The lock is what makes the
+    merge hold.
     """
     path = global_config_path(env)
     path.parent.mkdir(parents=True, exist_ok=True)
+    with exclusive(global_lock_path(env)):
+        _merge_global(settings, env)
+    return path
+
+
+def _merge_global(settings: dict[str, str], env: dict[str, str] | None) -> None:
+    """The read-merge-write of :func:`write_global`. Call with the lock held.
+
+    Split out so a caller that must *decide* from the current contents — see
+    :func:`_set_machine_hub`, which refuses to overwrite a hub somebody chose — can
+    hold the lock across its own read as well. Locking only the write would leave that
+    decision made against a value another process had already replaced, which is the
+    same lost update one level up.
+    """
     data = load_global(env)
     data.update(settings)
+    _render_global(global_config_path(env), data)
+
+
+def _render_global(path: Path, data: dict[str, str]) -> None:
+    """Write the machine-wide file. Call with the lock held.
+
+    Atomic, for the same reason `_render_project` is: this file carries the shared
+    token, and a crash between truncate and write left a machine with no credential
+    and no indication why the hub had started refusing it.
+    """
     lines = [
         "# agent-inbox — machine-wide settings, written by `agent-inbox configure`.",
         "# A shared token belongs here: it admits this machine, whatever project an",
@@ -149,9 +207,23 @@ def write_global(settings: dict[str, str], env: dict[str, str] | None = None) ->
         *(f"{key} = {_toml_str(str(value))}" for key, value in sorted(data.items())),
         "",
     ]
-    path.write_text("\n".join(lines))
-    path.chmod(0o600)
-    return path
+    tmp = _scratch(path)
+    tmp.write_text("\n".join(lines))
+    tmp.chmod(0o600)
+    tmp.replace(path)
+
+
+def _scratch(target: Path) -> Path:
+    """A temp file beside *target* that no other process will pick as well.
+
+    **Not merely tidiness.** A fixed `.tmp` name was shared by every writer, so two of
+    them racing meant one renamed the file away and the other's next operation failed
+    on a path that had ceased to exist — seen for real the first time the concurrent
+    join test ran, as a `FileNotFoundError` from `chmod`. The lock makes that rare; the
+    reclaim path (see `locking.exclusive`) means rare is not never, and an atomic write
+    that only works when uncontended is not an atomic write.
+    """
+    return target.with_name(f"{target.name}.{os.getpid()}.tmp")
 
 
 def write_project(
@@ -169,41 +241,38 @@ def write_project(
     or the MCP server acting for a named client. Falling back to `"default"` when
     nothing is known was how a human shell could write an entry that no real agent
     owns; callers that could be wrong now refuse rather than reach that line.
+
+    **The lock spans the read and the write, not the write alone.** The rename in
+    `_render_project` is already atomic, and atomicity is not the property that was
+    missing: a second writer that read before this one renamed still holds a stale map
+    of engines, and merging into it puts the file back the way it was.
     """
     environ = env if env is not None else dict(os.environ)
     engine = engine or detect_engine(environ) or "default"
-    path = find_config(start) or (project_root(start) / CONFIG_NAME)
-    existing: dict[str, Any] = {}
-    if path.is_file():
-        existing = tomllib.loads(path.read_text())
-    hub = str(settings.get("hub") or existing.get("hub") or "").strip()
-    entries = dict(existing.get("agents") or {})
-    mine = dict(entries.get(engine) or {})
-    for key, value in settings.items():
-        if key != "hub":
-            mine[key] = value
-    entries[engine] = mine
-    return _render_project(path, hub, entries)
+    with exclusive(project_lock_path(start)):
+        path = find_config(start) or (project_root(start) / CONFIG_NAME)
+        existing: dict[str, Any] = {}
+        if path.is_file():
+            existing = tomllib.loads(path.read_text())
+        hub = str(settings.get("hub") or existing.get("hub") or "").strip()
+        entries = dict(existing.get("agents") or {})
+        mine = dict(entries.get(engine) or {})
+        for key, value in settings.items():
+            if key != "hub":
+                mine[key] = value
+        entries[engine] = mine
+        return _render_project(path, hub, entries)
 
 
 def unset_global(name: str, env: dict[str, str] | None = None) -> bool:
     """Remove one machine-wide setting. True if it was there."""
-    data = load_global(env)
-    if name not in data:
-        return False
-    del data[name]
-    path = global_config_path(env)
-    lines = [
-        "# agent-inbox — machine-wide settings, written by `agent-inbox config`.",
-        "# A shared token belongs here: it admits this machine, whatever project an",
-        "# agent is working in. Identity stays per project, in agent-inbox.toml.",
-        "",
-        *(f"{key} = {_toml_str(str(value))}" for key, value in sorted(data.items())),
-        "",
-    ]
-    path.write_text("\n".join(lines))
-    path.chmod(0o600)
-    return True
+    with exclusive(global_lock_path(env)):
+        data = load_global(env)
+        if name not in data:
+            return False
+        del data[name]
+        _render_global(global_config_path(env), data)
+        return True
 
 
 def unset_project(
@@ -212,26 +281,32 @@ def unset_project(
     env: dict[str, str] | None = None,
     engine: str | None = None,
 ) -> bool:
-    """Remove one setting from one engine's entry. True if it was there."""
+    """Remove one setting from one engine's entry. True if it was there.
+
+    Locked for the same reason the writers are, and the loss here is worse than a
+    merge gone wrong: this one *replaces* the file from what it read, so a concurrent
+    join is not merely merged over, it is deleted.
+    """
     environ = env if env is not None else dict(os.environ)
     engine = engine or detect_engine(environ) or "default"
-    path = find_config(start)
-    if path is None or not path.is_file():
-        return False
-    data = tomllib.loads(path.read_text())
-    if name == "hub":
-        if not data.get("hub"):
+    with exclusive(project_lock_path(start)):
+        path = find_config(start)
+        if path is None or not path.is_file():
             return False
-        _render_project(path, "", dict(data.get("agents") or {}))
+        data = tomllib.loads(path.read_text())
+        if name == "hub":
+            if not data.get("hub"):
+                return False
+            _render_project(path, "", dict(data.get("agents") or {}))
+            return True
+        entries = dict(data.get("agents") or {})
+        mine = dict(entries.get(engine) or {})
+        if name not in mine:
+            return False
+        del mine[name]
+        entries[engine] = mine
+        _render_project(path, str(data.get("hub") or ""), entries)
         return True
-    entries = dict(data.get("agents") or {})
-    mine = dict(entries.get(engine) or {})
-    if name not in mine:
-        return False
-    del mine[name]
-    entries[engine] = mine
-    _render_project(path, str(data.get("hub") or ""), entries)
-    return True
 
 
 def effective_settings(
@@ -634,6 +709,13 @@ def write_config(
     The write is atomic (temp file + rename) and every value is escaped, so a
     name or token with an awkward character cannot corrupt the file or lose the
     entries below it.
+
+    **Atomicity was never the missing half** (issue #49). Two engines joining a project
+    in the same moment each read a file without the other's entry, each merge into what
+    they read, and each rename a complete, well-formed file over the top — and the first
+    one's identity is gone. It is exactly the eviction the paragraph above says merging
+    prevents, arriving through the read rather than the write, and it is invisible until
+    somebody's mail stops arriving. So the lock spans from the read to the rename.
     """
     # **Merge into the file that is actually in force, whichever name it wears.** This
     # was `project_root(start) / CONFIG_NAME` — always the canonical name — so a project
@@ -646,48 +728,53 @@ def write_config(
     # file than the one being used. Observed on this repository — a project holding
     # `claude` and `codex` was joined as `claude` and came back holding `claude` alone,
     # with the other identity still on disk and no longer read.
-    target = find_config(start) or (project_root(start) / CONFIG_NAME)
-    existing: dict[str, Any] = {}
-    if target.exists():
-        existing = tomllib.loads(target.read_text())
+    # The project lock is taken before the machine-wide one, here and everywhere. Both
+    # are only ever held in that order, which is what stops the pair deadlocking; a
+    # writer that took the machine-wide lock and then reached for a project's would
+    # close the cycle, so if one is ever added, add it the same way round.
+    with exclusive(project_lock_path(start)):
+        target = find_config(start) or (project_root(start) / CONFIG_NAME)
+        existing: dict[str, Any] = {}
+        if target.exists():
+            existing = tomllib.loads(target.read_text())
 
-    agents: dict[str, Any] = dict(existing.get("agents") or {})
-    _prior = agents.get(engine)
-    prior: dict[str, Any] = _prior if isinstance(_prior, dict) else {}
-    if engine in agents and not force:
-        held = prior.get("name")
-        raise ClientError(
-            f"{engine} is already {held!r} on this project (in {target}). "
-            "Keep it, or pass force to change it — mail addressed to the old name "
-            "stops arriving."
-        )
-    entry = {"name": name, "role": role}
-    # Keep a token we already had unless a new one is given — reconfiguring
-    # identity should not silently drop the credential.
-    kept_token = token or prior.get("token")
-    if kept_token:
-        entry["token"] = kept_token
-    agents[engine] = entry
+        agents: dict[str, Any] = dict(existing.get("agents") or {})
+        _prior = agents.get(engine)
+        prior: dict[str, Any] = _prior if isinstance(_prior, dict) else {}
+        if engine in agents and not force:
+            held = prior.get("name")
+            raise ClientError(
+                f"{engine} is already {held!r} on this project (in {target}). "
+                "Keep it, or pass force to change it — mail addressed to the old name "
+                "stops arriving."
+            )
+        entry = {"name": name, "role": role}
+        # Keep a token we already had unless a new one is given — reconfiguring
+        # identity should not silently drop the credential.
+        kept_token = token or prior.get("token")
+        if kept_token:
+            entry["token"] = kept_token
+        agents[engine] = entry
 
-    # **The hub is machine-wide unless this project already pins one** (v0.48.0).
-    # Writing it here unconditionally is what `join` used to do, and it re-created
-    # the shadowing the machine-wide default exists to remove: every project joined
-    # against
-    # a hub was silently pinned to it for ever, and a later `config set hub` appeared to
-    # do nothing. A project that *has* its own hub keeps it — that is a deliberate
-    # choice somebody made, and `doctor` reports it so it cannot be forgotten.
-    pinned = str(existing.get("hub") or "").strip()
-    # **A credential keeps its hub beside it.** If this engine carries its own token,
-    # the address it was minted against belongs in the same file — otherwise the hub
-    # goes machine-wide while the token stays here, and the engine loads the new hub
-    # with the old hub's key. The hub then answers `token rejected`, which points at
-    # the one thing that is not wrong. Found by an outside review, and it is the same
-    # rule `config set` enforces: hub and token live together.
-    if not pinned and hub and not kept_token:
-        _set_machine_hub(hub)
-    elif not pinned and hub:
-        pinned = hub
-    return _render_project(target, pinned, agents)
+        # **The hub is machine-wide unless this project already pins one** (v0.48.0).
+        # Writing it here unconditionally is what `join` used to do, and it re-created
+        # the shadowing the machine-wide default exists to remove: every project joined
+        # against a hub was silently pinned to it for ever, and a later `config set hub`
+        # appeared to do nothing. A project that *has* its own hub keeps it — that is a
+        # deliberate choice somebody made, and `doctor` reports it so it cannot be
+        # forgotten.
+        pinned = str(existing.get("hub") or "").strip()
+        # **A credential keeps its hub beside it.** If this engine carries its own
+        # token, the address it was minted against belongs in the same file — otherwise
+        # the hub goes machine-wide while the token stays here, and the engine loads the
+        # new hub with the old hub's key. The hub then answers `token rejected`, which
+        # points at the one thing that is not wrong. Found by an outside review, and it
+        # is the same rule `config set` enforces: hub and token live together.
+        if not pinned and hub and not kept_token:
+            _set_machine_hub(hub)
+        elif not pinned and hub:
+            pinned = hub
+        return _render_project(target, pinned, agents)
 
 
 def _set_machine_hub(hub: str, env: dict[str, str] | None = None) -> None:
@@ -710,17 +797,24 @@ def _set_machine_hub(hub: str, env: dict[str, str] | None = None) -> None:
     and a config tool that loses an operator's decision is worse than one that declines
     to make it.
     """
-    current = str(load_global(env).get("hub") or "").strip()
-    if current and current != hub:
-        logger.warning(
-            "event=config.hub.kept existing=%s offered=%s — the machine-wide hub was "
-            "already set; keeping it. Change it deliberately with "
-            "`agent-inbox config --global set hub <url>`.",
-            current,
-            hub,
-        )
-        return
-    write_global({"hub": hub}, env)
+    # Read and write under one lock. The decision below is made *from* the current
+    # value, so a read outside the lock is a decision about a file that may already
+    # have changed — and the losing branch is the dangerous one: it would conclude
+    # "absent, or the same" from a stale read and overwrite a hub somebody had just
+    # chosen, which is the failure this function exists to have stopped.
+    global_config_path(env).parent.mkdir(parents=True, exist_ok=True)
+    with exclusive(global_lock_path(env)):
+        current = str(load_global(env).get("hub") or "").strip()
+        if current and current != hub:
+            logger.warning(
+                "event=config.hub.kept existing=%s offered=%s — the machine-wide hub "
+                "was already set; keeping it. Change it deliberately with "
+                "`agent-inbox config --global set hub <url>`.",
+                current,
+                hub,
+            )
+            return
+        _merge_global({"hub": hub}, env)
 
 
 #: What a caller is told after a config write moved the file. Empty when nothing moved.
@@ -868,7 +962,7 @@ def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
             lines.append(f"token = {_toml_str(str(item['token']))}")
     # Atomic: write a sibling temp file and rename over the target, so a crash mid-write
     # never leaves a half-written config that loses everyone's identity.
-    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp = _scratch(target)
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp.replace(target)
     # **The old file goes only after the new one is on disk.** Dying between the two

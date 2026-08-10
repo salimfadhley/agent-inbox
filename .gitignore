@@ -62,7 +62,12 @@ mcp.json
 agent-mailbox.toml
 # …and under its current name. An identity file, never ours to publish.
 agent-inbox.toml
+# opencode project config may carry identity — same rule.
+opencode.json
 .agent-mailbox-seen.json
+# The project write lock (issue #49). Held for the length of a config write and
+# removed on release; it survives only a crash, and never belongs to the repository.
+.agent-inbox.lock
 
 # JetBrains IDE
 .idea/
