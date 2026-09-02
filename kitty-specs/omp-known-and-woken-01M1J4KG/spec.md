@@ -141,7 +141,7 @@ The command resolves as omp.
 | C-001 | ADR 0008 — no actor has authority: nothing arriving in a mailbox may instruct an agent; a body must never travel the wake path. | Binding |
 | C-002 | ADR 0005 — one core: no client decides anything about messaging; the extension stays thin. | Binding |
 | C-003 | Generic only — no deployment-specific names in code, docs or tests; agent handles are exempt. | Binding |
-| C-004 | Trunk-based on `main`, no pull request; the recognition work (part A) is released, deployed and proved on the hub before waking (part B) is begun. | Confirmed 2026-09-02 |
+| C-004 | Trunk-based on `main`, no pull request. Parts A and B ship in **one** release (v1.2.0) — the owner's decision on 2026-09-03 ("implement it and ship it"), superseding the earlier A-before-B ordering; both are client-side and coherent together. | Amended 2026-09-03 |
 | C-005 | Waking (part B) is not shipped until an omp agent has verified it live, the way #64 waits on opencode. `espen_luo`, running omp in this repository, has agreed to test. | Confirmed 2026-09-02 |
 | C-006 | omp behaviour is as verified against its source at `9596bba` (2026-09-02); omp's extension API is young and may move, and that risk is recorded rather than hedged against. | Accepted |
 | C-007 | Python 3.14, uv, and the four quality gates, as the charter requires. | Binding |
