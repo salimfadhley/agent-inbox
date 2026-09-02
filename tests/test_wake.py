@@ -108,7 +108,7 @@ class TestRunWaitMode:
     ) -> None:
         unread = [[], [_msg("a", "jed_smith", "urgent")]]
 
-        def fetch_unread(root: Path) -> list[dict]:
+        def fetch_unread(root: Path, engine: str | None = None) -> list[dict]:
             assert root == tmp_path
             return unread.pop(0)
 
@@ -147,7 +147,7 @@ class TestRunWaitMode:
         Re-arming works by waking once on purpose. Exit 2 makes Claude Code continue the
         turn; the turn ends; the `Stop` that follows installs a fresh waiter.
         """
-        monkeypatch.setattr(wake, "_fetch_unread", lambda root: [])
+        monkeypatch.setattr(wake, "_fetch_unread", lambda root, engine=None: [])
         sleeps: list[float] = []
 
         code = wake.run(
@@ -174,7 +174,7 @@ class TestRunWaitMode:
         """An agent woken by exit 2 has every reason to assume mail prompted it, and
         would go looking. Saying so costs one sentence; letting it search costs a turn.
         """
-        monkeypatch.setattr(wake, "_fetch_unread", lambda root: [])
+        monkeypatch.setattr(wake, "_fetch_unread", lambda root, engine=None: [])
 
         wake.run(
             "Stop",
@@ -205,7 +205,7 @@ class TestRunWaitMode:
         waiting = [{"id": "u/1", "attributedTo": "u/pablo_fantomas", "summary": "late"}]
         arrived: list[bool] = []
 
-        def fetch(root: Path) -> list[dict[str, object]]:
+        def fetch(root: Path, engine: str | None = None) -> list[dict[str, object]]:
             # Empty until the settle has happened, then a message is there.
             return waiting if arrived else []
 
@@ -232,7 +232,7 @@ class TestRunWaitMode:
         lock.write_text(json.dumps({"pid": os.getpid(), "created": time.time()}))
         called = False
 
-        def fetch_unread(root: Path) -> list[dict]:
+        def fetch_unread(root: Path, engine: str | None = None) -> list[dict]:
             nonlocal called
             called = True
             return []
@@ -264,7 +264,7 @@ class TestTheWaiterSurvivesTheHubGoingAway:
 
         attempts = {"n": 0}
 
-        def flaky(root: Path) -> list[dict[str, object]]:
+        def flaky(root: Path, engine: str | None = None) -> list[dict[str, object]]:
             attempts["n"] += 1
             if attempts["n"] in (2, 3):
                 raise ConnectionError("hub restarting")
@@ -298,7 +298,7 @@ class TestTheWaiterSurvivesTheHubGoingAway:
 
         attempts = {"n": 0}
 
-        def flaky(root: Path) -> list[dict[str, object]]:
+        def flaky(root: Path, engine: str | None = None) -> list[dict[str, object]]:
             attempts["n"] += 1
             if attempts["n"] == 1:
                 raise ConnectionError("hub restarting")

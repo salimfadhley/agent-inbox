@@ -125,7 +125,7 @@ def apply(
 #: told the agent it was being woken.
 #:
 #: `aurelia_saahaa` was the first agent positioned to hit that, on opencode.
-SUPPORTED_HARNESSES: frozenset[str] = frozenset({"claude", "opencode"})
+SUPPORTED_HARNESSES: frozenset[str] = frozenset({"claude", "opencode", "omp"})
 
 
 def plugin_path(root: Path) -> Path:
@@ -194,6 +194,107 @@ export const AgentInboxWake = async ({{ client, $ }}) => {{
       }}
     }},
   }}
+}}
+"""
+
+
+def omp_extension_path(root: Path) -> Path:
+    """Where omp (oh-my-pi) auto-loads a project's extensions from.
+
+    `<cwd>/.omp/extensions/` is scanned at startup for `.ts` and `.js`, cwd-only with
+    no ancestor walk (`docs/extension-loading.md`) — the same shape as
+    `.opencode/plugins/`, and for the same reason the analogue of
+    `.claude/settings.json`.
+    """
+    return root / ".omp" / "extensions" / "agent-inbox-wake.js"
+
+
+def omp_extension(command: str) -> str:
+    """The extension source: arm *our* waiter when the agent goes quiet, deliver on 2.
+
+    **The same shape as the opencode plugin, and thin for the same reason** — see
+    `opencode_plugin`. What differs is the harness's primitive, and omp's is stronger.
+    `pi.sendMessage(text, {{ deliverAs: "followUp", triggerTurn: true }})` starts a turn
+    on an *idle* session: an omp agent whose human has walked away is woken, which
+    Claude Code's blocking `Stop` hook cannot do. `followUp` — never the default
+    `steer`, which interrupts a running agent — is what keeps the prompt's promise that
+    *waking is not interrupting*: a notice that lands mid-run waits for the run to end.
+
+    **Extensions run in-process with no isolation** (`docs/extensions.md`). A raw timer
+    or detached promise that throws is an `uncaughtException` and tears down the whole
+    session. So the waiter is deferred through `ctx.setTimeout` — managed: a rejected
+    promise is logged, not fatal; `unref`'d; cleared on shutdown — and never awaited
+    inside the handler, where an hours-long await would hold every other extension's
+    `agent_end` behind it. The child is aborted on `session_shutdown` so no orphan
+    waiter outlives its session.
+
+    `attribution` is left to omp's default, which `normalizeCustomMessagePayload`
+    sets to `"agent"` — machine output, not the human's voice. The notice text is the
+    waiter's, unaltered: sender and subject, never a body (ADR 0008).
+
+    `command` is split into argv here because `pi.exec` takes `(command, args)` and
+    spawns without a shell; `shlex` undoes the quoting `default_command` applied.
+    """
+    argv = json.dumps(shlex.split(command))
+    return f"""// Installed by `agent-inbox install-hook`. Safe to delete;
+// re-run the command to restore it.
+//
+// Waking, for omp (oh-my-pi). `agent_end` is this harness's `Stop`: it fires when the
+// agent goes quiet. We then run the mailbox's own waiter, which holds the hub's event
+// stream and returns the moment something arrives — or re-arms when its clock runs out.
+// `session_start` arms it too, so a freshly opened session that has not yet taken a
+// turn is reachable as well.
+//
+// Exit 2 means "there is mail, and here is who it is from" on stderr. That text is
+// passed through unchanged: it names senders and subjects and never a message body,
+// because a message arriving here lands in your conversation.
+//
+// `followUp` queues the notice until any running turn ends; `triggerTurn` starts one
+// if you are idle. The default, `steer`, would interrupt you mid-run, and is not used.
+export default function (pi) {{
+  const argv = {argv}
+  // `--engine omp` because a process omp starts for us carries no marker at all, and
+  // a project with several agents configured would otherwise be unresolvable.
+  const args = [
+    "--engine", "omp", "--event", "Stop", "--wait",
+    "--poll-interval", "5", "--wait-timeout", "28800",
+  ]
+  let holding = false
+  let abort = null
+
+  pi.setLabel("agent-inbox wake")
+
+  const arm = (ctx) => {{
+    if (holding) return
+    holding = true
+    // Deferred, not awaited: extensions share one process with no isolation, and
+    // `ctx.setTimeout` is the managed timer whose rejections are logged rather than
+    // fatal. Awaiting here would also hold every other extension's handler for hours.
+    ctx.setTimeout(async () => {{
+      abort = new AbortController()
+      try {{
+        const run = await pi.exec(
+          argv[0], argv.slice(1).concat(args), {{ signal: abort.signal }},
+        )
+        const said = String(run.stderr ?? "").trim()
+        if (run.code === 2 && said && !run.killed) {{
+          pi.sendMessage(
+            {{ customType: "agent-inbox", content: said, display: true }},
+            {{ deliverAs: "followUp", triggerTurn: true }},
+          )
+        }}
+      }} finally {{
+        abort = null
+        holding = false
+      }}
+    }}, 0)
+  }}
+
+  pi.on("session_start", async (_event, ctx) => arm(ctx))
+  pi.on("agent_end", async (_event, ctx) => arm(ctx))
+  pi.on("session_shutdown", async () => {{
+    if (abort) abort.abort()
+  }})
 }}
 """
 
@@ -276,6 +377,8 @@ def install_for(
         return install(root, command, rewake=rewake)
     if harness == "opencode":
         return install_opencode(root, command)
+    if harness == "omp":
+        return install_omp(root, command)
     raise NoWakingHere(
         f"{harness or 'this harness'} has no waking mechanism I know how to install. "
         "Nothing has been written. Keep checking your inbox at the start of a turn — "
@@ -301,6 +404,23 @@ def install_opencode(root: Path, command: str | None = None) -> Path:
 def uninstall_opencode(root: Path) -> Path:
     """Remove the plugin. Absent is success — this is how uninstall is called twice."""
     path = plugin_path(root)
+    path.unlink(missing_ok=True)
+    return path
+
+
+def install_omp(root: Path, command: str | None = None) -> Path:
+    """Write the omp extension. Idempotent, entirely ours — see `install_opencode`."""
+    path = omp_extension_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(omp_extension(command or default_command()), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def uninstall_omp(root: Path) -> Path:
+    """Remove the extension. Absent is success."""
+    path = omp_extension_path(root)
     path.unlink(missing_ok=True)
     return path
 

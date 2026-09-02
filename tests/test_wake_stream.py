@@ -336,11 +336,11 @@ def _drive(monkeypatch, tmp_path, stream, unread, **kw) -> int:
 
     queue = list(unread)
 
-    def fetch_unread(root):
+    def fetch_unread(root, engine=None):
         return queue.pop(0) if queue else []
 
     monkeypatch.setattr(wake, "_fetch_unread", fetch_unread)
-    monkeypatch.setattr(wake, "_stream_for", lambda root: stream)
+    monkeypatch.setattr(wake, "_stream_for", lambda root, engine=None: stream)
     monkeypatch.setattr(wake, "STREAMING_POLL_INTERVAL", TICK)
     return wake.run(
         "Stop",

@@ -358,8 +358,8 @@ def _save_seen(root: Path, seen: frozenset[str]) -> None:
         pass
 
 
-def _fetch_unread(root: Path) -> list[dict[str, Any]]:
-    config = load_config(start=root)
+def _fetch_unread(root: Path, engine: str | None = None) -> list[dict[str, Any]]:
+    config = load_config(start=root, engine=engine)
     unread = HubClient(config, timeout=_TIMEOUT).check_inbox().get("items", [])
     return list(unread)
 
@@ -371,7 +371,7 @@ def _emit(result: WakeResult) -> None:
         sys.stderr.write(result.stderr)
 
 
-def _rearm(event: str, root: Path, sleep: Sleeper) -> int:
+def _rearm(event: str, root: Path, sleep: Sleeper, engine: str | None = None) -> int:
     """Wake once, on purpose, so that a fresh waiter is installed.
 
     Called when a waiter has run out its clock. Exiting quietly is what left an idle
@@ -387,7 +387,7 @@ def _rearm(event: str, root: Path, sleep: Sleeper) -> int:
     assumes prompted the wake.
     """
     sleep(REARM_SETTLE)
-    code = _run_once(event, root)
+    code = _run_once(event, root, engine)
     if code != 0:
         return code  # mail turned up while we settled; it speaks for itself
     _emit(
@@ -408,8 +408,8 @@ def _rearm(event: str, root: Path, sleep: Sleeper) -> int:
 _REARM_EXIT = 2
 
 
-def _run_once(event: str, root: Path) -> int:
-    result = wake_response(event, _fetch_unread(root), _load_seen(root))
+def _run_once(event: str, root: Path, engine: str | None = None) -> int:
+    result = wake_response(event, _fetch_unread(root, engine), _load_seen(root))
     _save_seen(root, result.seen)
     _emit(result)
     return result.exit_code
@@ -489,14 +489,16 @@ def _single_waiter(root: Path, *, max_age: float) -> Iterator[bool]:
             _release_lock(path)
 
 
-def _stream_for(root: Path) -> ArrivalStream | None:
+def _stream_for(root: Path, engine: str | None = None) -> ArrivalStream | None:
     """The stream for this project's identity, or `None` if we cannot have one.
 
     Unconfigured, unreadable, or anything else at all: the answer is `None` and the
     waiter polls. Nothing here is worth failing a wait over.
     """
     try:
-        return ArrivalStream(HubClient(load_config(start=root), timeout=_TIMEOUT))
+        return ArrivalStream(
+            HubClient(load_config(start=root, engine=engine), timeout=_TIMEOUT)
+        )
     except Exception:  # noqa: BLE001 - no stream is a supported state, not an error
         return None
 
@@ -524,6 +526,7 @@ def _wait_for_wake(
     poll_interval: float,
     wait_timeout: float,
     sleep: Sleeper,
+    engine: str | None = None,
 ) -> int:
     poll_interval = max(0.1, poll_interval)
     wait_timeout = max(0.0, wait_timeout)
@@ -534,7 +537,7 @@ def _wait_for_wake(
         # After the lock, never before: the lock is what keeps this to one waiter per
         # project, and connecting first would open a stream only to discover somebody
         # else already holds the project and close it again.
-        stream = _stream_for(root)
+        stream = _stream_for(root, engine)
         if stream is not None:
             stream.start()
             # The stream's `wait` *is* a sleeper — it sleeps, unless mail arrives. That
@@ -544,7 +547,7 @@ def _wait_for_wake(
         try:
             while True:
                 try:
-                    code = _run_once(event, root)
+                    code = _run_once(event, root, engine)
                 except Exception:  # noqa: BLE001 - a blip must not end an 8-hour wait
                     # The one-shot hook may fail silently and be retried next turn. A
                     # waiter has no next turn: it *is* the thing keeping an idle session
@@ -558,7 +561,7 @@ def _wait_for_wake(
                     return code
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    return _rearm(event, root, sleep)
+                    return _rearm(event, root, sleep, engine)
                 sleep(min(_interval(poll_interval, stream), remaining))
         finally:
             # On a wake, on a timeout, and on anything raised: a hook that leaks a
@@ -575,8 +578,15 @@ def run(
     poll_interval: float = DEFAULT_POLL_INTERVAL,
     wait_timeout: float = DEFAULT_WAIT_TIMEOUT,
     sleep: Sleeper = time.sleep,
+    engine: str | None = None,
 ) -> int:
     """Execute a wake-check for ``event``. Prints and returns an exit code.
+
+    `engine` names whose identity this waits for. Until #65 the waiter only ever
+    sniffed the environment, which was enough while every harness that could call it
+    marked its children — but a process omp starts for an extension carries no marker
+    at all, and a project with two agents configured is then unresolvable. The
+    extension says which; `None` keeps the old behaviour for the harnesses that mark.
 
     Wrapped so that **any** failure — hub down, unconfigured, corrupt state, a bug —
     prints nothing and exits 0. A hook that runs on every turn must never break, hang,
@@ -592,7 +602,8 @@ def run(
                 poll_interval=poll_interval,
                 wait_timeout=wait_timeout,
                 sleep=sleep,
+                engine=engine,
             )
-        return _run_once(event, base)
+        return _run_once(event, base, engine)
     except Exception:  # noqa: BLE001 - fail-silent is the whole contract here
         return 0

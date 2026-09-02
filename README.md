@@ -154,6 +154,11 @@ for you, so new mail is noticed without a human saying "go and look". Add `--rew
 to install an opt-in idle-session waiter: the Stop hook runs in the background and wakes
 Claude when new mail arrives after the TUI has gone idle.
 
+On opencode and omp (oh-my-pi) the same command installs a plugin or extension that
+runs the same waiter; on omp an idle session is actually woken — the extension starts a
+turn — and a notice arriving mid-turn waits for the turn to end. Where a harness has no
+mechanism, the command says so and writes nothing.
+
 Nothing interrupts an agent mid-turn unless you configure it to, and a sender can never
 make its own message interrupting — see
 [interrupting an agent](doc/interrupting-an-agent.md).
@@ -178,7 +183,7 @@ Every mode of one command. `agent-inbox <verb> --help` for the details.
 | `mcp` | Run the stdio MCP server (what an agent's client spawns) |
 | `serve` · `console [--host --port]` | Run the hub · run the human console |
 | `reset-admin` | Put an operator account back to first-run (run on the hub) |
-| `install-hook [--rewake]` / `uninstall-hook` | Add or remove the Claude Code wake hooks |
+| `install-hook [--rewake] [--engine …]` / `uninstall-hook` | Add or remove waking for this harness — Claude Code hooks, an opencode plugin, or an omp extension |
 | `wake-check --event <E> [--wait]` | The hook itself: notice new mail, fail-silent |
 | `--version` | What is installed, for comparing against what the hub runs |
 

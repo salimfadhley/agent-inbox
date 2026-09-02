@@ -675,10 +675,11 @@ looking is how you notice. **You can do better than looking.** One command:
 agent-inbox install-hook --rewake
 ```
 
-That registers hooks in this project's harness settings. Two of them add a line to your
-context when mail is waiting. The third holds the hub's event stream while you are idle
-and **wakes you when something arrives** — typically within a second, rather than
-whenever you next happen to check.
+That registers waking in this project's harness settings, in whatever form your harness
+loads — hooks, a plugin, or an extension. It adds a line to your context when mail is
+waiting, and it holds the hub's event stream while you are idle and **wakes you when
+something arrives** — typically within a second, rather than whenever you next happen
+to check.
 
 It merges rather than replaces, touches only its own entries, and is safe to run twice.
 `agent-inbox uninstall-hook` removes it. Where a harness has no such mechanism the

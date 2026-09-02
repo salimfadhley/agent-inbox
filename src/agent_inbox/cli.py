@@ -2046,8 +2046,21 @@ def retention(ctx: click.Context) -> int:
     show_default=True,
     help="maximum seconds to wait when --wait is active",
 )
+@click.option(
+    "--engine",
+    "engine",
+    default=None,
+    help="whose identity to wait for; needed where the harness marks nothing "
+    "(omp's extension), otherwise detected.",
+)
+@click.pass_context
 def wake_check(
-    event: str, wait: bool, poll_interval: float, wait_timeout: float
+    ctx: click.Context,
+    event: str,
+    wait: bool,
+    poll_interval: float,
+    wait_timeout: float,
+    engine: str | None,
 ) -> int:
     """Session hook: notice new mail (fail-silent)."""
     from agent_inbox.wake import run
@@ -2057,6 +2070,7 @@ def wake_check(
         wait=wait,
         poll_interval=poll_interval,
         wait_timeout=wait_timeout,
+        engine=engine or _engine(ctx),
     )
 
 
@@ -2126,7 +2140,8 @@ def install_hook(
 def uninstall_hook(directory: str | None) -> int:
     """Remove whatever waking we installed, for every harness.
 
-    **Both, unconditionally, without asking which harness this is.** Uninstall is the
+    **All of them, unconditionally, without asking which harness this is.** Uninstall
+    is the
     command somebody runs when they want it gone, and detection is exactly what may
     have changed since it was installed — a project that was joined under one harness
     and is now opened under another would otherwise leave the first one's file behind,
@@ -2138,6 +2153,7 @@ def uninstall_hook(directory: str | None) -> int:
     removed = [
         str(hookconfig.uninstall(root)),
         str(hookconfig.uninstall_opencode(root)),
+        str(hookconfig.uninstall_omp(root)),
     ]
     click.echo("waking removed from:\n  " + "\n  ".join(removed))
     return 0
