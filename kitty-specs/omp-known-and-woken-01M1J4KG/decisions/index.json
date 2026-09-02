@@ -1,0 +1,30 @@
+{
+  "entries": [
+    {
+      "created_at": "2026-09-02T22:44:22.586479Z",
+      "decision_id": "01M1J4PXXTHJYG8M88J1M01Z4R",
+      "final_answer": "Yes, as stated",
+      "input_key": "intent_summary_confirmed",
+      "mission_id": "01M1J4KGV995RPKZXZCV00QX93",
+      "mission_slug": "omp-known-and-woken-01M1J4KG",
+      "opened_by": "cli",
+      "options": [
+        "Yes, as stated",
+        "Ship both parts together",
+        "Other"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Intent Summary confirmed as stated: two parts, part A ships first, waking ships after live omp verification?",
+      "rationale": null,
+      "resolved_at": "2026-09-02T22:44:23.292224Z",
+      "resolved_by": null,
+      "slot_key": "specify.scope.intent-summary",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    }
+  ],
+  "mission_id": "01M1J4KGV995RPKZXZCV00QX93",
+  "version": 1
+}
