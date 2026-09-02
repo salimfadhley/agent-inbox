@@ -404,6 +404,13 @@ STARTUP_RETRY_EVERY = 0.75
 #: Two of them sharing a name would silently share an inbox, which is the exact failure
 #: the hub's name reservation exists to prevent.
 ENGINE_MARKERS: tuple[tuple[str, str], ...] = (
+    # **Before the Claude Code markers, and it has to be.** omp (oh-my-pi) sets
+    # `OMPCODE=1` *and* `CLAUDECODE=1` on the shell it gives its agent — it imitates
+    # Claude Code so that tooling written for Claude Code keeps working
+    # (`packages/utils/src/procmgr.ts`, read on 2026-09-02). First match wins here, so
+    # with the Claude entries first every command an omp agent ran resolved as Claude
+    # Code, and `espen_luo`'s first `join` claimed the Claude identity (issue #65).
+    ("OMPCODE", "omp"),
     ("CLAUDECODE", "claude"),
     ("CLAUDE_CODE_ENTRYPOINT", "claude"),
     ("CODEX_SANDBOX", "codex"),

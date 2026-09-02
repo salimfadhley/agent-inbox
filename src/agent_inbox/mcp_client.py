@@ -143,6 +143,12 @@ _CLIENT_ENGINES: tuple[tuple[str, str], ...] = (
     # `aurelia_saahaa` from a live session. This is the better of the two paths: it
     # needs no environment variable at all.
     ("opencode", "opencode"),
+    # omp (oh-my-pi) sends `clientInfo.name = "omp-coding-agent"` — read from its
+    # `mcp/client.ts`, not recalled (issue #65). It exports no environment marker to
+    # its children at all, so this is its only route, and it is the good one. Last in
+    # the tuple because it is the shortest marker: substring matching means it must
+    # not get a look at a name before the longer markers have.
+    ("omp", "omp"),
 )
 
 
@@ -769,9 +775,13 @@ async def join(
     """
 
     def go() -> dict[str, Any]:
-        engine = detect_engine()
+        # The name the client announced on connect beats any marker this process
+        # inherited. omp hands its children Claude Code's marker as well as its own
+        # (#65), and sniffing the environment here is how an omp agent's `join` wrote
+        # `[agents.claude]` — a wrong identity, the worst answer this can give.
+        engine = _engine or detect_engine()
         try:
-            config = load_config()
+            config = load_config(engine=engine)
             configured = True
         except NotConfigured:
             configured = False
