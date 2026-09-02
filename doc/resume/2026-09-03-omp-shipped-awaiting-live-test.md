@@ -8,19 +8,16 @@ owner to restart the omp session — they said they would do it tomorrow.
 
 - **Code:** `82309aa` (omp is a known harness) and `e9bf4da` (omp waking). Gates green,
   removal proofs run. Spec C-004 amended (`5362c70`): both parts shipped as one release.
-- **Release:** tag `v1.2.0` pushed at 23:15 UTC 2026-09-02. A background job was waiting
-  for the Release and Docker workflows and would then run
-  `~/workspace/agent_inbox_private/deploy/ship-fly.sh 1.2.0` and `verify-deployment`.
-  **Check that it landed** — do not assume: `agent-inbox verify-deployment` must report
-  1.2.0 for hub and console at the public addresses. Log was in the session scratchpad
-  (`ship-1.2.0.log`), which does not survive the session; if unsure, run the script
-  again — it is idempotent and refuses to say shipped unless proved.
+- **Release:** v1.2.0 released (PyPI + Docker Hub) and **deployed to stodge, proved**:
+  `verify-deployment` — 5 checks, hub and console both 1.2.0 (2026-09-02 23:50 UTC).
+  Deployed by dispatching the private repo's workflow — the Actions allowance is back —
+  `gh workflow run deploy.yml -R salimfadhley/agent-inbox-private -f version=1.2.0`;
+  `ship-fly.sh` locally needs `flyctl auth login`, which has lapsed on this machine.
 - **Local tool:** `~/.local/bin/agent-inbox` is 1.2.0, installed from this checkout.
 - **MCP config:** `~/.claude.json` repointed from the removed `agent-mailbox` script to
   `agent-inbox`. omp imported the stale entry, so its mailbox has been dead all session;
   the restart fixes that.
-- **Announcement to all agents:** not yet sent. Do it once the deploy is proved (memory:
-  release every fix and tell the agents).
+- **Announcement to all agents:** sent after the deploy was proved.
 
 ## The test, step by step (already sent to espen_luo as mail)
 
