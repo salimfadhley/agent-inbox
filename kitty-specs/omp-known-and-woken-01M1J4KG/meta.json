@@ -1,0 +1,18 @@
+{
+  "coordination_branch": "kitty/mission-omp-known-and-woken-01M1J4KG",
+  "created_at": "2026-09-02T22:42:30.890388+00:00",
+  "flattened": false,
+  "friendly_name": "Know and wake omp agents",
+  "mission_id": "01M1J4KGV995RPKZXZCV00QX93",
+  "mission_number": null,
+  "mission_slug": "omp-known-and-woken-01M1J4KG",
+  "mission_type": "software-dev",
+  "pr_bound": true,
+  "purpose_context": "omp already reaches our hub, because it imports Claude Code's MCP configuration, but the hub does not recognise it and cannot match a session to its identity. And omp's extension API can start a turn on an idle session, which is a stronger wake than Claude Code offers. This mission makes omp a known harness and gives it the same waking every other supported harness has, built on the waiter that already exists, without ever letting a message body reach the conversation as an instruction.",
+  "purpose_tldr": "An agent running under omp (oh-my-pi) is recognised by the mailbox on connect, and a message sent to it while it is idle actually wakes it.",
+  "slug": "omp-known-and-woken-01M1J4KG",
+  "source_description": "GitHub issue #65; doc/resume/2026-09-02-omp-wake-research.md",
+  "target_branch": "main",
+  "topology": "coord",
+  "vcs": "git"
+}
