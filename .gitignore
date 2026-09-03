@@ -88,3 +88,7 @@ graphify-out/
 
 # spec-kitty charter lint output — regenerated on every `charter lint`
 .kittify/lint-report.json
+
+# omp (oh-my-pi) project config: mcp.json may carry identity, extensions/ carries an
+# interpreter path written by install-hook — same rule as .opencode/.
+.omp/
