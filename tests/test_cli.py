@@ -1514,6 +1514,13 @@ class TestSeeingAndAmendingWhatTheHubHolds:
                 raise ClientError("cannot reach the mailbox at http://hub.invalid")
             return {"preferredUsername": name, "profile": dict(type(self).stored)}
 
+        def remote_doctor(self) -> dict[str, Any]:
+            # `whoami` now asks the hub who it serves this caller as (#68); down is
+            # down for that question too.
+            if not type(self).reachable:
+                raise ClientError("cannot reach the mailbox at http://hub.invalid")
+            return {"you": {"token": "accepted"}, "verdict": "fine"}
+
         def update_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
             type(self).stored = dict(profile)
             return {"profile": dict(profile)}
@@ -1640,6 +1647,25 @@ class TestJoinArmsTheWake:
         assert "Stop" in hooks, "an arriving message cannot wake this session"
         assert "wake-check" in json.dumps(hooks)
 
+    def test_joining_from_omp_arms_the_omp_extension(
+        self, _repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Joining used to always write Claude Code settings, even after resolving omp.
+
+        With both markers present — the real omp shell — the auto-installed wake file
+        must belong to omp, or a joined omp agent still cannot be woken.
+        """
+        monkeypatch.setenv("OMPCODE", "1")
+
+        assert main(["join", "rosemary_nasrin", "--hub", "http://hub.invalid"]) == 0
+
+        extension = _repo / ".omp" / "extensions" / "agent-inbox-wake.js"
+        assert extension.exists(), "an omp join did not install the omp extension"
+        source = extension.read_text()
+        assert 'deliverAs: "followUp"' in source
+        assert "triggerTurn: true" in source
+        assert not (_repo / ".claude").exists()
+
     def test_the_waiter_is_the_kind_that_wakes_an_idle_session(
         self, _repo: Path
     ) -> None:
@@ -1698,7 +1724,7 @@ class TestJoinArmsTheWake:
     ) -> None:
         """The name is claimed and the config written before this runs."""
         monkeypatch.setattr(
-            "agent_inbox.hookconfig.install",
+            "agent_inbox.hookconfig.install_for",
             lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")),
         )
 

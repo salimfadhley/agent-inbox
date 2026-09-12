@@ -500,7 +500,7 @@ def join(
     )
     _say_if_migrated()
     recorded = {} if no_machine_facts else _record_machine_facts(client, granted)
-    woken = None if no_wake_hook else _install_wake_hook()
+    woken = None if no_wake_hook else _install_wake_hook(engine)
     ignored = _keep_it_out_of_git(path)
     _print(
         {
@@ -685,6 +685,58 @@ def _env_token_source() -> str:
     return found[1] if found and found[0] else ""
 
 
+def _env_name_source() -> str:
+    """Which variable set the name, if one did — the one in effect."""
+    from agent_inbox.hub_settings import env_with_source
+
+    found = env_with_source("NAME", os.environ)
+    return found[1] if found and found[0] else ""
+
+
+#: What an authenticating hub reports as the verified caller when the credential is a
+#: *shared* token: it admits the machine and takes the name from the header. The wire
+#: value is the hub's (`auth.records.SHARED_ACTOR`); spelled here so the client does
+#: not import hub-side modules to read a diagnosis.
+_SHARED_TOKEN_CALLER = "*"
+
+
+def _hub_says(you: dict[str, Any], sent: str, where: Path) -> tuple[bool, str] | None:
+    """What the hub answered about who this caller is, beside the name we sent (#68).
+
+    Returns ``(fine, text)`` — or ``None`` for a hub too old to answer, because a line
+    that fills in what the hub did not say is a diagnosis that has started guessing.
+
+    **The two halves can disagree, and nothing said so.** An omp session ran for a
+    morning with `AGENT_INBOX_NAME` set to another agent's name by an imported config
+    (2026-09-03); a pre-1.2.0 client picked another engine's entry and `doctor`
+    reported that agent's name as its own (2026-09-07, #65). In both cases the
+    configured name was printed and believed. What settles it is the hub's own answer:
+    a token bound to an actor is served *as that actor whatever the header says*, so
+    when the two differ, every message goes out under the token's name and the inbox
+    read is that actor's. Putting the two side by side makes either case one glance.
+    """
+    if "claimed" not in you and "verified" not in you:
+        return None
+    claimed = str(you.get("claimed") or sent)
+    verified = you.get("verified")
+    if verified is None:
+        return True, f"you are {claimed} — taken at your word; nothing verified it"
+    if verified == _SHARED_TOKEN_CALLER:
+        return True, (
+            f"you are {claimed} — shared token; the hub takes the name from your header"
+        )
+    if verified == claimed:
+        return True, f"you are {verified} — settled by your token"
+    origin = _env_name_source() or str(where)
+    return False, (
+        f"you send {claimed!r} but your token belongs to {verified!r}.\n"
+        f"     The hub serves you as {verified}: every message goes out in that name "
+        f"and the inbox you read is theirs.\n"
+        f"     {claimed!r} comes from {origin} — fix that, or use the token "
+        f"minted for it."
+    )
+
+
 def _report_profile(client: HubClient, name: str, ok: str, notes: _Notes) -> None:
     """Say whether this agent has described itself at all (issue #61).
 
@@ -810,8 +862,8 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
             )
 
 
-def _install_wake_hook() -> str | None:
-    """Register the hooks that let an arriving message wake an idle session.
+def _install_wake_hook(engine: str) -> str | None:
+    """Register the wake integration for the harness that just joined.
 
     **On by default since 0.55.0** (owner, 2026-08-05: *"by default, the CLI should be
     able to wake the agent"*). A mailbox nobody is told about is a mailbox nobody reads:
@@ -819,23 +871,23 @@ def _install_wake_hook() -> str | None:
     worked in exactly one project — the one whose author configured it by hand.
 
     **This writes to somebody else's config**, which is why it was opt-in and why it
-    is careful rather than merely enabled. `hookconfig` merges instead of replacing,
-    adds only entries carrying its own marker, removes only those on uninstall, and is
-    idempotent — so a second join doubles nothing, and hooks another tool put there
-    survive. `agent-inbox uninstall-hook` reverses it.
+    is careful rather than merely enabled. `hookconfig` merges Claude Code settings,
+    owns the opencode plugin and omp extension files outright, and is idempotent — so a
+    second join doubles nothing, and hooks another tool put there survive.
+    `agent-inbox uninstall-hook` reverses it.
 
     Best effort, and silent on failure. The join has already succeeded; a harness that
-    is not Claude Code, or a settings file we may not write, costs the agent a
+    has no wake mechanism, or a project config we may not write, costs the agent a
     convenience and must not cost it the identity it just claimed.
     """
     from agent_inbox import hookconfig
 
     try:
-        return str(hookconfig.install(project_root(), rewake=True))
+        return str(hookconfig.install_for(engine, project_root(), rewake=True))
     except Exception as exc:  # noqa: BLE001 - the join already happened and is durable
         # Not every harness has hooks, and not every checkout is writable. Neither is a
         # reason to make a successful join look like a failed one.
-        logger.debug("could not install the wake hook: %s", exc)
+        logger.debug("could not install the wake hook for %s: %s", engine, exc)
         return None
 
 
@@ -1288,6 +1340,16 @@ def whoami(ctx: click.Context, role_definition: bool) -> int:
         # Not fatal: who this engine is locally is still worth printing, and a hub that
         # cannot be reached is a separate problem `doctor` exists to diagnose.
         out["profile"] = f"unavailable — {exc}"
+    # The server-side half of "who am I" (#68): who the hub serves this caller as,
+    # which a bound token decides whatever the config says. Omitted, never guessed,
+    # when the hub is too old to answer or cannot be reached.
+    try:
+        you = (client.remote_doctor() or {}).get("you") or {}
+    except ClientError:
+        you = {}
+    where = find_config() or (project_root() / CONFIG_NAME)
+    if said := _hub_says(you, config.name, where):
+        out["hub_says"] = said[1]
     if role_definition:
         out["role_definition"] = client.role_definition(config.role)
     _print(out)
@@ -1716,6 +1778,14 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     if verdict := remote.get("verdict"):
         click.echo(f"{ok} hub check       {verdict}")
 
+    # What the hub says this agent *is*, beside what this machine sends (#68). Only
+    # when both names are in hand: an unresolved engine has sent nothing to compare.
+    misnamed = False
+    if config is not None and (said := _hub_says(you, config.name, where)):
+        fine, text = said
+        misnamed = not fine
+        (click.echo if fine else _err)(f"{ok if fine else bad} hub says        {text}")
+
     # FR-007: an unresolved engine is not a missing credential. Inviting someone to
     # mint a token when the blocking issue is "which of your two agents am I" sends
     # them to an operator for a problem they can fix themselves in one flag.
@@ -1774,8 +1844,9 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
     _report_profile(client, config.name, ok, notes)
 
     # A local fault the network checks cannot see, so it decides the exit code even when
-    # everything else answered.
-    if clashes:
+    # everything else answered. The same for a name the hub overrides: the API answered,
+    # and it answered as somebody else.
+    if clashes or misnamed:
         return 1
 
     if not authenticated:
