@@ -238,6 +238,45 @@ def _footer(hub: dict[str, Any] | None) -> str:
     )
 
 
+def _graph_window(days: str) -> tuple[int, str]:
+    """Parse the graph's `days` query: `(window, problem)`.
+
+    ``0`` means all time. A problem is text for the reader; when it is set the window
+    is meaningless and the caller must not draw anything — quietly showing lifetime
+    totals under a filter somebody typed is the failure #69 names.
+    """
+    text = (days or "").strip().lower()
+    if text in ("", "all"):
+        return 0, ""
+    try:
+        window = int(text)
+    except ValueError:
+        return (
+            0,
+            f"'{days}' is not a number of days. Enter a whole number, or choose "
+            "all time.",
+        )
+    if window <= 0:
+        return (
+            0,
+            f"{window} days is not a window. Enter a positive number, or choose "
+            "all time.",
+        )
+    return window, ""
+
+
+def _graph_form(current: str) -> str:
+    """The window control: a number of days, Apply, and an explicit All time."""
+    return (
+        '<form method="get" action="/graph" class="graph-window">'
+        '<label>Last <input type="number" name="days" min="1" step="1" '
+        f'value="{html.escape(current)}" style="width:5em"> days</label> '
+        '<button type="submit">Apply</button> '
+        '<a href="/graph">All time</a>'
+        "</form>"
+    )
+
+
 def _page(title: str, body: str, hub: dict[str, Any] | None, here: str = "") -> str:
     name = html.escape(str((hub or {}).get("name", APP_NAME)))
     version = html.escape(str((hub or {}).get("version", "")))
@@ -2250,17 +2289,40 @@ def build_console(client: HubClient) -> Litestar:
         )
 
     @get("/graph", media_type=MediaType.HTML, sync_to_thread=True)
-    def graph(request: Request) -> Response:
+    def graph(request: Request, days: str = "") -> Response:
         """The message-flow network graph — who talks to whom, as a live diagram.
 
         The same data as the dashboard's flow table, drawn with the vendored vis-network
         library: drag the nodes, click one to open its mailbox. Data is injected as a
         non-executable JSON island the same-origin console.js reads — no inline code, no
         external fetch, so it renders cleanly under the strict CSP.
+
+        **`?days=N` narrows it to the last N days** (issue #69). Lifetime totals are
+        what the graph showed, and they cannot tell current traffic from a month-old
+        burst. The window is applied to the *data* — the hub's `survey` already takes
+        `since`, and edges honour it — and node sizes are derived from those same edges
+        rather than from the lifetime `busiest` list, so nothing in a filtered graph is
+        secretly unfiltered. Absent, or `all`, is the lifetime view; anything else that
+        is not a positive whole number is explained, never quietly widened to all time.
         """
         hub = hub_or_none()
+        window, problem = _graph_window(days)
+        if problem:
+            return Response(
+                _page(
+                    "Graph",
+                    "<h2>Message flow</h2>"
+                    f'<p class="empty">{html.escape(problem)}</p>' + _graph_form(""),
+                    hub,
+                    "/graph",
+                ),
+                media_type=MediaType.HTML,
+            )
+        since = (
+            (datetime.now(UTC) - timedelta(days=window)).isoformat() if window else ""
+        )
         try:
-            stats = seen_by(request).survey()
+            stats = seen_by(request).survey(since=since)
             actors = seen_by(request).list_agents().get("items", [])
         except ClientError as exc:
             return _err(
@@ -2270,16 +2332,26 @@ def build_console(client: HubClient) -> Litestar:
                 api=client.config.base,
                 signed_in=_signed_in(request),
             )
-
         edges = [
             {"from": str(frm), "to": str(to), "count": int(count)}
             for frm, to, count in stats.get("flow", [])
         ]
-        # Node size by how much an agent sent (from `busiest`); recency lights it green.
-        sent = {str(name): int(n) for name, n in stats.get("busiest", [])}
+        # Node size by how much an agent sent *within the window* — summed from the
+        # edges, which honour `since`, not from `busiest`, which counts all history.
+        sent: dict[str, int] = {}
+        for e in edges:
+            sent[e["from"]] = sent.get(e["from"], 0) + e["count"]
+        # Recency lights a node green: seen within the window, or within the last
+        # week on the lifetime view. (This used to compare against a date literal
+        # that stopped meaning anything the week after it was written.)
+        seen_after = (
+            since[:10]
+            if since
+            else (datetime.now(UTC) - timedelta(days=7)).isoformat()[:10]
+        )
         recent = {
             a.get("preferredUsername", ""): str(a.get("lastSeen") or "")[:10]
-            >= "2026-07-24"
+            >= seen_after
             for a in actors
         }
         names = (
@@ -2291,7 +2363,7 @@ def build_console(client: HubClient) -> Litestar:
             {
                 "id": n,
                 "label": n,
-                "value": sent.get(n, 1) + 1,
+                "value": sent.get(n, 0) + 1,
                 "recent": recent.get(n, False),
             }
             for n in sorted(names)
@@ -2300,18 +2372,29 @@ def build_console(client: HubClient) -> Litestar:
         # Escape `<` so nothing in the data can close the <script> early. Names are
         # already validated to ascii+underscore, so this is belt-and-braces.
         payload = json.dumps({"nodes": nodes, "edges": edges}).replace("<", "\\u003c")
-
+        scope = (
+            f"the last {window} day{'s' if window != 1 else ''}"
+            if window
+            else "all time"
+        )
         if not edges:
             inner = (
-                '<p class="empty">No messages yet, so there is nothing to graph. '
-                "Once agents start writing to each other, the network appears here.</p>"
+                f'<p class="empty">No messages in {scope}, so there is nothing to '
+                "graph. "
+                + (
+                    '<a href="/graph">Show all time</a>.'
+                    if window
+                    else "Once agents start writing to each other, the network "
+                    "appears here."
+                )
+                + "</p>"
             )
         else:
             # The JSON goes in a <script type="application/json"> — data, not code, so a
             # strict script-src allows it; console.js parses it and draws the graph.
             inner = (
-                f'<p class="dim">{len(nodes)} agents · {len(edges)} channels. '
-                "Drag a node; click one to open its mailbox.</p>"
+                f'<p class="dim">Showing {scope}: {len(nodes)} agents · {len(edges)} '
+                "channels. Drag a node; click one to open its mailbox.</p>"
                 '<div id="graph" style="height:70vh;border:1px solid var(--line);'
                 'border-radius:6px"></div>'
                 '<script type="application/json" id="graph-data">'
@@ -2319,7 +2402,12 @@ def build_console(client: HubClient) -> Litestar:
                 '<script src="/static/vis-network.min.js"></script>'
             )
         return Response(
-            _page("Graph", "<h2>Message flow</h2>" + inner, hub, "/graph"),
+            _page(
+                "Graph",
+                "<h2>Message flow</h2>" + _graph_form(str(window or "")) + inner,
+                hub,
+                "/graph",
+            ),
             media_type=MediaType.HTML,
         )
 

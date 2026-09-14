@@ -14,6 +14,7 @@ which client methods were called, which is how the no-impersonation property is 
 """
 
 import html
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -1804,3 +1805,101 @@ class TestTheFooterOffersBothDoors:
         from agent_inbox.console import HOMEPAGE_URL, PROJECT_URL
 
         assert HOMEPAGE_URL != PROJECT_URL
+
+
+# -- the graph's time window (issue #69) ------------------------------------
+
+
+class _WindowedHub(StubHub):
+    """A survey that honours `since`, with one message inside a 7-day window and one
+    far outside it — so a filtered graph and a lifetime graph must differ."""
+
+    def survey(self, since: str = "") -> dict[str, Any]:
+        self.calls.append(f"survey:{since}")
+        old = ("rosemary_nasrin", "trevor_mahmood", "2026-01-01T00:00:00+00:00", 5)
+        new_ = ("trevor_mahmood", "rosemary_nasrin", datetime.now(UTC).isoformat(), 1)
+        flow = [
+            [frm, to, n]
+            for frm, to, when, n in (old, new_)
+            if not since or when >= since
+        ]
+        return {
+            "actors": 2,
+            "messages": 6,
+            "threads": 2,
+            "per_day": [],
+            "flow": flow,
+            "busiest": [["rosemary_nasrin", 5], ["trevor_mahmood", 1]],
+        }
+
+
+def _graph_data(body: str) -> dict[str, Any]:
+    start = body.index('id="graph-data">') + len('id="graph-data">')
+    return json.loads(body[start : body.index("</script>", start)])
+
+
+def test_a_days_window_changes_the_edges_not_just_the_caption() -> None:
+    """Both halves in one graph: the old edge is present at all time and absent in
+    the window, and the caption says which it is showing."""
+    client, hub = make(_WindowedHub())
+    with client as c:
+        lifetime = _graph_data(c.get("/graph").text)
+        windowed_page = c.get("/graph?days=7").text
+        windowed = _graph_data(windowed_page)
+
+    assert {(e["from"], e["to"]) for e in lifetime["edges"]} == {
+        ("rosemary_nasrin", "trevor_mahmood"),
+        ("trevor_mahmood", "rosemary_nasrin"),
+    }
+    assert {(e["from"], e["to"]) for e in windowed["edges"]} == {
+        ("trevor_mahmood", "rosemary_nasrin")
+    }
+    assert "Showing the last 7 days" in windowed_page
+    # The premise: the hub was actually asked for a window, not filtered client-side.
+    assert any(call.startswith("survey:2") for call in hub.calls)
+
+
+def test_node_sizes_follow_the_window_rather_than_lifetime_busiest() -> None:
+    """The acceptance criterion that catches the easy mistake: `busiest` counts all
+    history, so a graph sized from it would keep old activity in a filtered view."""
+    client, _ = make(_WindowedHub())
+    with client as c:
+        windowed = _graph_data(c.get("/graph?days=7").text)
+
+    value = {n["id"]: n["value"] for n in windowed["nodes"]}
+    assert value["rosemary_nasrin"] == 1  # sent nothing in the window: 0 + 1
+    assert value["trevor_mahmood"] == 2  # one message in the window: 1 + 1
+
+
+def test_an_empty_window_says_so_and_offers_all_time() -> None:
+    class Quiet(_WindowedHub):
+        def survey(self, since: str = "") -> dict[str, Any]:
+            out = super().survey(since)
+            return {**out, "flow": [] if since else out["flow"]}
+
+    client, _ = make(Quiet())
+    with client as c:
+        body = c.get("/graph?days=3").text
+
+    assert "No messages in the last 3 days" in body
+    assert 'href="/graph">Show all time' in body
+    assert 'id="graph-data"' not in body
+
+
+@pytest.mark.parametrize("bad", ["0", "-2", "soon", "1.5"])
+def test_bad_input_is_explained_rather_than_widened_to_all_time(bad: str) -> None:
+    client, hub = make(_WindowedHub())
+    with client as c:
+        body = c.get(f"/graph?days={bad}").text
+
+    assert "all time" in body
+    assert 'id="graph-data"' not in body, "drew lifetime data under a broken filter"
+    assert not any(call.startswith("survey") for call in hub.calls)
+
+
+def test_the_form_and_all_time_are_on_the_page(console: TestClient) -> None:
+    body = console.get("/graph").text
+    assert '<form method="get" action="/graph"' in body
+    assert 'name="days"' in body
+    assert 'href="/graph">All time</a>' in body
+    assert "Showing all time" in body
