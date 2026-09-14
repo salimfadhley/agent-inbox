@@ -22,6 +22,7 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,32 @@ def _note_hub(version: str) -> None:
         staleness.note_hub_version(version)
     except Exception:  # noqa: BLE001 - see above: never fail a completed call
         logger.debug("could not record the hub version %r", version, exc_info=True)
+
+
+#: Engine keys some projects were written with before the key was decided — read as the
+#: canonical engine, and **kept** under their own spelling when written back, never
+#: duplicated. Two agents joined as `ohmypi` before `omp` was chosen (mission
+#: omp-known-and-woken, 2026-09-02); a client that then looked only for `[agents.omp]`
+#: refused them, or on `join` claimed a second identity beside the first. The charter's
+#: rule for our own renames is that the old spelling keeps working —
+#: `agent-mailbox.toml` is still read — and an engine key is one of our names.
+LEGACY_ENGINE_KEYS: dict[str, str] = {"omp": "ohmypi"}
+
+
+def entry_key(entries: Mapping[str, Any], engine: str | None) -> str | None:
+    """The key under which *engine*'s entry lives: itself, else its legacy spelling.
+
+    Falls back to `engine` when neither is present, so a writer creating the entry
+    creates it under the current name. Only the legacy spelling is ever *read from*;
+    a project that has both keeps the current one, and the legacy one is then just
+    another engine's entry — `duplicate_names` says so if they share a name.
+    """
+    if engine is None:
+        return None
+    if engine in entries:
+        return engine
+    legacy = LEGACY_ENGINE_KEYS.get(engine)
+    return legacy if legacy is not None and legacy in entries else engine
 
 
 #: Client settings, current name first. As with the hub's own prefix, the new name wins
@@ -256,11 +283,12 @@ def write_project(
             existing = tomllib.loads(path.read_text())
         hub = str(settings.get("hub") or existing.get("hub") or "").strip()
         entries = dict(existing.get("agents") or {})
-        mine = dict(entries.get(engine) or {})
+        held_as = entry_key(entries, engine) or engine
+        mine = dict(entries.get(held_as) or {})
         for key, value in settings.items():
             if key != "hub":
                 mine[key] = value
-        entries[engine] = mine
+        entries[held_as] = mine
         return _render_project(path, hub, entries)
 
 
@@ -300,11 +328,12 @@ def unset_project(
             _render_project(path, "", dict(data.get("agents") or {}))
             return True
         entries = dict(data.get("agents") or {})
-        mine = dict(entries.get(engine) or {})
+        held_as = entry_key(entries, engine) or engine
+        mine = dict(entries.get(held_as) or {})
         if name not in mine:
             return False
         del mine[name]
-        entries[engine] = mine
+        entries[held_as] = mine
         _render_project(path, str(data.get("hub") or ""), entries)
         return True
 
@@ -333,7 +362,7 @@ def effective_settings(
         if hub := str(data.get("hub", "")).strip():
             found["hub"] = (hub, str(path))
         entries = data.get("agents") or {}
-        mine = entries.get(engine) if engine else None
+        mine = entries.get(entry_key(entries, engine) or "") if engine else None
         if mine is None and len(entries) == 1 and not engine:
             mine = next(iter(entries.values()))
         if isinstance(mine, dict):
@@ -621,7 +650,7 @@ def load_config(
         data = tomllib.loads(path.read_text())
         hub = hub or str(data.get("hub", "")).strip()
         entries = data.get("agents") or {}
-        mine = entries.get(engine) if engine else None
+        mine = entries.get(entry_key(entries, engine) or "") if engine else None
         if mine is None and len(entries) == 1 and not engine:
             # One entry and no detectable engine: it can only be meant for us.
             mine = next(iter(entries.values()))
@@ -746,9 +775,13 @@ def write_config(
             existing = tomllib.loads(target.read_text())
 
         agents: dict[str, Any] = dict(existing.get("agents") or {})
-        _prior = agents.get(engine)
+        # A legacy spelling holds this engine's identity: re-joining reuses that entry
+        # rather than writing a second one beside it — two entries with one name
+        # would share an inbox, which is the fault `duplicate_names` exists to catch.
+        held_as = entry_key(agents, engine) or engine
+        _prior = agents.get(held_as)
         prior: dict[str, Any] = _prior if isinstance(_prior, dict) else {}
-        if engine in agents and not force:
+        if held_as in agents and not force:
             held = prior.get("name")
             raise ClientError(
                 f"{engine} is already {held!r} on this project (in {target}). "
@@ -761,7 +794,7 @@ def write_config(
         kept_token = token or prior.get("token")
         if kept_token:
             entry["token"] = kept_token
-        agents[engine] = entry
+        agents[held_as] = entry
 
         # **The hub is machine-wide unless this project already pins one** (v0.48.0).
         # Writing it here unconditionally is what `join` used to do, and it re-created

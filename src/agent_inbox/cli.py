@@ -43,6 +43,7 @@ from agent_inbox.client import (
     detect_engine,
     duplicate_names,
     effective_settings,
+    entry_key,
     find_config,
     global_config_path,
     load_config,
@@ -195,7 +196,11 @@ def _resolve_engine(ctx: click.Context, *, must_exist: bool = False) -> str | No
     if named := _engine(ctx):
         # `must_exist` separates acting from creating. `join` and `config set` may
         # legitimately name an engine that has no entry yet — that is how one is made.
-        if must_exist and engines and named not in engines:
+        if (
+            must_exist
+            and engines
+            and entry_key(dict.fromkeys(engines), named) not in engines
+        ):
             raise EngineNotConfigured(named, engines)
         return named
     if detected := detect_engine():
@@ -1541,10 +1546,19 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
             if _engine(ctx)
             else ("detected" if detect_engine() else "the only one configured")
         )
+        # An entry read under an older spelling of the engine key is worth a word:
+        # it works, and the reader may otherwise look for `[agents.omp]` and not find
+        # it. Said here rather than migrated, because a file is somebody's.
+        held_as = entry_key(dict.fromkeys(engines), chosen)
+        spelling = (
+            f"; read from [agents.{held_as}], the older spelling"
+            if held_as and held_as != chosen
+            else ""
+        )
         click.echo(f"{ok} configuration   {where}")
         click.echo(
             f"{ok} identity        {config.name} "
-            f"({config.role}, engine {config.engine or chosen} — {how})"
+            f"({config.role}, engine {config.engine or chosen} — {how}{spelling})"
         )
 
     _report_exposure(ok, notes)
