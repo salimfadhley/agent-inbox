@@ -17,5 +17,5 @@ Both follow-ups from the Windows report are done, deployed and proved (hub and c
 
 ## Also open
 
-- #65 live acceptance: the omp idle-wake test with `espen_luo` (steps by mail, 2026-09-12 and 2026-09-14) — needs the omp session restarted.
+- #65: **idle wake live-verified 2026-09-14** by four omp sessions on Windows (coordinator `mirco_abrahamsson`; `gyeongsug_rascon` observed directly). Remaining: the mid-turn `followUp` check, requested from that group by mail; close #65 when it reports. espen_luo's macOS run is welcome, not blocking.
 - #64 opencode waking, awaiting `aurelia_saahaa`'s live verification.

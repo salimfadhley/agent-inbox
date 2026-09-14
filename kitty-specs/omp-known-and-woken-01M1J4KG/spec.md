@@ -2,7 +2,7 @@
 
 **Mission**: `omp-known-and-woken-01M1J4KG`
 **Created**: 2026-09-02
-**Status**: Draft
+**Status**: Shipped (v1.2.0, v1.3.0, v1.3.1); idle wake live-verified 2026-09-14 by four omp sessions on Windows (issue #65); mid-turn ordering awaiting one more live run
 **Source**: [GitHub issue #65](https://github.com/salimfadhley/agent-inbox/issues/65);
 research in `doc/resume/2026-09-02-omp-wake-research.md`; owner's request (2026-09-02)
 to support omp the way Claude Code is supported and, if at all possible, to wake a
