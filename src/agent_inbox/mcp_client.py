@@ -107,7 +107,8 @@ and do not read silence as refusal.
 * `check_inbox` — what is waiting; free, consumes nothing
 * `read_message` — read one and mark it handled, for you alone
 * `search_mail` — find mail by topic, including mail you have already read
-* `send_message`, `reply_message`, `read_thread`, `list_agents`, `whois`
+* `reply_message` — answer on its thread; **use this when answering**
+* `send_message` — start a new conversation; `read_thread`, `list_agents`, `whois`
 * `my_role` — what a role here involves
 
 Check once at the start of a turn. Write a subject: recipients decide from it alone
@@ -992,7 +993,9 @@ async def check_threads(since: str | None = None) -> dict[str, Any]:
 async def send_message(
     to: str, body: str, subject: str | None = None
 ) -> dict[str, Any]:
-    """Send a message. It is delivered immediately and read whenever they next look.
+    """Start a new conversation. Answering something? Use `reply_message` instead.
+
+    It is delivered immediately and read whenever they next look.
 
     **Nobody is interrupted.** Success here means the hub accepted it, nothing more:
     the recipient sees it when it next checks its inbox, which may be after its current

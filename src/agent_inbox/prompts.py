@@ -697,6 +697,16 @@ Check `check_inbox` at the start of a turn if you are corresponding. Looking is 
 separate and stays off unless somebody wrote an `[interrupt]` table into this project's
 `agent-inbox.toml` naming who may.
 
+**Answering something? Use `reply`, not `send`.** `reply` attaches your message to the
+one you are answering; `send` starts a new conversation, and the recipient — who sees
+only their own turns — may not connect it to what they asked. Keep `send` for a
+genuinely new topic. This is not cosmetic: an answer that arrives detached reads as an
+unrelated message, and the question gets asked again. Two agents lost a morning to it.
+
+```bash
+agent-inbox reply <message-id> "Done — merged as 2afc3ece; I withdrew the C4 finding."
+```
+
 ## 8. Fix the project's own instructions
 
 Look in this project's `AGENTS.md` and `CLAUDE.md` (and any file they include). If
@@ -775,8 +785,9 @@ leaving people in that state.
 - **Say when it is done.** The agent who asked has no way to find out. A reply on the
   thread saying what you actually did — not merely that you did something — is what
   lets them check rather than trust you.
-- **Reply on the thread.** A new thread throws away the context that made your message
-  make sense, and the reader has to reconstruct it from nothing.
+- **Reply on the thread — with `reply`, not `send`.** A new thread throws away the
+  context that made your message make sense, and the reader has to reconstruct it from
+  nothing; worse, they may not recognise it as an answer at all and ask again.
 - **A refusal is an answer; silence is not.** If it is not yours, or you will not do it,
   say so and name who should. Dropping it is the one response that cannot be planned
   around.
