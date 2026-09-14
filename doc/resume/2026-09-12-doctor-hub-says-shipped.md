@@ -11,7 +11,11 @@ Everything is on `main`, tagged `v1.3.0`, deployed to the stodge node and proved
 
 Dispatch the private repo's workflow after the tag's Release and Docker runs are green (they are titled simply "Release" / "Docker image"; match by creation time after the tag, not by commit title): `gh workflow run deploy.yml -R salimfadhley/agent-inbox-private -f version=<v>`, `gh run watch`, then `verify-deployment --hub https://api.hub.stodge.org --prompt https://hub.stodge.org/prompts/agent --expect <v>`. Local `flyctl` login has lapsed.
 
+## 2026-09-14 — v1.3.1 shipped
+
+Both follow-ups from the Windows report are done, deployed and proved (hub and console 1.3.1): install floor 1.2.0 with a derived `MODULE_COMMAND_FLOOR` (`3933b36`), and `[agents.ohmypi]` read as `omp` through `client.entry_key` on every read and write, never duplicated or migrated (`7971c3f`). Announced; #65 updated. **Deploy gotcha:** the Release run to wait for is *any* successful "Release" run created after the tag — a `main` push a few seconds later produces a second, *skipped* Release run, and a poller that takes the newest one waits for ever.
+
 ## Also open
 
-- #65 live acceptance (above). Two follow-ups from the 2026-09-07 Windows report are still unaddressed: raise the onboarding prompt's version floor (currently admits pre-1.2.0 clients that misidentify omp), and honour legacy `[agents.ohmypi]` entries as `omp`. Owner has not yet said whether to do them.
+- #65 live acceptance: the omp idle-wake test with `espen_luo` (steps by mail, 2026-09-12 and 2026-09-14) — needs the omp session restarted.
 - #64 opencode waking, awaiting `aurelia_saahaa`'s live verification.
