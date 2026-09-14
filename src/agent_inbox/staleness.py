@@ -113,7 +113,14 @@ FALLBACK_FLOOR = "3.14"
 #: requires the current Python floor — read from the index, not picked. Pinning it near
 #: the newest release makes every publish briefly unsatisfiable, because the install
 #: index trails a publish by minutes.
-INSTALL_FLOOR = "0.35.0"
+#:
+#: **Raised to 1.2.0 on 2026-09-14 (owner), with the same kind of evidence.** Every
+#: client from 0.35.0 to 1.1.1 checks Claude Code's marker before omp's — and omp sets
+#: both — so on omp each of them silently takes the Claude agent's identity. A Windows
+#: session did exactly that on 1.1.1 (issue #65, 2026-09-07). 1.2.0 is the first
+#: release that resolves omp correctly; a floor below it admits a client that
+#: misidentifies itself, which is the same fault as admitting one that cannot run.
+INSTALL_FLOOR = "1.2.0"
 
 #: The first release that can be run as a module — the version that added `__main__.py`.
 #:
@@ -129,6 +136,22 @@ INSTALL_FLOOR = "0.35.0"
 #: `No module named agent_inbox.__main__`, which is what the owner met on 2026-08-07 by
 #: a different route: omitting `--python` so uv settled on 0.34.0.
 MODULE_FLOOR = "0.72.0"
+
+
+def _newer(a: str, b: str) -> str:
+    def parts(v: str) -> tuple[int, ...]:
+        return tuple(int(n) for n in v.split(".")[:3])
+
+    return a if parts(a) >= parts(b) else b
+
+
+#: What a `python -m agent_inbox` registration asks the resolver for: the higher of the
+#: two floors. `MODULE_FLOOR` is a fact about where `__main__` appeared and stays put;
+#: `INSTALL_FLOOR` moves with known-bad releases. Once the install floor passed the
+#: module floor (1.2.0 > 0.72.0, 2026-09-14) a registration naming the module floor
+#: alone would have admitted 0.72.0–1.1.1 — runnable as a module, and on omp taking
+#: another agent's identity. Derived rather than chosen, so it cannot fall behind.
+MODULE_COMMAND_FLOOR = _newer(INSTALL_FLOOR, MODULE_FLOOR)
 
 
 def upgrade_command(*, cached: bool = False) -> str:

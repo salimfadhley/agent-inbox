@@ -16,7 +16,7 @@ import re
 import pytest
 
 from agent_inbox.prompts import onboarding
-from agent_inbox.staleness import INSTALL_FLOOR, MODULE_FLOOR
+from agent_inbox.staleness import INSTALL_FLOOR, MODULE_COMMAND_FLOOR, MODULE_FLOOR
 
 
 @pytest.fixture
@@ -33,11 +33,20 @@ class TestTheModuleCommandAsksForAVersionThatHasOne:
         assert importlib.util.find_spec("agent_inbox.__main__") is not None
         assert MODULE_FLOOR >= "0.72.0"
 
-    def test_it_is_higher_than_the_install_floor(self) -> None:
+    def test_the_command_asks_for_both_floors_at_once(self) -> None:
         """The two answer different questions — "old enough to be a known-bad silent
-        downgrade" and "new enough to be runnable as a module". Collapsing them back
-        into one number is how this was wrong by 37 releases."""
-        assert MODULE_FLOOR > INSTALL_FLOOR
+        downgrade" and "new enough to be runnable as a module" — and each has moved
+        past the other at some point. Collapsing them into one chosen number is how
+        this was wrong by 37 releases; the command floor is *derived*, the higher of
+        the two, so whichever moves, the registration cannot admit a release that
+        fails either question."""
+
+        def parts(v: str) -> tuple[int, ...]:
+            return tuple(int(n) for n in v.split(".")[:3])
+
+        assert parts(MODULE_COMMAND_FLOOR) >= parts(MODULE_FLOOR)
+        assert parts(MODULE_COMMAND_FLOOR) >= parts(INSTALL_FLOOR)
+        assert MODULE_COMMAND_FLOOR in (MODULE_FLOOR, INSTALL_FLOOR)
 
     def test_every_module_invocation_carries_it(self, prompt: str) -> None:
         """The bug, stated. A registration that runs `python -m agent_inbox` while
@@ -51,7 +60,7 @@ class TestTheModuleCommandAsksForAVersionThatHasOne:
 
         assert registrations, "precondition: the prompt registers the module somewhere"
         for block in registrations:
-            assert MODULE_FLOOR in block, block
+            assert f">={MODULE_COMMAND_FLOOR}" in block, block
 
     def test_the_error_it_produces_is_explained(self, prompt: str) -> None:
         """It names no version, so a reader has no reason to suspect one. Recognising

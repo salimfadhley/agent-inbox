@@ -338,12 +338,13 @@ class TestTheVersionFloorIsCalibratedNotChosen:
         """The paired concern, and the reason not to 'fix' this by pinning to current.
 
         A floor near the newest release makes every publish briefly unsatisfiable,
-        because the install index trails a publish by minutes. 0.35.0 is the boundary
-        and nothing above it buys anything.
+        because the install index trails a publish by minutes. The floor sits at the
+        first release with a *named* property — 1.2.0, the first that resolves omp's
+        identity correctly (#65) — and nothing above it buys anything.
         """
         from agent_inbox.staleness import INSTALL_FLOOR
 
-        assert self._parts(INSTALL_FLOOR) == (0, 35, 0)
+        assert self._parts(INSTALL_FLOOR) == (1, 2, 0)
 
     def test_the_floor_reaches_the_prompt(self) -> None:
         """It is a constant until something renders it."""

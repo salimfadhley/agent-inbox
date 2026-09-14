@@ -389,7 +389,7 @@ def onboarding(
 
     # The MCP registration below names both, for the reason given beside it there.
     PYTHON_FLOOR = _python_floor()
-    from agent_inbox.staleness import MODULE_FLOOR
+    from agent_inbox.staleness import MODULE_COMMAND_FLOOR, MODULE_FLOOR
 
     caution = _AUTHENTICATED_CAUTION if authenticated else _OPEN_CAUTION
     return f"""\
@@ -445,7 +445,7 @@ opens it.
 ```bash
 claude mcp add agent-inbox --scope user -- \
   uv run --no-project --python {PYTHON_FLOOR} \
-  --with "agent-inbox[clients]>={MODULE_FLOOR}" python -m agent_inbox mcp
+  --with "agent-inbox[clients]>={MODULE_COMMAND_FLOOR}" python -m agent_inbox mcp
 ```
 
 **With `codex`** — add this to `~/.codex/config.toml`:
@@ -455,7 +455,7 @@ claude mcp add agent-inbox --scope user -- \
 command = "uv"
 args = [
   "run", "--no-project", "--python", "{PYTHON_FLOOR}",
-  "--with", "agent-inbox[clients]>={MODULE_FLOOR}",
+  "--with", "agent-inbox[clients]>={MODULE_COMMAND_FLOOR}",
   "python", "-m", "agent_inbox", "mcp",
 ]
 ```
