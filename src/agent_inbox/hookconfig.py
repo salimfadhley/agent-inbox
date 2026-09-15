@@ -8,10 +8,13 @@ command). Re-install is idempotent (it strips ours first), and the write is atom
 """
 
 import json
+import logging
 import shlex
 import sys
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: Our hook entries are the ones whose command runs this subcommand.
 #:
@@ -386,6 +389,28 @@ def install_for(
     )
 
 
+def keep_out_of_git(path: Path, root: Path) -> str:
+    """Ignore a generated hook, narrowly, and say what happened (#70).
+
+    The file carries the installing machine's interpreter path — on Windows, a path
+    under the user's profile — so it is per-machine, and `git add -A` in a project
+    that had never thought about it staged it. The rule is anchored to the one file,
+    not its directory: `.omp/` may hold extensions a team shares on purpose.
+
+    Best effort and never fatal, as with the identity file: the hook is written and
+    working, and a checkout that is not a repository, or a `.gitignore` we may not
+    write, costs a safeguard — which `doctor` reports — not the wake.
+    """
+    from agent_inbox import ignores
+
+    try:
+        rule = "/" + path.relative_to(root).as_posix()
+        return ignores.ensure_ignored(path, root, rule=rule, note=ignores.HOOK_NOTE)
+    except Exception as exc:  # noqa: BLE001 - the hook is installed; this is hygiene
+        logger.debug("could not add an ignore rule for %s: %s", path, exc)
+        return ""
+
+
 def install_opencode(root: Path, command: str | None = None) -> Path:
     """Write the opencode plugin. Idempotent — the file is replaced, not appended to.
 
@@ -398,6 +423,7 @@ def install_opencode(root: Path, command: str | None = None) -> Path:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(opencode_plugin(command or default_command()), encoding="utf-8")
     tmp.replace(path)
+    keep_out_of_git(path, root)
     return path
 
 
@@ -415,6 +441,7 @@ def install_omp(root: Path, command: str | None = None) -> Path:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(omp_extension(command or default_command()), encoding="utf-8")
     tmp.replace(path)
+    keep_out_of_git(path, root)
     return path
 
 

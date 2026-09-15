@@ -38,6 +38,25 @@ _TIMEOUT = 5.0
 #: than deleting it as clutter.
 _NOTE = "# agent-inbox: identity and possibly a device token. Never commit."
 
+#: The wake integrations `install-hook` writes wholesale, relative to the project root.
+#: Each carries the installing machine's interpreter path — on Windows, a path under
+#: the user's profile — so it is per-machine, not project configuration (#70). Named
+#: here rather than in `hookconfig` so that this module, which `hookconfig` calls, does
+#: not import it back.
+HOOK_FILES: tuple[str, ...] = (
+    ".omp/extensions/agent-inbox-wake.js",
+    ".opencode/plugins/agent-inbox-wake.js",
+)
+
+#: The first line of every hook we generate. A file at one of the paths above that
+#: does not carry it is somebody else's, and not ours to report.
+HOOK_MARKER = "Installed by `agent-inbox install-hook`"
+
+HOOK_NOTE = (
+    "# agent-inbox: generated wake hook; carries this machine's interpreter path. "
+    "Never commit."
+)
+
 
 def _git(args: list[str], root: Path) -> subprocess.CompletedProcess[str] | None:
     """Run git in *root*, or ``None`` if git is unavailable or unhappy."""
@@ -77,11 +96,18 @@ def is_tracked(path: Path, root: Path) -> bool:
     return bool(done and done.returncode == 0)
 
 
-def ensure_ignored(path: Path, root: Path) -> str:
+def ensure_ignored(
+    path: Path, root: Path, *, rule: str | None = None, note: str = _NOTE
+) -> str:
     """Make git ignore *path*, and say what happened.
 
     Returns one of ``"already"``, ``"added"``, ``"tracked"``, or ``""`` when there is
     nothing to do because this is not a repository.
+
+    ``rule`` is the line to add; the default is the bare file name, which is right for
+    an identity file that may sit anywhere in a checkout. A generated hook wants the
+    opposite — an anchored path such as ``/.omp/extensions/agent-inbox-wake.js`` — so
+    that the rule hides our one file and not a directory somebody else shares (#70).
 
     ``"tracked"`` is the one worth acting on: the file is already in git, so an ignore
     line will not help and somebody has to decide what to do about the history. Saying
@@ -94,7 +120,7 @@ def ensure_ignored(path: Path, root: Path) -> str:
         return "tracked"
     if is_ignored(path, root):
         return "already"
-    _append(root / ".gitignore", path.name)
+    _append(root / ".gitignore", rule or path.name, note)
     # Ask again rather than assume: reporting a protection we have not verified is the
     # failure this module exists to prevent, and the answer is one cheap local call.
     #
@@ -106,11 +132,11 @@ def ensure_ignored(path: Path, root: Path) -> str:
     return "added" if is_ignored(path, root) else "tracked"
 
 
-def _append(gitignore: Path, name: str) -> None:
+def _append(gitignore: Path, name: str, note: str = _NOTE) -> None:
     """Add one entry, with its reason, leaving everything else untouched."""
     existing = gitignore.read_text() if gitignore.is_file() else ""
     prefix = "" if not existing or existing.endswith("\n") else "\n"
-    gitignore.write_text(f"{existing}{prefix}\n{_NOTE}\n{name}\n")
+    gitignore.write_text(f"{existing}{prefix}\n{note}\n{name}\n")
     logger.info("event=config.gitignore.added file=%s", name)
 
 
@@ -192,6 +218,42 @@ def exposed_configs(root: Path) -> list[tuple[Path, str]]:
                 found[path] = "tracked"
             elif not is_ignored(path, root):
                 found[path] = "unignored"
+    order = {"staged": 0, "tracked": 1, "unignored": 2}
+    return sorted(found.items(), key=lambda pair: (order[pair[1]], str(pair[0])))
+
+
+def is_our_hook(path: Path) -> bool:
+    """Whether a file at a hook path is one `install-hook` wrote, by its first line."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            return HOOK_MARKER in fh.readline()
+    except OSError:
+        return False
+
+
+def exposed_hooks(root: Path) -> list[tuple[Path, str]]:
+    """Generated wake hooks in this checkout that git is not protecting (#70).
+
+    The same three states as :func:`exposed_configs`, worst first. Only files that
+    carry :data:`HOOK_MARKER` count: the paths are ours by convention, the contents by
+    fact, and a file somebody else put at one of them is not ours to report.
+
+    Empty outside a repository — "cannot say", not "safe"; the caller says which.
+    """
+    if not in_a_repository(root):
+        return []
+    found: dict[Path, str] = {}
+    for relative in HOOK_FILES:
+        name = Path(relative).name
+        parent = Path(relative).parent.as_posix()
+        for path in _candidates(root, name):
+            if path.parent.as_posix().endswith(parent) and is_our_hook(path):
+                if is_staged(path, root):
+                    found[path] = "staged"
+                elif is_tracked(path, root):
+                    found[path] = "tracked"
+                elif not is_ignored(path, root):
+                    found[path] = "unignored"
     order = {"staged": 0, "tracked": 1, "unignored": 2}
     return sorted(found.items(), key=lambda pair: (order[pair[1]], str(pair[0])))
 

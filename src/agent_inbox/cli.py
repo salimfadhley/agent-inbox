@@ -833,17 +833,26 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
     """
     from agent_inbox import ignores
 
+    here = Path.cwd()
     try:
-        exposed = ignores.exposed_configs(Path.cwd())
+        if not ignores.in_a_repository(here):
+            # Said, not implied (#70). "Not exposed to git" outside a repository was
+            # true in the way a locked door on an open field is true, and read as a
+            # check that had passed.
+            click.echo(
+                f"{ok} config safety   not a git repository, so nothing to expose"
+            )
+            return
+        exposed = ignores.exposed_configs(here)
+        hooks = ignores.exposed_hooks(here)
     except Exception:  # noqa: BLE001 - a safeguard must not break the command it guards
         logger.debug("could not check whether the config is exposed", exc_info=True)
         return
     if not exposed:
-        # Deliberately quiet about *why* it is fine. Outside a repository there is
-        # nothing to protect against, and inside one the file is protected; either way
-        # the reader needs no advice.
+        # Deliberately quiet about *why* it is fine: the file is protected, and the
+        # reader needs no advice.
         click.echo(f"{ok} config safety   identity files are not exposed to git")
-        return
+    _report_hook_exposure(hooks, ok, notes)
     for path, state in exposed:
         name = path.name
         if state == "staged":
@@ -864,6 +873,42 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
                 f"config safety   {name} is NOT IGNORED — `git add -A` would "
                 f"stage it. Add it to .gitignore, or run `agent-inbox join` again "
                 f"in that project."
+            )
+
+
+def _report_hook_exposure(
+    hooks: list[tuple[Path, str]], ok: str, notes: _Notes
+) -> None:
+    """The generated wake hooks, with the same three states as the identity file (#70).
+
+    A hook carries the installing machine's interpreter path — not a secret, but a
+    username and an install location that will not exist on the next machine, and a
+    per-machine diff on every checkout. `install-hook` now ignores it as it writes
+    it; this is for hooks written before that, and for the one case a rule cannot
+    fix — a file git already tracks.
+    """
+    if not hooks:
+        click.echo(f"{ok} hook safety     generated wake hooks are not exposed to git")
+        return
+    for path, state in hooks:
+        shown = path.as_posix()
+        if state == "staged":
+            notes.say(
+                f"hook safety     {shown} is STAGED — it carries this machine's "
+                f"interpreter path. Undo with:\n"
+                f"       git restore --staged {shown}"
+            )
+        elif state == "tracked":
+            notes.say(
+                f"hook safety     {shown} is TRACKED by git. An ignore rule will "
+                f"not help now:\n"
+                f"       git rm --cached {shown}\n"
+                f"     then re-run `agent-inbox install-hook`, which adds the rule."
+            )
+        else:
+            notes.say(
+                f"hook safety     {shown} is NOT IGNORED — `git add -A` would stage "
+                f"it. Re-run `agent-inbox install-hook`, which adds the rule."
             )
 
 
