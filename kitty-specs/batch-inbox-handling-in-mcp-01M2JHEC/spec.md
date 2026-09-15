@@ -2,7 +2,7 @@
 
 **Mission**: `batch-inbox-handling-in-mcp-01M2JHEC`
 **Created**: 2026-09-15
-**Status**: Draft
+**Status**: Shipped (v1.5.0, 2026-09-15); SC-1 live run awaiting the reporting session (#67)
 **Source**: [GitHub issue #67](https://github.com/salimfadhley/agent-inbox/issues/67), filed from a Windows omp session; owner's decision on the retry design, 2026-09-15 (client-side lookup).
 
 ## Purpose

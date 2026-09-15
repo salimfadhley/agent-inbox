@@ -26,6 +26,11 @@ Both follow-ups from the Windows report are done, deployed and proved (hub and c
 
 Generated wake hooks (omp extension, opencode plugin) carry the installing machine's interpreter path; the installer now adds an ignore rule anchored to the one file on every write path (`hookconfig.keep_out_of_git`), `doctor` has a `hook safety` line via `ignores.exposed_hooks` with the three states, and outside a repository `doctor` says so instead of claiming safety. `373b190`. Deployed, proved, announced. Not done: `.claude/settings.json` (merged, often shared) — noted on the issue.
 
+## 2026-09-15, later — v1.5.0 shipped (#67); #52 parked
+
+- **v1.5.0 (#67):** multi-id `peek_message` with completeness; new `reply_messages` with per-item outcomes; safe retry by looking for the caller's own identical reply on the thread before sending (`mcp_client._existing_reply` / `_reply_once`); unknown means not sent. Spec `batch-inbox-handling-in-mcp-01M2JHEC`. Deployed, proved, announced. **#67 stays open** for the reporting session's live round trip (SC-1).
+- **#52 parked with data:** 40 agents, 11 with `host`, all 11 different strings — nothing to group on exact equality. Enablers proposed on the issue (doctor hint / `profile refresh`); not built.
+
 ## Also open
 
 - #65: **idle wake live-verified 2026-09-14** by four omp sessions on Windows (coordinator `mirco_abrahamsson`; `gyeongsug_rascon` observed directly). Remaining: the mid-turn `followUp` check, requested from that group by mail; close #65 when it reports. espen_luo's macOS run is welcome, not blocking.
