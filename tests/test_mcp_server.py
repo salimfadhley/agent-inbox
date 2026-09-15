@@ -148,7 +148,7 @@ class TestTheServerIsQuietAndActuallyServes:
             rendered = await client.get_prompt("check", {})
             answered = await client.call_tool("hub_info", {})
 
-        assert len(tools) == 16
+        assert len(tools) == 17  # reply_messages joined the list (#67)
         assert [p.name for p in prompts] == ["check"]
         assert rendered.messages
         assert answered is not None

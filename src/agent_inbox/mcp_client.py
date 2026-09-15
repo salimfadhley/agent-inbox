@@ -107,7 +107,8 @@ and do not read silence as refusal.
 * `check_inbox` — what is waiting; free, consumes nothing
 * `read_message` — read one and mark it handled, for you alone
 * `search_mail` — find mail by topic, including mail you have already read
-* `reply_message` — answer on its thread; **use this when answering**
+* `reply_message` — answer on its thread; **use this when answering**; several at
+  once with `reply_messages`, safe to retry
 * `send_message` — start a new conversation; `read_thread`, `list_agents`, `whois`
 * `my_role` — what a role here involves
 
@@ -690,6 +691,72 @@ async def _stop_listening() -> None:
         await task
 
 
+#: How many items one batch call attempts. Past this the caller is told, item by item,
+#: that the rest were not attempted — never that they were done, and never silently
+#: dropped. Sized so a batch finishes well inside a client's transport patience: the
+#: report that produced this (#67) lost a twelve-item call to a thirty-second timeout.
+BATCH_CAP = 25
+
+
+def _existing_reply(
+    client: HubClient, original_id: str, body: str
+) -> dict[str, Any] | None:
+    """The caller's own reply to *original_id* carrying exactly *body*, if the thread
+    already shows one.
+
+    This is what makes a retry safe without a hub change (#67, owner's decision
+    2026-09-15): a reply the hub stored whose receipt was lost in transit is on the
+    thread by the time anyone retries, attributed to us, `inReplyTo` the original, with
+    the same content. Matching on the body as well as the parent is what keeps a
+    genuine second turn on the same message — "done now", after "doing it" — sendable.
+    """
+    me = client.config.name
+    parent = _leaf(original_id)
+    for note in client.read_thread(original_id).get("items", []):
+        if (
+            _leaf(note.get("attributedTo")) == me
+            and _leaf(note.get("inReplyTo") or "") == parent
+            and (note.get("content") or "") == body
+        ):
+            return note
+    return None
+
+
+def _reply_once(
+    client: HubClient, message_id: str, body: str, subject: str | None
+) -> dict[str, Any]:
+    """Reply unless the thread already shows this exact reply from us. One outcome.
+
+    Outcomes: ``delivered`` with the receipt; ``duplicate`` with the *existing* receipt
+    and nothing sent; ``unknown`` when the thread could not be checked — nothing sent,
+    because guessing in the direction of sending is the one thing a retry must never
+    do; ``failed`` with the hub's reason.
+    """
+    try:
+        found = _existing_reply(client, message_id, body)
+    except Exception as exc:  # noqa: BLE001 - unknown means not sent, whatever the cause
+        return {
+            "id": message_id,
+            "outcome": "unknown",
+            "error": f"could not check the thread before sending: {exc}",
+            "what_to_do": "Nothing was sent. Retry when the hub answers; the check "
+            "runs again and a stored reply will be found rather than repeated.",
+        }
+    if found is not None:
+        return {
+            "id": message_id,
+            "outcome": "duplicate",
+            "receipt": _summarise(found),
+            "note": "you already sent exactly this reply to this message; "
+            "nothing sent.",
+        }
+    try:
+        sent = client.reply_message(message_id, body, subject)
+    except Exception as exc:  # noqa: BLE001 - per item, never all-or-nothing
+        return {"id": message_id, "outcome": "failed", "error": str(exc)}
+    return {"id": message_id, "outcome": "delivered", "receipt": _summarise(sent)}
+
+
 def _summarise(note: dict[str, Any]) -> dict[str, Any]:
     """A message in the shape an agent actually wants to read."""
     return {
@@ -1079,8 +1146,38 @@ async def peek_message(message_id: str) -> dict[str, Any]:
     For when you need the content to decide something but are not ready to take the
     message on — it stays in your inbox and keeps showing up in `check_inbox`, with its
     age visible, until you `read_message` it. Reading is the commitment; this is not it.
+
+    **Several ids, separated by commas, come back as one result with an item each** —
+    the way to look at a morning's mail before deciding what to answer, without
+    consuming any of it (#67). The result says how many were returned, which failed and
+    why, and which were not attempted (past the cap, so submit those in another call);
+    completeness is stated, never left to be inferred from a count.
     """
-    return await _guard(lambda: _summarise(_client().peek_message(message_id)))
+
+    def go() -> dict[str, Any]:
+        wanted = [part.strip() for part in message_id.split(",") if part.strip()]
+        if len(wanted) <= 1:
+            return _summarise(_client().peek_message(message_id))
+        client = _client()
+        results: list[dict[str, Any]] = []
+        for one in wanted[:BATCH_CAP]:
+            try:
+                results.append(
+                    {"id": one, "status": "ok", **_summarise(client.peek_message(one))}
+                )
+            except Exception as exc:  # noqa: BLE001 - per item; the failure is the answer
+                results.append({"id": one, "status": "failed", "error": str(exc)})
+        not_attempted = wanted[BATCH_CAP:]
+        return {
+            "requested": len(wanted),
+            "returned": sum(r["status"] == "ok" for r in results),
+            "failed": [r["id"] for r in results if r["status"] == "failed"],
+            "not_attempted": not_attempted,
+            "complete": not not_attempted,
+            "messages": results,
+        }
+
+    return await _guard(go)
 
 
 @mcp.tool()
@@ -1099,10 +1196,102 @@ async def reply_message(
 
     Replying does not summon anyone. Your reply waits exactly as any message does, until
     that agent next looks — which may be after its current work, or its next session.
+
+    **Safe to retry.** If your previous call timed out, call again with the same body:
+    a reply the hub already stored is found on the thread and returned as `outcome:
+    duplicate`, and nothing is sent twice. A different body is a new turn and goes.
+
+    **Unread is not unanswered.** A closing acknowledgement — "thanks, done" — needs no
+    reply; `read_message` it and it leaves your inbox. Do not answer an
+    acknowledgement merely to clear it. Several at once: `reply_messages`.
     """
-    return await _guard(
-        lambda: _summarise(_client().reply_message(message_id, body, subject))
-    )
+
+    def go() -> dict[str, Any]:
+        result = _reply_once(_client(), message_id, body, subject)
+        if result["outcome"] == "delivered":
+            return result["receipt"]
+        if result["outcome"] == "duplicate":
+            return {**result["receipt"], "outcome": "duplicate", "note": result["note"]}
+        if result["outcome"] == "failed":
+            raise ClientError(result["error"])
+        return result
+
+    return await _guard(go)
+
+
+@mcp.tool()
+async def reply_messages(replies: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reply to several messages in one call — each with a reply **you** wrote.
+
+    `replies` is a list of `{"message_id": ..., "body": ..., "subject": optional}`.
+    Every item is reported on its own: `delivered` with its receipt; `failed` with the
+    hub's reason; `duplicate` when you already sent exactly that reply to that message
+    (the existing receipt is returned and nothing is sent); `unknown` when the thread
+    could not be checked first (nothing is sent — retry later); `not attempted` past
+    the cap. `complete` says whether everything was attempted. Partial success is
+    reported as partial; nothing is retried on your behalf.
+
+    Each original is marked handled only when its own reply was delivered. The rest
+    stay in your inbox. Sender-only, on-thread, `Re:` — exactly as `reply_message`.
+
+    This exists because an agent with twelve replies to send wrote its own loop and
+    delivery ledger around the single-message tool, and one reply ended in a state
+    nobody could name (#67). Ordinary correspondence should not need that.
+    """
+
+    def go() -> dict[str, Any]:
+        client = _client()
+        results: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        attempted = 0
+        for item in replies:
+            mid = str((item or {}).get("message_id") or "").strip()
+            body = str((item or {}).get("body") or "")
+            subject = (item or {}).get("subject")
+            if not mid or not body:
+                results.append(
+                    {
+                        "id": mid,
+                        "outcome": "failed",
+                        "error": "each item needs a message_id and a body",
+                    }
+                )
+                continue
+            if mid in seen:
+                results.append(
+                    {
+                        "id": mid,
+                        "outcome": "duplicate",
+                        "note": "the same message appears earlier in this batch; "
+                        "it was handled there and not sent twice.",
+                    }
+                )
+                continue
+            seen.add(mid)
+            if attempted >= BATCH_CAP:
+                results.append(
+                    {
+                        "id": mid,
+                        "outcome": "not attempted",
+                        "note": f"beyond the {BATCH_CAP}-item cap; submit it in "
+                        "another call.",
+                    }
+                )
+                continue
+            attempted += 1
+            results.append(_reply_once(client, mid, body, subject))
+        tally = {
+            key: sum(r["outcome"] == key for r in results)
+            for key in ("delivered", "failed", "duplicate", "unknown", "not attempted")
+        }
+        return {
+            "requested": len(replies),
+            **{key.replace(" ", "_"): n for key, n in tally.items()},
+            "complete": tally["not attempted"] == 0,
+            "results": results,
+        }
+
+    return await _guard(go)
 
 
 @mcp.tool()
