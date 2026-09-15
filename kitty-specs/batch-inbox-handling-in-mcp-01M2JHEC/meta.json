@@ -1,0 +1,18 @@
+{
+  "coordination_branch": "kitty/mission-batch-inbox-handling-in-mcp-01M2JHEC",
+  "created_at": "2026-09-15T12:42:36.302123+00:00",
+  "flattened": false,
+  "friendly_name": "Recoverable batch inbox handling in the MCP",
+  "mission_id": "01M2JHECWDQXQ1C6B6SMDMRP3N",
+  "mission_number": null,
+  "mission_slug": "batch-inbox-handling-in-mcp-01M2JHEC",
+  "mission_type": "software-dev",
+  "pr_bound": true,
+  "purpose_context": "An agent with a dozen pending messages read them in one call, the transport timed out after the hub had already consumed them, and the agent built its own loop and delivery ledger to reply one by one \u2014 with one reply left in an unknown state. Ordinary correspondence should not need agent-written orchestration. This mission gives the MCP a bounded non-consuming batch inspection with explicit completeness, batch replies with per-item receipts that mark each original handled only on its own success, and a retry that recovers an existing reply from the thread instead of sending a duplicate \u2014 all through the canonical hub API, with no hub change.",
+  "purpose_tldr": "An agent can inspect several waiting messages, answer each with its own authored reply, and safely retry after a lost response \u2014 using only the advertised MCP tools, with per-item outcomes.",
+  "slug": "batch-inbox-handling-in-mcp-01M2JHEC",
+  "source_description": "GitHub issue #67",
+  "target_branch": "main",
+  "topology": "coord",
+  "vcs": "git"
+}

@@ -1,0 +1,30 @@
+{
+  "entries": [
+    {
+      "created_at": "2026-09-15T12:43:51.033078Z",
+      "decision_id": "01M2JHGNVSATJP2VEKNYCSKQ62",
+      "final_answer": "Client-side lookup",
+      "input_key": "retry_design",
+      "mission_id": "01M2JHECWDQXQ1C6B6SMDMRP3N",
+      "mission_slug": "batch-inbox-handling-in-mcp-01M2JHEC",
+      "opened_by": "cli",
+      "options": [
+        "Client-side lookup",
+        "Hub-side idempotency keys",
+        "Both, client first"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Where does safe retry after a lost response live: client-side lookup of the caller's own reply, or hub-side idempotency keys?",
+      "rationale": null,
+      "resolved_at": "2026-09-15T12:43:51.744089Z",
+      "resolved_by": null,
+      "slot_key": "specify.retry.design",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    }
+  ],
+  "mission_id": "01M2JHECWDQXQ1C6B6SMDMRP3N",
+  "version": 1
+}
