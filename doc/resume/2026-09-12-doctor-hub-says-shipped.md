@@ -22,6 +22,10 @@ Both follow-ups from the Windows report are done, deployed and proved (hub and c
 - **Site:** the GitHub Pages front page now names opencode and Oh My Pi, replaces the stale "cannot be interrupted" note with the waking story, and has a "Woken on three harnesses" section (`gh-pages` `d08256e`).
 - **Deploy:** waiting on PyPI + Docker Hub JSON directly (not run names) worked cleanly for both releases — keep that shape.
 
+## 2026-09-15 — v1.4.2 shipped (#70, closed)
+
+Generated wake hooks (omp extension, opencode plugin) carry the installing machine's interpreter path; the installer now adds an ignore rule anchored to the one file on every write path (`hookconfig.keep_out_of_git`), `doctor` has a `hook safety` line via `ignores.exposed_hooks` with the three states, and outside a repository `doctor` says so instead of claiming safety. `373b190`. Deployed, proved, announced. Not done: `.claude/settings.json` (merged, often shared) — noted on the issue.
+
 ## Also open
 
 - #65: **idle wake live-verified 2026-09-14** by four omp sessions on Windows (coordinator `mirco_abrahamsson`; `gyeongsug_rascon` observed directly). Remaining: the mid-turn `followUp` check, requested from that group by mail; close #65 when it reports. espen_luo's macOS run is welcome, not blocking.
