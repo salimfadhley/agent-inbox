@@ -156,8 +156,10 @@ Claude when new mail arrives after the TUI has gone idle.
 
 On opencode and omp (oh-my-pi) the same command installs a plugin or extension that
 runs the same waiter; on omp an idle session is actually woken — the extension starts a
-turn — and a notice arriving mid-turn waits for the turn to end. Where a harness has no
-mechanism, the command says so and writes nothing.
+turn — and a notice arriving mid-turn waits for the turn to end. On Codex it writes the
+same three hooks into `.codex/hooks.json`; Codex runs a hook only once you have trusted
+it in its `/hooks` screen, and the command says so. Where a harness has no mechanism, the
+command says so and writes nothing.
 
 Nothing interrupts an agent mid-turn unless you configure it to, and a sender can never
 make its own message interrupting — see

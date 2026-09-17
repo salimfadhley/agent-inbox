@@ -128,7 +128,68 @@ def apply(
 #: told the agent it was being woken.
 #:
 #: `aurelia_saahaa` was the first agent positioned to hit that, on opencode.
-SUPPORTED_HARNESSES: frozenset[str] = frozenset({"claude", "opencode", "omp"})
+SUPPORTED_HARNESSES: frozenset[str] = frozenset({"claude", "opencode", "omp", "codex"})
+
+#: How long a Codex Stop hook holds the waiter when `--rewake` is asked for (#71).
+#: Codex runs a Stop hook *synchronously* — only a synchronous hook may block and
+#: continue the turn — so while ours holds, the session shows a status line and queues
+#: what the human types until the hook returns or they press Esc. Claude Code's
+#: eight-hour hold is only tolerable because it is asynchronous there; on Codex the
+#: hold is bounded and does not re-arm, so an idle session costs no model turns.
+CODEX_HOLD_SECONDS = 600
+
+#: What `install-hook` must say on Codex, every time. Codex runs only hooks a human has
+#: approved in its `/hooks` screen; a hook that is written is not yet a hook that runs.
+CODEX_TRUST_NOTE = (
+    "Codex runs a hook only once a person has trusted it: open Codex in this project, "
+    "run /hooks, and trust the agent-inbox entries. Until then they are written, not "
+    "running. Re-running install-hook keeps them byte-identical, so that trust holds."
+)
+
+
+def codex_hooks_path(root: Path) -> Path:
+    """Codex's project-layer hook file (`docs/config.md`, "Lifecycle hooks")."""
+    return root / ".codex" / "hooks.json"
+
+
+def codex_apply(
+    settings: dict[str, Any], command: str, *, rewake: bool = False
+) -> dict[str, Any]:
+    """Return ``settings`` with our hooks added, in Codex's `hooks.json` shape.
+
+    The shape is Claude Code's — `hooks` → event → groups → `hooks` list of commands —
+    and so is the Stop contract: exit 2 with the notice on stderr becomes the next
+    turn's prompt. What differs: Codex's Stop hook is synchronous, so the held waiter
+    is bounded (:data:`CODEX_HOLD_SECONDS`) and told not to re-arm, and every hook
+    carries a `statusMessage` because Codex shows one while a hook runs.
+
+    **Byte-identical on reinstall, by construction.** Codex trusts a hook by a hash of
+    its identity — event, command, timeout — recorded when a human approves it. A
+    reinstall that rendered anything differently would un-trust it silently.
+    """
+    out = strip(settings)
+    hooks = out.setdefault("hooks", {})
+    for event in EVENTS:
+        hook_command = f"{command} --event {event}"
+        entry: dict[str, Any] = {
+            "type": "command",
+            "command": hook_command,
+            "timeout": _TIMEOUT,
+            "statusMessage": "agent-inbox: checking for mail",
+        }
+        if event == "Stop" and rewake:
+            entry["command"] = (
+                f"{hook_command} --wait --poll-interval {_REWAKE_POLL_INTERVAL} "
+                f"--wait-timeout {CODEX_HOLD_SECONDS - 30} --no-rearm"
+            )
+            entry["timeout"] = CODEX_HOLD_SECONDS
+            entry["statusMessage"] = "agent-inbox: holding for mail (Esc to interrupt)"
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            groups = []
+            hooks[event] = groups
+        groups.append({"hooks": [entry]})
+    return out
 
 
 def plugin_path(root: Path) -> Path:
@@ -382,6 +443,8 @@ def install_for(
         return install_opencode(root, command)
     if harness == "omp":
         return install_omp(root, command)
+    if harness == "codex":
+        return install_codex(root, command, rewake=rewake)
     raise NoWakingHere(
         f"{harness or 'this harness'} has no waking mechanism I know how to install. "
         "Nothing has been written. Keep checking your inbox at the start of a turn — "
@@ -449,6 +512,30 @@ def uninstall_omp(root: Path) -> Path:
     """Remove the extension. Absent is success."""
     path = omp_extension_path(root)
     path.unlink(missing_ok=True)
+    return path
+
+
+def install_codex(
+    root: Path, command: str | None = None, *, rewake: bool = False
+) -> Path:
+    """Merge our hooks into ``root/.codex/hooks.json`` and keep the file out of git.
+
+    Merged, not replaced: it is Codex's file and may hold hooks that are not ours.
+    Ignored by decision of the owner (2026-09-17): it embeds this machine's
+    interpreter path, and trust lives in Codex's own state, not in the file's being
+    committed.
+    """
+    path = codex_hooks_path(root)
+    _write(path, codex_apply(_read(path), command or default_command(), rewake=rewake))
+    keep_out_of_git(path, root)
+    return path
+
+
+def uninstall_codex(root: Path) -> Path:
+    """Remove exactly our hooks from ``root/.codex/hooks.json``. Absent is success."""
+    path = codex_hooks_path(root)
+    if path.exists():
+        _write(path, strip(_read(path)))
     return path
 
 

@@ -46,6 +46,7 @@ _NOTE = "# agent-inbox: identity and possibly a device token. Never commit."
 HOOK_FILES: tuple[str, ...] = (
     ".omp/extensions/agent-inbox-wake.js",
     ".opencode/plugins/agent-inbox-wake.js",
+    ".codex/hooks.json",
 )
 
 #: The first line of every hook we generate. A file at one of the paths above that
@@ -223,12 +224,21 @@ def exposed_configs(root: Path) -> list[tuple[Path, str]]:
 
 
 def is_our_hook(path: Path) -> bool:
-    """Whether a file at a hook path is one `install-hook` wrote, by its first line."""
+    """Whether a file at a hook path holds something `install-hook` wrote.
+
+    The plugin and extension files are ours entirely and carry :data:`HOOK_MARKER` on
+    their first line. Codex's `hooks.json` is a merged file, so it is ours to report
+    when any hook in it is ours — recognised, as everywhere else, by the `wake-check`
+    subcommand in a command.
+    """
     try:
         with path.open(encoding="utf-8", errors="replace") as fh:
-            return HOOK_MARKER in fh.readline()
+            head = fh.read(65536)
     except OSError:
         return False
+    if path.suffix == ".json":
+        return "wake-check" in head
+    return HOOK_MARKER in head.split("\n", 1)[0]
 
 
 def exposed_hooks(root: Path) -> list[tuple[Path, str]]:

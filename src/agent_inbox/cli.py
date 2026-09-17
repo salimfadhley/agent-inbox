@@ -853,6 +853,7 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
         # reader needs no advice.
         click.echo(f"{ok} config safety   identity files are not exposed to git")
     _report_hook_exposure(hooks, ok, notes)
+    _report_codex_hooks(here, ok)
     for path, state in exposed:
         name = path.name
         if state == "staged":
@@ -874,6 +875,21 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
                 f"stage it. Add it to .gitignore, or run `agent-inbox join` again "
                 f"in that project."
             )
+
+
+def _report_codex_hooks(here: Path, ok: str) -> None:
+    """Say the Codex hooks are present — and that whether they run is not ours to
+    say (#71). Codex runs only hooks a person has trusted in its `/hooks` screen, and
+    that state lives in Codex; a line here claiming the agent is wakeable would be a
+    guess dressed as a check."""
+    from agent_inbox import hookconfig, ignores
+
+    path = hookconfig.codex_hooks_path(project_root(here))
+    if path.is_file() and ignores.is_our_hook(path):
+        click.echo(
+            f"{ok} codex hooks     present in {path} — they run only once trusted "
+            "in Codex's /hooks, which cannot be checked from here"
+        )
 
 
 def _report_hook_exposure(
@@ -2183,6 +2199,13 @@ def retention(ctx: click.Context) -> int:
     help="whose identity to wait for; needed where the harness marks nothing "
     "(omp's extension), otherwise detected.",
 )
+@click.option(
+    "--no-rearm",
+    "no_rearm",
+    is_flag=True,
+    help="when the wait runs out, end quietly instead of waking once to re-arm; "
+    "for a harness whose Stop hook is synchronous (Codex).",
+)
 @click.pass_context
 def wake_check(
     ctx: click.Context,
@@ -2191,17 +2214,35 @@ def wake_check(
     poll_interval: float,
     wait_timeout: float,
     engine: str | None,
+    no_rearm: bool,
 ) -> int:
     """Session hook: notice new mail (fail-silent)."""
     from agent_inbox.wake import run
 
+    _drain_hook_stdin()
     return run(
         event,
         wait=wait,
         poll_interval=poll_interval,
         wait_timeout=wait_timeout,
         engine=engine or _engine(ctx),
+        rearm=not no_rearm,
     )
+
+
+def _drain_hook_stdin() -> None:
+    """Read and discard what the harness wrote to our stdin.
+
+    Claude Code and Codex both hand a hook a JSON payload on stdin. We take our event
+    from argv and need none of it — but a child that exits without reading can leave
+    the parent's write failing with a broken pipe, and on Codex a hook run that errors
+    is a hook that did not block. Never from a terminal, where reading would wait.
+    """
+    try:
+        if not sys.stdin.isatty():
+            sys.stdin.read()
+    except Exception:  # noqa: BLE001 - stdin is the harness's business, not ours
+        pass
 
 
 @cli.command("install-hook")
@@ -2259,6 +2300,19 @@ def install_hook(
             )
         return 0
 
+    if harness == "codex":
+        # **Written is not running.** Codex runs only hooks a person has trusted, so
+        # the line that would be true everywhere else — "waking installed" — is the
+        # false success #64 was about, here. Say what is true and what is next.
+        click.echo(f"hooks written for codex in {path} — not yet running.")
+        click.echo(f"     {hookconfig.CODEX_TRUST_NOTE}")
+        if rewake:
+            click.echo(
+                f"     With --rewake the Stop hook holds for "
+                f"{hookconfig.CODEX_HOLD_SECONDS // 60} minutes after each turn; "
+                "Codex shows a status line meanwhile and Esc interrupts it."
+            )
+        return 0
     extra = " (with async rewake)" if rewake and harness == "claude" else ""
     click.echo(f"waking installed for {harness} in {path}{extra}")
     click.echo("Restart your session so it picks it up.")
@@ -2284,6 +2338,7 @@ def uninstall_hook(directory: str | None) -> int:
         str(hookconfig.uninstall(root)),
         str(hookconfig.uninstall_opencode(root)),
         str(hookconfig.uninstall_omp(root)),
+        str(hookconfig.uninstall_codex(root)),
     ]
     click.echo("waking removed from:\n  " + "\n  ".join(removed))
     return 0

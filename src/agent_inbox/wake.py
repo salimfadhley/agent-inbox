@@ -527,6 +527,7 @@ def _wait_for_wake(
     wait_timeout: float,
     sleep: Sleeper,
     engine: str | None = None,
+    rearm: bool = True,
 ) -> int:
     poll_interval = max(0.1, poll_interval)
     wait_timeout = max(0.0, wait_timeout)
@@ -561,7 +562,10 @@ def _wait_for_wake(
                     return code
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    return _rearm(event, root, sleep, engine)
+                    # A harness whose Stop hook is synchronous (Codex, #71) asks for
+                    # no re-arm: the re-arm is a turn, and an idle session must not
+                    # spend one every window. The hold simply ends.
+                    return _rearm(event, root, sleep, engine) if rearm else 0
                 sleep(min(_interval(poll_interval, stream), remaining))
         finally:
             # On a wake, on a timeout, and on anything raised: a hook that leaks a
@@ -579,6 +583,7 @@ def run(
     wait_timeout: float = DEFAULT_WAIT_TIMEOUT,
     sleep: Sleeper = time.sleep,
     engine: str | None = None,
+    rearm: bool = True,
 ) -> int:
     """Execute a wake-check for ``event``. Prints and returns an exit code.
 
@@ -603,6 +608,7 @@ def run(
                 wait_timeout=wait_timeout,
                 sleep=sleep,
                 engine=engine,
+                rearm=rearm,
             )
         return _run_once(event, base, engine)
     except Exception:  # noqa: BLE001 - fail-silent is the whole contract here
