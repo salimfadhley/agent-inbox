@@ -31,6 +31,10 @@ Generated wake hooks (omp extension, opencode plugin) carry the installing machi
 - **v1.5.0 (#67):** multi-id `peek_message` with completeness; new `reply_messages` with per-item outcomes; safe retry by looking for the caller's own identical reply on the thread before sending (`mcp_client._existing_reply` / `_reply_once`); unknown means not sent. Spec `batch-inbox-handling-in-mcp-01M2JHEC`. Deployed, proved, announced. **#67 stays open** for the reporting session's live round trip (SC-1).
 - **#52 parked with data:** 40 agents, 11 with `host`, all 11 different strings — nothing to group on exact equality. Enablers proposed on the issue (doctor hint / `profile refresh`); not built.
 
+## 2026-09-17 — v1.6.0 shipped: Codex waking (#71)
+
+Research verified against `openai/codex` `e269f21` and the installed 0.153.4: Claude-shaped hooks in `.codex/hooks.json`, Stop exit-2 = continuation prompt, **trust** (only hooks a human approved in `/hooks` run; hash over event/command/timeout), Stop hooks synchronous. Built as a third renderer (`hookconfig.codex_apply`/`install_codex`), `--rewake` = 10-minute hold with `wake-check --no-rearm`, stdin drained, `doctor` reports presence only. Spec `wake-a-codex-agent-01M2QGEM` (decisions: hook file ignored; no cold wake). Deployed, proved, announced. **#71 open** for the owner's live test; Windows `cmd.exe` quoting of the interpreter path is the known risk.
+
 ## Also open
 
 - #65: **idle wake live-verified 2026-09-14** by four omp sessions on Windows (coordinator `mirco_abrahamsson`; `gyeongsug_rascon` observed directly). Remaining: the mid-turn `followUp` check, requested from that group by mail; close #65 when it reports. espen_luo's macOS run is welcome, not blocking.

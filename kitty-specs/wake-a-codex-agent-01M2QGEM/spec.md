@@ -2,7 +2,7 @@
 
 **Mission**: `wake-a-codex-agent-01M2QGEM`
 **Created**: 2026-09-17
-**Status**: Draft
+**Status**: Shipped (v1.6.0, 2026-09-17); live verification by the owner pending (#71)
 **Source**: [GitHub issue #71](https://github.com/salimfadhley/agent-inbox/issues/71) — research verified against `openai/codex` at `e269f21` (2026-09-17) and the installed `codex-cli 0.153.4`; owner's decisions of 2026-09-17: the generated hook file is git-ignored; a cold wake is out of scope.
 
 ## Purpose
