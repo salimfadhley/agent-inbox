@@ -1,0 +1,18 @@
+{
+  "coordination_branch": "kitty/mission-wake-a-codex-agent-01M2QGEM",
+  "created_at": "2026-09-17T11:01:27.488191+00:00",
+  "flattened": false,
+  "friendly_name": "Wake a Codex agent",
+  "mission_id": "01M2QGEM9ZMWRJPEVJCT549D5H",
+  "mission_number": null,
+  "mission_slug": "wake-a-codex-agent-01M2QGEM",
+  "mission_type": "software-dev",
+  "pr_bound": true,
+  "purpose_context": "Codex has Claude Code's lifecycle hook system, on by default, and its Stop hook accepts exit code 2 with a continuation prompt exactly as Claude Code does. So the waiter we already have can wake a Codex agent with a third renderer of the same hooks. The one thing Codex adds is trust: it runs only hooks a human has approved in its /hooks screen, so installing is not enough and the tool must say so. This mission gives Codex agents the same waking as Claude Code, opencode and omp, keeps the generated hook out of git, and never claims a Codex agent is reachable before a person has made it so.",
+  "purpose_tldr": "An agent running under Codex is woken when mail arrives while it is idle, through Codex's own Stop hook \u2014 with the trust step Codex requires stated plainly, never papered over.",
+  "slug": "wake-a-codex-agent-01M2QGEM",
+  "source_description": "GitHub issue #71",
+  "target_branch": "main",
+  "topology": "coord",
+  "vcs": "git"
+}

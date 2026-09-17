@@ -1,0 +1,52 @@
+{
+  "entries": [
+    {
+      "created_at": "2026-09-17T11:02:36.002658Z",
+      "decision_id": "01M2QGGQ72S9CZZNTMC5EZ6S5V",
+      "final_answer": "Add to .gitignore",
+      "input_key": "hook_file_ignored",
+      "mission_id": "01M2QGEM9ZMWRJPEVJCT549D5H",
+      "mission_slug": "wake-a-codex-agent-01M2QGEM",
+      "opened_by": "cli",
+      "options": [
+        "Add to .gitignore",
+        "Report if tracked, do not ignore"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Should <project>/.codex/hooks.json be added to .gitignore, or reported-if-tracked like .claude/settings.json?",
+      "rationale": null,
+      "resolved_at": "2026-09-17T11:02:36.660354Z",
+      "resolved_by": null,
+      "slot_key": "specify.git.hook-file",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    },
+    {
+      "created_at": "2026-09-17T11:02:37.301411Z",
+      "decision_id": "01M2QGGRFNBRM3ZV6QF2P64NYN",
+      "final_answer": "No, separate mission if ever",
+      "input_key": "cold_wake_in_scope",
+      "mission_id": "01M2QGEM9ZMWRJPEVJCT549D5H",
+      "mission_slug": "wake-a-codex-agent-01M2QGEM",
+      "opened_by": "cli",
+      "options": [
+        "No, separate mission if ever",
+        "Yes, include it"
+      ],
+      "origin_flow": "specify",
+      "other_answer": false,
+      "question": "Is a cold wake through the app-server daemon (turn/start on an idle session) in this mission?",
+      "rationale": null,
+      "resolved_at": "2026-09-17T11:02:37.938234Z",
+      "resolved_by": null,
+      "slot_key": "specify.scope.cold-wake",
+      "status": "resolved",
+      "step_id": null,
+      "summary_json": null
+    }
+  ],
+  "mission_id": "01M2QGEM9ZMWRJPEVJCT549D5H",
+  "version": 1
+}
