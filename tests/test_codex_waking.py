@@ -64,19 +64,41 @@ class TestCodexGetsHooks:
         assert "--wait" not in stop["command"]
         assert stop["timeout"] == hookconfig._TIMEOUT
 
-    def test_rewake_holds_bounded_and_does_not_rearm(self, tmp_path: Path) -> None:
-        """Codex's Stop hook is synchronous. An eight-hour hold would freeze the
-        prompt; a re-arm would spend a model turn every window on an idle session."""
+    def test_rewake_installs_no_hold_at_all(self, tmp_path: Path) -> None:
+        """**The defect this replaced (#73).** v1.6.0 gave Codex a ten-minute held
+        waiter, and Codex's Stop hook is synchronous: the session showed "Working"
+        and queued whatever the human typed until they pressed Esc. A shorter hold
+        is the same fault in a smaller font, so there is none — the flag is accepted
+        for callers that pass it to every harness, and changes nothing here."""
+        held = hookconfig.install_for("codex", tmp_path, rewake=True).read_text()
+        plain = hookconfig.install_for("codex", tmp_path).read_text()
+
+        assert held == plain
+        assert "--wait" not in held
+        assert "holding for mail" not in held
+
+    def test_every_codex_hook_returns_at_once(self, tmp_path: Path) -> None:
+        """No hook may outlast the ten-second check, whatever the event."""
         data = json.loads(
             hookconfig.install_for("codex", tmp_path, rewake=True).read_text()
         )
-        stop = data["hooks"]["Stop"][0]["hooks"][0]
 
-        assert "--wait" in stop["command"]
-        assert "--no-rearm" in stop["command"]
-        assert stop["timeout"] == hookconfig.CODEX_HOLD_SECONDS
-        assert f"--wait-timeout {hookconfig.CODEX_HOLD_SECONDS - 30}" in stop["command"]
-        assert "async" not in stop  # an async hook cannot continue the turn
+        for event in ("SessionStart", "UserPromptSubmit", "Stop"):
+            entry = data["hooks"][event][0]["hooks"][0]
+            assert entry["timeout"] == hookconfig._TIMEOUT
+            assert "--wait" not in entry["command"]
+
+    def test_the_stop_hook_still_delivers_mail_that_arrived_during_the_turn(
+        self, tmp_path: Path
+    ) -> None:
+        """What Codex keeps, and why the Stop hook is worth having without a hold:
+        a quick look the moment a turn ends catches everything that arrived while the
+        agent was working, with nobody having to prompt it."""
+        data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
+
+        assert (
+            "wake-check --event Stop" in data["hooks"]["Stop"][0]["hooks"][0]["command"]
+        )
 
 
 class TestTrustSurvivesReinstall:
@@ -152,15 +174,17 @@ class TestInstallHookSaysWrittenNotRunning:
         assert "/hooks" in out and "trust" in out
         assert "waking installed" not in out
 
-    def test_rewake_explains_the_hold(
+    def test_rewake_says_it_does_nothing_here(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
     ) -> None:
+        """A flag silently ignored is a false success in a smaller font (#73)."""
         self._project(tmp_path, monkeypatch)
 
         assert main(["install-hook", "--engine", "codex", "--rewake"]) == 0
 
         out = capsys.readouterr().out
-        assert "10 minutes" in out and "Esc" in out
+        assert "--rewake does nothing here" in out
+        assert "blocking your session" in out
 
 
 class TestTheFileIsKeptOutOfGit:

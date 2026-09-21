@@ -580,6 +580,34 @@ def configured_engines(start: Path | None = None) -> list[str]:
     return [str(key) for key in (data.get("agents") or {})]
 
 
+#: What an engine's entry says when this project has asked not to have wake hooks.
+#: Written by `uninstall-hook`, cleared by an explicit `install-hook` (#73).
+WAKE_OFF = "off"
+
+
+def wake_declined(engine: str | None, start: Path | None = None) -> bool:
+    """Has this project asked not to have waking installed for *engine*?
+
+    **Because removing them was not enough.** `join` installs the wake hooks by
+    default, so an agent who deleted them got them back the next time it joined — and
+    on Codex what came back was a hook that blocked the session (#73). A choice a
+    person made by hand must survive the tool's next opinion, so it is recorded beside
+    the identity it belongs to and read before anything is written.
+    """
+    path = find_config(start)
+    if path is None or engine is None:
+        return False
+    try:
+        data = tomllib.loads(path.read_text())
+    except OSError, tomllib.TOMLDecodeError:
+        return False
+    entries = data.get("agents") or {}
+    mine = entries.get(entry_key(entries, engine) or "")
+    if not isinstance(mine, dict):
+        return False
+    return str(mine.get("wake", "")).strip().lower() in {WAKE_OFF, "false", "no"}
+
+
 def duplicate_names(start: Path | None = None) -> dict[str, list[str]]:
     """Names claimed by more than one engine in this project, mapped to those engines.
 
@@ -1000,6 +1028,12 @@ def _render_project(target: Path, hub: str, agents: dict[str, Any]) -> Path:
         lines.append(f"role = {_toml_str(str(item.get('role', 'agent')))}")
         if item.get("token"):
             lines.append(f"token = {_toml_str(str(item['token']))}")
+        # **The renderer is the whitelist**, which is why this line exists rather than
+        # the write being trusted: `write_project` accepted `wake` and this dropped it
+        # on the floor, so `uninstall-hook` reported a refusal it had not recorded
+        # (#73, caught by its own test). Only written when somebody set it.
+        if item.get("wake"):
+            lines.append(f"wake = {_toml_str(str(item['wake']))}")
     # Atomic: write a sibling temp file and rename over the target, so a crash mid-write
     # never leaves a half-written config that loses everyone's identity.
     tmp = _scratch(target)

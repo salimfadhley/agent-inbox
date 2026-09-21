@@ -35,6 +35,7 @@ from agent_inbox import __version__, staleness
 from agent_inbox.client import (
     CONFIG_NAME,
     UNNAMED,
+    WAKE_OFF,
     ClientError,
     Config,
     HubClient,
@@ -53,6 +54,7 @@ from agent_inbox.client import (
     take_migration_notice,
     unset_global,
     unset_project,
+    wake_declined,
     write_config,
     write_global,
     write_project,
@@ -948,6 +950,10 @@ def _install_wake_hook(engine: str) -> str | None:
     """
     from agent_inbox import hookconfig
 
+    if wake_declined(engine):
+        # This project said no, by hand, and a join is not a change of mind (#73).
+        logger.debug("waking declined for %s in this project; not installing", engine)
+        return None
     try:
         return str(hookconfig.install_for(engine, project_root(), rewake=True))
     except Exception as exc:  # noqa: BLE001 - the join already happened and is durable
@@ -2285,6 +2291,12 @@ def install_hook(
 
     root = Path(directory) if directory else project_root()
     harness = engine or detect_engine()
+    # Asking for it back is a change of mind, and clears any earlier refusal (#73).
+    if harness and wake_declined(harness, root):
+        try:
+            unset_project("wake", start=root, engine=harness)
+        except Exception:  # noqa: BLE001 - a config we may not write is not fatal here
+            logger.debug("could not clear the wake decline for %s", harness)
     try:
         path = hookconfig.install_for(harness, root, command=command, rewake=rewake)
     except hookconfig.NoWakingHere as absent:
@@ -2307,10 +2319,10 @@ def install_hook(
         click.echo(f"hooks written for codex in {path} — not yet running.")
         click.echo(f"     {hookconfig.CODEX_TRUST_NOTE}")
         if rewake:
+            # Asked for, not given, and said so: a flag silently ignored is the same
+            # false success in a smaller font (#73).
             click.echo(
-                f"     With --rewake the Stop hook holds for "
-                f"{hookconfig.CODEX_HOLD_SECONDS // 60} minutes after each turn; "
-                "Codex shows a status line meanwhile and Esc interrupts it."
+                f"     --rewake does nothing here. {hookconfig.CODEX_NO_HOLD_NOTE}"
             )
         return 0
     extra = " (with async rewake)" if rewake and harness == "claude" else ""
@@ -2321,7 +2333,8 @@ def install_hook(
 
 @cli.command("uninstall-hook")
 @click.option("--dir", "directory", help="project dir (default: this repo root)")
-def uninstall_hook(directory: str | None) -> int:
+@click.pass_context
+def uninstall_hook(ctx: click.Context, directory: str | None) -> int:
     """Remove whatever waking we installed, for every harness.
 
     **All of them, unconditionally, without asking which harness this is.** Uninstall
@@ -2341,6 +2354,25 @@ def uninstall_hook(directory: str | None) -> int:
         str(hookconfig.uninstall_codex(root)),
     ]
     click.echo("waking removed from:\n  " + "\n  ".join(removed))
+    # **And remembered**, or `join` would put them back (#73). Recorded against the
+    # engine we can name; when we cannot name one there is no entry to record it in,
+    # and saying so beats writing somebody else's.
+    harness = _engine(ctx) or detect_engine()
+    if harness:
+        try:
+            write_project({"wake": WAKE_OFF}, start=root, engine=harness)
+            click.echo(
+                f"This project will not have them reinstalled for {harness}, "
+                "including by join. `agent-inbox install-hook` asks for them back."
+            )
+        except Exception as exc:  # noqa: BLE001 - removal succeeded; the note is extra
+            logger.debug("could not record the wake decline: %s", exc)
+    else:
+        click.echo(
+            "Which engine you are could not be told, so nothing was recorded: a "
+            "later `join` may install them again. Re-run with --engine <harness> "
+            "to record it."
+        )
     return 0
 
 

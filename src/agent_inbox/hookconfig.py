@@ -131,13 +131,25 @@ def apply(
 #: `aurelia_saahaa` was the first agent positioned to hit that, on opencode.
 SUPPORTED_HARNESSES: frozenset[str] = frozenset({"claude", "opencode", "omp", "codex"})
 
-#: How long a Codex Stop hook holds the waiter when `--rewake` is asked for (#71).
-#: Codex runs a Stop hook *synchronously* — only a synchronous hook may block and
-#: continue the turn — so while ours holds, the session shows a status line and queues
-#: what the human types until the hook returns or they press Esc. Claude Code's
-#: eight-hour hold is only tolerable because it is asynchronous there; on Codex the
-#: hold is bounded and does not re-arm, so an idle session costs no model turns.
-CODEX_HOLD_SECONDS = 600
+#: **Codex gets no held waiter, at any length** (#73). Codex runs a Stop hook
+#: synchronously — only a synchronous hook may continue the turn — so a hook that
+#: waits holds the *whole session*: the session shows "Working", and what the human
+#: types next is queued until the hook returns or they press Esc. v1.6.0 shipped a
+#: ten-minute hold and a Codex user on Windows met exactly that, pressing Esc before
+#: every follow-up for five minutes at a time. Claude Code's eight-hour hold is only
+#: tolerable because it is asynchronous there; there is no asynchronous hook on Codex
+#: that may continue a turn, so the honest answer is not a shorter hold but none.
+#:
+#: What Codex keeps is the quick check at every boundary, which is a real wake for the
+#: case that matters most: mail that arrives *during* a turn is delivered the moment
+#: that turn ends, without the human saying anything.
+CODEX_NO_HOLD_NOTE = (
+    "Codex has no way to wait for mail without blocking your session: its Stop hook "
+    "is synchronous, so a waiting hook queues whatever you type next until it ends. "
+    "So these hooks only look — at session start, before each prompt, and when a turn "
+    "ends. Mail that arrives while you work reaches you as soon as that turn is over; "
+    "mail that arrives while you sit idle reaches you at your next prompt."
+)
 
 #: What `install-hook` must say on Codex, every time. Codex runs only hooks a human has
 #: approved in its `/hooks` screen; a hook that is written is not yet a hook that runs.
@@ -160,9 +172,12 @@ def codex_apply(
 
     The shape is Claude Code's — `hooks` → event → groups → `hooks` list of commands —
     and so is the Stop contract: exit 2 with the notice on stderr becomes the next
-    turn's prompt. What differs: Codex's Stop hook is synchronous, so the held waiter
-    is bounded (:data:`CODEX_HOLD_SECONDS`) and told not to re-arm, and every hook
-    carries a `statusMessage` because Codex shows one while a hook runs.
+    turn's prompt. Every hook carries a `statusMessage`, because Codex shows one while
+    a hook runs.
+
+    **Every hook here returns at once, and `rewake` cannot change that** — see
+    :data:`CODEX_NO_HOLD_NOTE`. The parameter is accepted so that one caller may pass
+    it to every harness, and deliberately ignored; the caller reports that.
 
     **Byte-identical on reinstall, by construction.** Codex trusts a hook by a hash of
     its identity — event, command, timeout — recorded when a human approves it. A
@@ -178,13 +193,6 @@ def codex_apply(
             "timeout": _TIMEOUT,
             "statusMessage": "agent-inbox: checking for mail",
         }
-        if event == "Stop" and rewake:
-            entry["command"] = (
-                f"{hook_command} --wait --poll-interval {_REWAKE_POLL_INTERVAL} "
-                f"--wait-timeout {CODEX_HOLD_SECONDS - 30} --no-rearm"
-            )
-            entry["timeout"] = CODEX_HOLD_SECONDS
-            entry["statusMessage"] = "agent-inbox: holding for mail (Esc to interrupt)"
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             groups = []
