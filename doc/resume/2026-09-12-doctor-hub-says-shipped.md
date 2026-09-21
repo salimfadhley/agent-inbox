@@ -35,6 +35,10 @@ Generated wake hooks (omp extension, opencode plugin) carry the installing machi
 
 Research verified against `openai/codex` `e269f21` and the installed 0.153.4: Claude-shaped hooks in `.codex/hooks.json`, Stop exit-2 = continuation prompt, **trust** (only hooks a human approved in `/hooks` run; hash over event/command/timeout), Stop hooks synchronous. Built as a third renderer (`hookconfig.codex_apply`/`install_codex`), `--rewake` = 10-minute hold with `wake-check --no-rearm`, stdin drained, `doctor` reports presence only. Spec `wake-a-codex-agent-01M2QGEM` (decisions: hook file ignored; no cold wake). Deployed, proved, announced. **#71 open** for the owner's live test; Windows `cmd.exe` quoting of the interpreter path is the known risk.
 
+## 2026-09-21 — v1.6.1: Windows hook quoting (#71)
+
+A Codex agent on Windows reported every generated hook failing with exit 1: `default_command` used `shlex.quote` (single quotes) and Codex on Windows runs hooks through `COMSPEC` = `cmd.exe /C` (verified `command_runner.rs` at `ebc05da`; PowerShell is not the hook shell). Fixed with `hookconfig.quote_for_shell` (bare on Windows for ordinary paths, else double quotes, never single) and `split_command` for omp's argv; the rendered command is launched through `sh -lc` in `tests/test_windows_hook_quoting.py`. `f032848`, deployed, proved, announced. **#71 still open:** the Windows agent must upgrade, reinstall, re-trust in `/hooks` (command text changed) and run Tests A–D. **#72** (AntiGravity/Gemini waking, `.agents/hooks.json`) is filed and untouched — next mission after #71 verifies.
+
 ## Also open
 
 - #65: **idle wake live-verified 2026-09-14** by four omp sessions on Windows (coordinator `mirco_abrahamsson`; `gyeongsug_rascon` observed directly). Remaining: the mid-turn `followUp` check, requested from that group by mail; close #65 when it reports. espen_luo's macOS run is welcome, not blocking.
