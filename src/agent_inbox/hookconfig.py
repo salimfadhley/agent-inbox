@@ -9,6 +9,7 @@ command). Re-install is idempotent (it strips ours first), and the write is atom
 
 import json
 import logging
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -299,7 +300,7 @@ def omp_extension(command: str) -> str:
     `command` is split into argv here because `pi.exec` takes `(command, args)` and
     spawns without a shell; `shlex` undoes the quoting `default_command` applied.
     """
-    argv = json.dumps(shlex.split(command))
+    argv = json.dumps(split_command(command))
     return f"""// Installed by `agent-inbox install-hook`. Safe to delete;
 // re-run the command to restore it.
 //
@@ -416,7 +417,56 @@ def default_command() -> str:
     Quoted with `shlex`, because the path is not ours and a uv tool directory can sit
     under a directory with a space in it.
     """
-    return f"{shlex.quote(sys.executable)} -m agent_inbox wake-check"
+    return f"{quote_for_shell(sys.executable)} -m agent_inbox wake-check"
+
+
+#: Characters a path may contain and still be passed to `cmd.exe` bare. Anything else
+#: gets double quotes, which `cmd.exe` honours and a bash on Windows honours too.
+_WINDOWS_BARE = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:\\/._-+~"
+)
+
+
+def quote_for_shell(path: str, *, windows: bool | None = None) -> str:
+    """Quote one path for the shell a harness will hand our command to.
+
+    **POSIX quoting broke every hook on Windows** (#71, reported 2026-09-21 from a
+    live Codex session: `Hook failed`, exit 1). `shlex.quote` wraps a path in single
+    quotes, and Codex on Windows runs a hook through `COMSPEC` — `cmd.exe /C` — to
+    which a single quote is an ordinary character: it looked for a program literally
+    named `'C:\\Users\\...\\python.exe'` and found none. Verified in
+    `hooks/src/engine/command_runner.rs` (`default_shell_command`); PowerShell is not
+    the hook shell unless somebody configures one.
+
+    On Windows a path with nothing but ordinary characters goes **bare** — the one
+    form every shell there agrees on — and anything else is double-quoted, which
+    `cmd.exe` honours and a bash on Windows honours too (backslashes are literal
+    inside double quotes in bash, and these paths carry no `\\"`). Never single quotes
+    on Windows.
+
+    `windows` is explicit so the Windows rule is testable on any platform.
+    """
+    on_windows = os.name == "nt" if windows is None else windows
+    if not on_windows:
+        return shlex.quote(path)
+    if path and all(ch in _WINDOWS_BARE for ch in path):
+        return path
+    return f'"{path}"'
+
+
+def split_command(command: str, *, windows: bool | None = None) -> list[str]:
+    """The argv a shell would build from *command* — the inverse of the above.
+
+    For omp, which spawns argv directly and must be given the pieces (#65). POSIX
+    `shlex.split` treats a backslash as an escape, so a Windows path fed to it comes
+    out as `C:Usersxpython.exe`; on Windows the split keeps backslashes and strips
+    only the double quotes this module adds.
+    """
+    on_windows = os.name == "nt" if windows is None else windows
+    if not on_windows:
+        return shlex.split(command)
+    tokens = shlex.split(command, posix=False)
+    return [t[1:-1] if len(t) >= 2 and t[0] == t[-1] == '"' else t for t in tokens]
 
 
 class NoWakingHere(Exception):
