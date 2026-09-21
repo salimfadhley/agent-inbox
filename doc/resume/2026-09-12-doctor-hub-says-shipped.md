@@ -39,6 +39,12 @@ Research verified against `openai/codex` `e269f21` and the installed 0.153.4: Cl
 
 A Codex agent on Windows reported every generated hook failing with exit 1: `default_command` used `shlex.quote` (single quotes) and Codex on Windows runs hooks through `COMSPEC` = `cmd.exe /C` (verified `command_runner.rs` at `ebc05da`; PowerShell is not the hook shell). Fixed with `hookconfig.quote_for_shell` (bare on Windows for ordinary paths, else double quotes, never single) and `split_command` for omp's argv; the rendered command is launched through `sh -lc` in `tests/test_windows_hook_quoting.py`. `f032848`, deployed, proved, announced. **#71 still open:** the Windows agent must upgrade, reinstall, re-trust in `/hooks` (command text changed) and run Tests A–D. **#72** (AntiGravity/Gemini waking, `.agents/hooks.json`) is filed and untouched — next mission after #71 verifies.
 
+## 2026-09-21 (evening) — v1.6.2: the Codex hold was a design error (#73)
+
+A Codex agent on Windows reported that the v1.6.0 held Stop waiter blocked their session — Codex Stop hooks are synchronous, so it queued the human's next prompt for up to 570s and they pressed Esc before every follow-up. **Not tunable: removed.** `codex_apply` renders no `--wait` at any length; `--rewake` says it does nothing there. Root cause of it being on at all: `cli._install_wake_hook` passes `rewake=True` for every harness. Also added a durable opt-out — `uninstall-hook` writes `wake = "off"` into the engine's entry (`client.wake_declined`, and `_render_project` had to learn the key, which its own test caught), `join` honours it, `install-hook` clears it. `dbc2eca`, deployed, proved, announced; #73 answered and the #71 protocol amended (Test B idle-wake withdrawn, new Tests B/E).
+
+**Lesson for the next harness (#72, AntiGravity):** before shipping a Stop-hook waiter, establish whether that harness runs Stop hooks synchronously, and if so do not hold at all.
+
 ## Also open
 
 - #65: **idle wake live-verified 2026-09-14** by four omp sessions on Windows (coordinator `mirco_abrahamsson`; `gyeongsug_rascon` observed directly). Remaining: the mid-turn `followUp` check, requested from that group by mail; close #65 when it reports. espen_luo's macOS run is welcome, not blocking.
