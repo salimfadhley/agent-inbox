@@ -130,12 +130,12 @@ def test_reinstall_repairs_legacy_hooks_and_preserves_other_hooks(
     assert path.read_bytes() == before
 
 
-def test_served_prompt_distinguishes_codex_from_idle_waking() -> None:
-    text = onboarding("http://hub.example", version="1.6.2")
+def test_served_prompt_explains_limits_without_naming_a_harness() -> None:
+    text = onboarding("http://hub.example", version="1.7.0")
     section = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
     assert "agent-inbox install-hook --rewake" in section
-    assert "It does not\nwake an idle session" in section
-    assert "`--rewake` does nothing\non Codex" in section
-    assert "Claude, opencode and omp support idle waking" in section
-    assert "agent-inbox install-hook --engine codex" in section
-    assert "re-trust" in section
+    assert "cannot wake an idle session" in section
+    assert "Others can hold the event stream and wake an idle session" in section
+    assert "`doctor` reports" in section
+    assert "approve changed entries" in section
+    assert "absolute path to uv" in section

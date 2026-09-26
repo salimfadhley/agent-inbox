@@ -679,25 +679,22 @@ That registers mail checks in this project's harness settings, in whatever form 
 harness loads — hooks, a plugin, or an extension. It adds a line to your context when
 mail is waiting. Generated hooks delegate to `uv run --isolated --no-project`, so they
 use the package's mail-checking command without saving an interpreter path or adopting
-your project's environment. uv must be on PATH; its first run needs the package cached
-or network access. Package code updates do not require rewriting hooks. uv uses its own
-package cache; upgrading a separate `uv tool` installation does not refresh it.
-Run the hook command once with `--refresh-package agent-inbox` to fetch a release now.
+your project's environment. Installation saves the absolute path to uv, so a different
+PATH in the running session does not break the command. Its first run needs the package
+cached or network access. Package code updates do not require rewriting hooks. uv uses
+its own cache; upgrading a separate `uv tool` installation does not refresh it. The
+package-version notice gives the refresh command when this client is behind its hub.
 
-**Codex checks at session start, before each prompt, and when a turn ends. It does not
-wake an idle session.** Mail arriving during work is noticed at the next turn boundary;
-mail arriving after the turn ends waits until your next prompt. `--rewake` does nothing
-on Codex: a held Stop hook would block your follow-up prompts. A person must trust the
-installed entries in Codex's `/hooks` before they run.
+**Some harnesses only check at turn boundaries and cannot wake an idle session.**
+`install-hook` tells you which kind yours is and whether a person must approve the
+installed entries. Others can hold the event stream and wake an idle session when mail
+arrives. The installer does not add a blocking waiter to a synchronous interactive hook.
 
-**Claude, opencode and omp support idle waking.** Their waiter holds the hub's
-event stream while you are idle and wakes you when something arrives — typically
-within a second, rather than whenever you next happen to check.
-
-**Upgrading the package does not regenerate existing hook files.** If `doctor` reports
-obsolete Codex commands, run `agent-inbox install-hook --engine codex` in that project,
-then re-trust the changed entries in `/hooks`. This removes the old blocking waiter
-and replaces Windows commands that used incompatible single quotes.
+**Upgrading the package does not regenerate existing hook files.** `doctor` reports
+known obsolete saved commands and gives the recovery steps. Run
+`agent-inbox install-hook` in the affected project to regenerate them, then approve
+changed entries if your harness requires it. Reinstalling the same configuration
+preserves it byte for byte.
 
 It merges rather than replaces, touches only its own entries, and is safe to run twice.
 `agent-inbox uninstall-hook` removes it. Where a harness has no such mechanism the

@@ -2335,6 +2335,9 @@ def install_hook(
             logger.debug("could not clear the wake decline for %s", harness)
     try:
         path = hookconfig.install_for(harness, root, command=command, rewake=rewake)
+    except hookconfig.HookRunnerNotFound as missing:
+        _err(str(missing))
+        return 1
     except hookconfig.NoWakingHere as absent:
         # Exit 0: nothing failed. The command was asked to do something this harness
         # cannot do, and the honest answer is a plain one — not an error a script has

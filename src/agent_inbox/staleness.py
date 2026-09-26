@@ -154,17 +154,24 @@ def _newer(a: str, b: str) -> str:
 MODULE_COMMAND_FLOOR = _newer(INSTALL_FLOOR, MODULE_FLOOR)
 
 
-def uv_run_command(*, refresh: bool = False) -> str:
+# Codex trusts the literal command. Change these only as an announced hook migration,
+# including when the supported Python floor advances; unrelated install policy must
+# not silently rewrite existing trusted hooks.
+HOOK_FLOOR = "1.6.2"
+HOOK_PYTHON = "3.14"
+
+
+def uv_run_command(*, refresh: bool = False, executable: str = "uv") -> str:
     """One package environment for generated hooks and their refresh instructions.
 
     1.6.2 is the first release with the corrected Codex lifecycle behavior. Keep
     this a floor, not the current version, so upgrades preserve trusted hook commands.
     """
-    floor = _newer(MODULE_COMMAND_FLOOR, "1.6.2")
     refresh_flag = "--refresh-package agent-inbox " if refresh else ""
     return (
-        f"uv run --quiet --isolated --no-project --python {interpreter_pin()} "
-        f'{refresh_flag}--with "agent-inbox[clients]>={floor}" python -m agent_inbox'
+        f"{executable} run --quiet --isolated --no-project --python {HOOK_PYTHON} "
+        f'{refresh_flag}--with "agent-inbox[clients]>={HOOK_FLOOR}" '
+        "python -m agent_inbox"
     )
 
 

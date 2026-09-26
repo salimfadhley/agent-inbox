@@ -157,7 +157,9 @@ class TestAnActualLaunch:
             "SessionStart",
         ]
 
-    def test_default_hook_passes_its_arguments_to_uv(self, tmp_path: Path) -> None:
+    def test_default_hook_passes_its_arguments_to_uv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Exercise the actual shell command without a registry or user's uv cache."""
         fake_dir = tmp_path / "a dir"
         fake_dir.mkdir()
@@ -165,10 +167,11 @@ class TestAnActualLaunch:
         record = tmp_path / "argv.txt"
         fake.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$@" > "{record}"\n')
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        monkeypatch.setattr(hookconfig.shutil, "which", lambda name: str(fake))
         data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
         command = data["hooks"]["Stop"][0]["hooks"][0]["command"]
-        assert command.startswith("uv run ")
-        env = {**os.environ, "PATH": str(fake_dir) + os.pathsep + os.environ["PATH"]}
+        assert command.startswith(quote_for_shell(str(fake)) + " run ")
+        env = {**os.environ, "PATH": "/nonexistent"}
         subprocess.run(  # noqa: S603
             ["/bin/sh", "-c", command],  # noqa: S607
             cwd=tmp_path,

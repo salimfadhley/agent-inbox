@@ -18,7 +18,10 @@ names the shape rather than the spelling.
 
 import json
 import shlex
+import shutil
 from pathlib import Path
+
+import pytest
 
 from agent_inbox import hookconfig
 
@@ -31,7 +34,7 @@ class TestTheDefaultCommandAvoidsTheLauncher:
 
     def test_it_runs_the_module_through_isolated_uv(self) -> None:
         assert shlex.split(hookconfig.default_command()) == [
-            "uv",
+            str(Path(shutil.which("uv") or "uv").absolute()),
             "run",
             "--quiet",
             "--isolated",
@@ -188,3 +191,31 @@ class TestThePromptSaysWhatIsHoldingIt:
         windows = text.split("taskkill", 1)[1].split("```", 2)[0]
 
         assert upgrade_command() in windows
+
+
+def test_hook_identity_is_independent_of_install_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing this string un-trusts Codex hooks: announce deliberate bumps."""
+    from agent_inbox import staleness
+
+    monkeypatch.setattr(hookconfig.shutil, "which", lambda name: "/opt/tools/uv")
+    expected = (
+        "/opt/tools/uv run --quiet --isolated --no-project --python 3.14 "
+        '--with "agent-inbox[clients]>=1.6.2" python -m agent_inbox wake-check'
+    )
+    assert hookconfig.default_command() == expected
+    monkeypatch.setattr(staleness, "INSTALL_FLOOR", "999.0.0")
+    monkeypatch.setattr(staleness, "MODULE_COMMAND_FLOOR", "999.0.0")
+    monkeypatch.setattr(staleness, "interpreter_pin", lambda: "3.99")
+    assert hookconfig.default_command() == expected
+
+
+def test_missing_uv_does_not_write_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_inbox.cli import main
+
+    monkeypatch.setattr(hookconfig.shutil, "which", lambda name: None)
+    assert main(["install-hook", "--engine", "codex", "--dir", str(tmp_path)]) == 1
+    assert not hookconfig.codex_hooks_path(tmp_path).exists()

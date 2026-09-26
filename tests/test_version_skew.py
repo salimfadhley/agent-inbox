@@ -83,7 +83,6 @@ class TestTheNoticeItself:
 
 
 def test_staleness_notice_refreshes_the_hook_environment() -> None:
-    from agent_inbox.hookconfig import default_command
 
     staleness.reset()
     try:
@@ -95,7 +94,7 @@ def test_staleness_notice_refreshes_the_hook_environment() -> None:
         assert "--refresh-package agent-inbox" in command
         assert (
             command.replace("--refresh-package agent-inbox ", "") + " wake-check"
-            == default_command()
+            == staleness.uv_run_command() + " wake-check"
         )
     finally:
         staleness.reset()

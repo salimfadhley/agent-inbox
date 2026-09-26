@@ -11,8 +11,11 @@ import json
 import logging
 import os
 import shlex
+import shutil
 from pathlib import Path
 from typing import Any
+
+from agent_inbox.exceptions import MailboxError
 
 logger = logging.getLogger(__name__)
 
@@ -392,6 +395,12 @@ def _write(path: Path, settings: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+class HookRunnerNotFound(MailboxError):
+    """The installer cannot resolve the runner required by a generated hook."""
+
+    code = "hook_runner_not_found"
+
+
 def default_command() -> str:
     """Keep installed hooks independent of interpreter paths and project environments.
 
@@ -400,10 +409,24 @@ def default_command() -> str:
     uv resolves the package using its cache; package updates need no hook rewrite.
     `--isolated` ignores active virtualenvs and `--no-project` ignores the host project.
     The Python module avoids holding the Windows agent-inbox.exe launcher open.
+    That lock broke upgrades in August 2026. uv remains the child's parent, so long
+    waiters may instead hold uv.exe open and prevent `uv self update` on Windows
+    (not yet verified there). End those waiters before updating uv itself.
+
+    Resolve uv at installation: GUI hook environments may not have the shell's PATH.
+    Cold or stale caches may require network access before our fail-silent code runs;
+    using uv does not make resolver failures part of that Python boundary.
     """
     from agent_inbox.staleness import uv_run_command
 
-    return f"{uv_run_command()} wake-check"
+    executable = shutil.which("uv")
+    if executable is None:
+        raise HookRunnerNotFound(
+            "uv was not found on PATH; install uv or add it to PATH, then rerun "
+            "install-hook. No runnable hook command could be generated."
+        )
+    runner = quote_for_shell(os.path.abspath(executable))
+    return f"{uv_run_command(executable=runner)} wake-check"
 
 
 #: Characters a path may contain and still be passed to `cmd.exe` bare. Anything else
