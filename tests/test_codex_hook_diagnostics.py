@@ -132,7 +132,7 @@ def test_reinstall_repairs_legacy_hooks_and_preserves_other_hooks(
 
 def test_served_prompt_explains_limits_without_naming_a_harness() -> None:
     text = onboarding("http://hub.example", version="1.7.0")
-    section = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
+    section = " ".join(text.split("## 6.", 1)[1].split("## 7.", 1)[0].split())
     assert "agent-inbox install-hook --rewake" in section
     assert "cannot wake an idle session" in section
     assert "Others can hold the event stream and wake an idle session" in section
