@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import shlex
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -306,7 +305,7 @@ def omp_extension(command: str) -> str:
     waiter's, unaltered: sender and subject, never a body (ADR 0008).
 
     `command` is split into argv here because `pi.exec` takes `(command, args)` and
-    spawns without a shell; `shlex` undoes the quoting `default_command` applied.
+    spawns without a shell; the platform-aware splitter preserves quoted requirements.
     """
     argv = json.dumps(split_command(command))
     return f"""// Installed by `agent-inbox install-hook`. Safe to delete;
@@ -394,38 +393,17 @@ def _write(path: Path, settings: dict[str, Any]) -> None:
 
 
 def default_command() -> str:
-    """How to run `wake-check`, without going through the `agent-inbox` launcher.
+    """Keep installed hooks independent of interpreter paths and project environments.
 
-    **This is the Windows upgrade bug, and it is ours.** On Windows a running `.exe`
-    cannot be overwritten, and `uv tool install --force` has to replace the launcher at
-    `~/.local/bin/agent-inbox.exe`. Installing this hook as `agent-inbox wake-check`
-    started that launcher on *every turn of every session*, so the file was reliably in
-    use and every upgrade ended in::
-
-        error: Failed to install entrypoint
-          Caused by: ... The process cannot access the file because it is being used by
-          another process. (os error 32)
-
-    Reported by the owner on 2026-08-07 upgrading 0.83.0 to 0.87.0, with the
-    observation that makes the fix obvious: **the launcher never actually changes
-    between releases.** It is a generic stub holding an interpreter path and an entry
-    point, both identical from one version to the next. uv copies it anyway, and the
-    copy is what fails. Nothing was wrong with the upgrade.
-
-    So run the interpreter directly. `sys.executable` is the environment agent-inbox is
-    installed into — the uv tool venv, or a project venv from source — and it is the one
-    that can import `agent_inbox`. It was measured during the MCP work that
-    `uv tool install --force` leaves that interpreter unchanged by inode, so holding
-    *it* open across an upgrade costs nothing.
-
-    The same reasoning already moved the MCP server to `python -m agent_inbox mcp`; this
-    is the other invocation we make on somebody's behalf, and it was missed because it
-    is installed once and never seen again.
-
-    Quoted with `shlex`, because the path is not ours and a uv tool directory can sit
-    under a directory with a space in it.
+    The requirement is a compatibility floor, not the installing package's version:
+    changing the command on every release would invalidate Codex's trusted hash.
+    uv resolves the package using its cache; package updates need no hook rewrite.
+    `--isolated` ignores active virtualenvs and `--no-project` ignores the host project.
+    The Python module avoids holding the Windows agent-inbox.exe launcher open.
     """
-    return f"{quote_for_shell(sys.executable)} -m agent_inbox wake-check"
+    from agent_inbox.staleness import uv_run_command
+
+    return f"{uv_run_command()} wake-check"
 
 
 #: Characters a path may contain and still be passed to `cmd.exe` bare. Anything else
@@ -579,9 +557,8 @@ def install_codex(
     """Merge our hooks into ``root/.codex/hooks.json`` and keep the file out of git.
 
     Merged, not replaced: it is Codex's file and may hold hooks that are not ours.
-    Ignored by decision of the owner (2026-09-17): it embeds this machine's
-    interpreter path, and trust lives in Codex's own state, not in the file's being
-    committed.
+    Kept ignored as before: custom commands may embed machine-local paths, and
+    trust lives in Codex's own state, not in the file's being committed.
     """
     path = codex_hooks_path(root)
     _write(path, codex_apply(_read(path), command or default_command(), rewake=rewake))

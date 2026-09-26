@@ -80,3 +80,22 @@ class TestTheNoticeItself:
         staleness.reset()
         staleness.note_hub_version(__version__)
         assert staleness.notice() is None
+
+
+def test_staleness_notice_refreshes_the_hook_environment() -> None:
+    from agent_inbox.hookconfig import default_command
+
+    staleness.reset()
+    try:
+        staleness.note_hub_version("999.0.0")
+        message = staleness.notice()
+        assert message is not None
+        command = staleness.uv_run_command(refresh=True)
+        assert command + " --version" in message
+        assert "--refresh-package agent-inbox" in command
+        assert (
+            command.replace("--refresh-package agent-inbox ", "") + " wake-check"
+            == default_command()
+        )
+    finally:
+        staleness.reset()

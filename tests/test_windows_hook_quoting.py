@@ -78,7 +78,7 @@ class TestSplittingRoundTrips:
 class TestTheRenderedCommandOnThisPlatform:
     def test_all_three_codex_hooks_share_the_prefix(self, tmp_path: Path) -> None:
         data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
-        prefix = quote_for_shell(sys.executable) + " -m agent_inbox wake-check"
+        prefix = hookconfig.default_command()
 
         for event in ("SessionStart", "UserPromptSubmit", "Stop"):
             assert data["hooks"][event][0]["hooks"][0]["command"].startswith(prefix)
@@ -89,12 +89,11 @@ class TestTheRenderedCommandOnThisPlatform:
         """Render as Windows would, from the reported path: no single quotes, and the
         command line the report pasted comes out runnable under cmd.exe."""
         monkeypatch.setattr(hookconfig.os, "name", "nt")
-        monkeypatch.setattr(hookconfig.sys, "executable", WIN_BARE)
 
         data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
         stop = data["hooks"]["Stop"][0]["hooks"][0]["command"]
 
-        assert stop.startswith(WIN_BARE + " -m agent_inbox wake-check --event Stop")
+        assert stop == hookconfig.default_command() + " --event Stop"
         assert "'" not in stop
 
 
@@ -105,7 +104,13 @@ class TestAnActualLaunch:
     not a hook that runs; this is the test the Windows report said was missing."""
 
     def test_the_real_stop_hook_launches_and_exits_zero(self, tmp_path: Path) -> None:
-        data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
+        data = json.loads(
+            hookconfig.install_for(
+                "codex",
+                tmp_path,
+                command=quote_for_shell(sys.executable) + " -m agent_inbox wake-check",
+            ).read_text()
+        )
         command = data["hooks"]["Stop"][0]["hooks"][0]["command"]
 
         done = subprocess.run(  # noqa: S603
@@ -131,9 +136,13 @@ class TestAnActualLaunch:
         record = tmp_path / "argv.txt"
         fake.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$0" "$@" > "{record}"\n')
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-        monkeypatch.setattr(hookconfig.sys, "executable", str(fake))
-
-        data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
+        data = json.loads(
+            hookconfig.install_for(
+                "codex",
+                tmp_path,
+                command=quote_for_shell(str(fake)) + " -m agent_inbox wake-check",
+            ).read_text()
+        )
         command = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         subprocess.run(
             ["/bin/sh", "-lc", command], cwd=tmp_path, check=True, timeout=30
@@ -146,4 +155,40 @@ class TestAnActualLaunch:
             "wake-check",
             "--event",
             "SessionStart",
+        ]
+
+    def test_default_hook_passes_its_arguments_to_uv(self, tmp_path: Path) -> None:
+        """Exercise the actual shell command without a registry or user's uv cache."""
+        fake_dir = tmp_path / "a dir"
+        fake_dir.mkdir()
+        fake = fake_dir / "uv"
+        record = tmp_path / "argv.txt"
+        fake.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$@" > "{record}"\n')
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        data = json.loads(hookconfig.install_for("codex", tmp_path).read_text())
+        command = data["hooks"]["Stop"][0]["hooks"][0]["command"]
+        assert command.startswith("uv run ")
+        env = {**os.environ, "PATH": str(fake_dir) + os.pathsep + os.environ["PATH"]}
+        subprocess.run(  # noqa: S603
+            ["/bin/sh", "-c", command],  # noqa: S607
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            timeout=10,
+        )
+        assert record.read_text().splitlines() == [
+            "run",
+            "--quiet",
+            "--isolated",
+            "--no-project",
+            "--python",
+            "3.14",
+            "--with",
+            "agent-inbox[clients]>=1.6.2",
+            "python",
+            "-m",
+            "agent_inbox",
+            "wake-check",
+            "--event",
+            "Stop",
         ]

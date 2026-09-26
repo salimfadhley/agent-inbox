@@ -23,6 +23,7 @@ the hub's own entry point runs through this module.
 import json
 import logging
 import os
+import re
 import sys
 from contextlib import suppress
 from dataclasses import replace
@@ -855,7 +856,6 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
         # reader needs no advice.
         click.echo(f"{ok} config safety   identity files are not exposed to git")
     _report_hook_exposure(hooks, ok, notes)
-    _report_codex_hooks(here, ok)
     for path, state in exposed:
         name = path.name
         if state == "staged":
@@ -879,19 +879,55 @@ def _report_exposure(ok: str, notes: _Notes) -> None:
             )
 
 
-def _report_codex_hooks(here: Path, ok: str) -> None:
-    """Say the Codex hooks are present — and that whether they run is not ours to
-    say (#71). Codex runs only hooks a person has trusted in its `/hooks` screen, and
-    that state lives in Codex; a line here claiming the agent is wakeable would be a
-    guess dressed as a check."""
-    from agent_inbox import hookconfig, ignores
+def _report_codex_hooks(here: Path, ok: str, notes: _Notes) -> None:
+    """Inspect saved commands; an upgraded package does not regenerate trusted hooks."""
+    from agent_inbox import hookconfig
 
     path = hookconfig.codex_hooks_path(project_root(here))
-    if path.is_file() and ignores.is_our_hook(path):
-        click.echo(
-            f"{ok} codex hooks     present in {path} — they run only once trusted "
-            "in Codex's /hooks, which cannot be checked from here"
+    if not path.is_file():
+        return
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except OSError, UnicodeError, json.JSONDecodeError:
+        notes.say(f"codex hooks     cannot read {path}; hook validity is unknown")
+        return
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return
+    commands: list[str] = []
+    for groups in hooks.values():
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
+            entries = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("type") != "command":
+                    continue
+                command = entry.get("command")
+                if isinstance(command, str) and "wake-check" in command:
+                    commands.append(command)
+    if not commands:
+        return
+    problems: list[str] = []
+    if any(re.search(r"(?:^|\s)--wait(?:\s|=|$)", c) for c in commands):
+        problems.append("obsolete blocking waiter (--wait) queues interactive prompts")
+    if any(re.match(r"^\s*'(?:[A-Za-z]:[\\/]|\\\\)", c) for c in commands):
+        problems.append("Windows executable is single-quoted; cmd.exe cannot run it")
+    if problems:
+        notes.say(
+            f"codex hooks     obsolete commands in {path}: {'; '.join(problems)}.\n"
+            "     In this project run `agent-inbox install-hook --engine codex`, "
+            "then re-trust the changed entries in Codex's /hooks. "
+            "Upgrading the package alone does not update saved hooks."
         )
+        return
+    click.echo(
+        f"{ok} codex hooks     present in {path}; no known obsolete forms detected — "
+        "trust and activation are unverified. They run only once trusted in "
+        "Codex's /hooks, which cannot be checked from here"
+    )
 
 
 def _report_hook_exposure(
@@ -1628,6 +1664,7 @@ def doctor(ctx: click.Context, hub: str | None) -> int:
             f"({config.role}, engine {config.engine or chosen} — {how}{spelling})"
         )
 
+    _report_codex_hooks(Path.cwd(), ok, notes)
     _report_exposure(ok, notes)
 
     # `hub` became machine-wide by default on 2026-08-03: you have one mailbox and as
@@ -2257,9 +2294,8 @@ def _drain_hook_stdin() -> None:
     "--command",
     default=None,
     help=(
-        "base hook command; override for local source-tree testing. Defaults to this "
-        "interpreter running the module, which is what keeps a Windows upgrade from "
-        "failing on a launcher held open by the hook itself."
+        "base hook command; override for local source-tree testing. Defaults to uv run "
+        "in an isolated environment, independent of this project and interpreter."
     ),
 )
 @click.option(

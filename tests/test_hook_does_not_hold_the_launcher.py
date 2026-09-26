@@ -17,7 +17,7 @@ names the shape rather than the spelling.
 """
 
 import json
-import sys
+import shlex
 from pathlib import Path
 
 from agent_inbox import hookconfig
@@ -29,30 +29,26 @@ class TestTheDefaultCommandAvoidsTheLauncher:
         would be fine and only one is forbidden."""
         assert "agent-inbox wake-check" not in hookconfig.default_command()
 
-    def test_it_runs_this_interpreter_on_the_module(self) -> None:
-        """The paired positive: not running the launcher is worthless if it does not
-        run anything that works. `sys.executable` is the environment agent-inbox is
-        installed into, so it is the one that can import the package."""
+    def test_it_runs_the_module_through_isolated_uv(self) -> None:
+        assert shlex.split(hookconfig.default_command()) == [
+            "uv",
+            "run",
+            "--quiet",
+            "--isolated",
+            "--no-project",
+            "--python",
+            "3.14",
+            "--with",
+            "agent-inbox[clients]>=1.6.2",
+            "python",
+            "-m",
+            "agent_inbox",
+            "wake-check",
+        ]
+
+    def test_windows_and_posix_receive_the_same_arguments(self) -> None:
         command = hookconfig.default_command()
-
-        assert "-m agent_inbox wake-check" in command
-        assert sys.executable in command
-
-    def test_an_interpreter_path_with_a_space_survives(
-        self, monkeypatch: object
-    ) -> None:
-        """A uv tool directory can sit under a path with a space in it, and an unquoted
-        command would then run the wrong program with a stray argument."""
-        import shlex
-
-        original = sys.executable
-        try:
-            sys.executable = "/opt/Program Files/py/python"
-            command = hookconfig.default_command()
-        finally:
-            sys.executable = original
-
-        assert shlex.split(command)[0] == "/opt/Program Files/py/python"
+        assert hookconfig.split_command(command, windows=True) == shlex.split(command)
 
 
 class TestInstallingMigratesTheOldHook:

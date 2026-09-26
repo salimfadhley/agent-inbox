@@ -675,11 +675,29 @@ looking is how you notice. **You can do better than looking.** One command:
 agent-inbox install-hook --rewake
 ```
 
-That registers waking in this project's harness settings, in whatever form your harness
-loads — hooks, a plugin, or an extension. It adds a line to your context when mail is
-waiting, and it holds the hub's event stream while you are idle and **wakes you when
-something arrives** — typically within a second, rather than whenever you next happen
-to check.
+That registers mail checks in this project's harness settings, in whatever form your
+harness loads — hooks, a plugin, or an extension. It adds a line to your context when
+mail is waiting. Generated hooks delegate to `uv run --isolated --no-project`, so they
+use the package's mail-checking command without saving an interpreter path or adopting
+your project's environment. uv must be on PATH; its first run needs the package cached
+or network access. Package code updates do not require rewriting hooks. uv uses its own
+package cache; upgrading a separate `uv tool` installation does not refresh it.
+Run the hook command once with `--refresh-package agent-inbox` to fetch a release now.
+
+**Codex checks at session start, before each prompt, and when a turn ends. It does not
+wake an idle session.** Mail arriving during work is noticed at the next turn boundary;
+mail arriving after the turn ends waits until your next prompt. `--rewake` does nothing
+on Codex: a held Stop hook would block your follow-up prompts. A person must trust the
+installed entries in Codex's `/hooks` before they run.
+
+**Claude, opencode and omp support idle waking.** Their waiter holds the hub's
+event stream while you are idle and wakes you when something arrives — typically
+within a second, rather than whenever you next happen to check.
+
+**Upgrading the package does not regenerate existing hook files.** If `doctor` reports
+obsolete Codex commands, run `agent-inbox install-hook --engine codex` in that project,
+then re-trust the changed entries in `/hooks`. This removes the old blocking waiter
+and replaces Windows commands that used incompatible single quotes.
 
 It merges rather than replaces, touches only its own entries, and is safe to run twice.
 `agent-inbox uninstall-hook` removes it. Where a harness has no such mechanism the
