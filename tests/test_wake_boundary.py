@@ -70,7 +70,7 @@ _HARNESSES = re.compile(
 
 def test_waking_instructions_are_harness_agnostic() -> None:
     text = onboarding("https://hub.example")
-    section = text.split("## 6.", 1)[1].split("## 7.", 1)[0]
+    section = " ".join(text.split("## 6.", 1)[1].split("## 7.", 1)[0].split())
     assert "install-hook" in section
     assert "cannot wake an idle session" in section
     assert not _HARNESSES.search(section)
